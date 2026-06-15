@@ -21,10 +21,6 @@ struct ComposerPreviewCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let options = pollOptions, !options.isEmpty {
-                pollPreview(options: options)
-            }
-
             RichContentView(
                 content: content,
                 tags: tags,
@@ -57,6 +53,10 @@ struct ComposerPreviewCard: View {
                 // outer ScrollView can scroll to reveal it.
                 nestedHorizontalInset: 48
             )
+
+            if let options = pollOptions, !options.isEmpty {
+                pollPreview(options: options)
+            }
         }
         .padding(12)
         .background(Color.wispSurfaceVariant.opacity(0.4),
