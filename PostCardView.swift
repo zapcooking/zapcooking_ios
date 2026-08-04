@@ -1814,7 +1814,7 @@ struct PostCardView: View {
                 for entry in board.scoredRelays.prefix(5) { set.insert(entry.url) }
             }
             if set.isEmpty {
-                set = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+                set = ["wss://relay.primal.net", "wss://nos.lol"]
             }
             let succeeded = await RelayPool.publish(event: target, to: Array(set), timeout: 8)
             guard !succeeded.isEmpty else {

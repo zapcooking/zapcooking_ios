@@ -13,7 +13,6 @@ final class ArticleCache {
     private var inflight: [String: Task<NostrEvent?, Never>] = [:]
 
     private static let defaultRelays = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band"

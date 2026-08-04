@@ -468,7 +468,6 @@ final class GoogleAuthViewModel {
     // MARK: - Constants
 
     private static let profileRelays = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
     ]
     private static let decoyRelay = "wss://relay.primal.net"

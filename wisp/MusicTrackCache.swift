@@ -17,7 +17,6 @@ final class MusicTrackCache {
     static let kind = 36787
 
     private static let defaultRelays = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band"

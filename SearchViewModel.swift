@@ -47,8 +47,6 @@ final class SearchViewModel {
 
     static let defaultSearchRelay = "wss://search.nostrarchives.com"
 
-    private static let engagementFallbackRelays = ["wss://relay.damus.io"]
-
     private let searchTimeout: TimeInterval = 5
     private let engagementTimeout: TimeInterval = 10
     private let authorTimeout: TimeInterval = 4
@@ -573,7 +571,7 @@ final class SearchViewModel {
             let top = board.scoredRelays.prefix(20).map(\.url)
             if !top.isEmpty { return top }
         }
-        return Self.engagementFallbackRelays
+        return RelayDefaults.fallbacks
     }
 
     private func preprocessQuery(_ text: String) -> SearchIntent {

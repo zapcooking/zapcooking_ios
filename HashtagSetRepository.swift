@@ -208,7 +208,7 @@ final class HashtagSetRepository {
             let top = board.scoredRelays.prefix(5).map(\.url)
             if !top.isEmpty { return top }
         }
-        return ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+        return ["wss://relay.primal.net", "wss://nos.lol"]
     }
 
     private func uniqueDTag(forName name: String) -> String {

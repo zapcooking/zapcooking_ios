@@ -57,7 +57,7 @@ final class LiveStreamViewModel: EmojiComposing {
 
         await resolveChatRelays()
         guard !chatRelays.isEmpty else {
-            chatRelays = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"]
+            chatRelays = ["wss://nos.lol", "wss://relay.primal.net"]
             return
         }
 

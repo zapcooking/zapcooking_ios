@@ -32,7 +32,6 @@ final class GroupListViewModel {
     /// at startup so other-device joins surface here too.
     private static let listLookupRelays: [String] = [
         Nip29.defaultGroupRelay,
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band"

@@ -12,7 +12,7 @@ nonisolated final class RelayScoreBoard {
         for pubkey in follows {
             guard let relays = writeRelaysByAuthor[pubkey] else { continue }
             // Canonicalize first: lowercase host + strip trailing slash + validate.
-            // Without this, `wss://Relay.Damus.IO/` and `wss://relay.damus.io` count
+            // Without this, `wss://Relay.Primal.Net/` and `wss://relay.primal.net` count
             // as separate relays — inflates the pool and creates duplicate sockets.
             // Dedupe via Set before taking the first N to use the redundancy budget on
             // distinct relays, not duplicate spellings of the same one.

@@ -129,7 +129,6 @@ final class PollsViewModel {
             if !top.isEmpty { return top }
         }
         return [
-            "wss://relay.damus.io",
             "wss://relay.primal.net",
             "wss://nos.lol",
             "wss://relay.nostr.band"

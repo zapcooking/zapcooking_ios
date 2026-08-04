@@ -96,7 +96,7 @@ struct SidebarDrawerView: View {
         guard let priv = Hex.decode(keypair.privkey) else { return }
         guard let event = try? Nip38.buildStatus(privkey32: priv, pubkey: pubkey, content: content) else { return }
         var relays = await RelayListRepository.shared.getWriteRelays(pubkey)
-        if relays.isEmpty { relays = ["wss://relay.damus.io", "wss://relay.primal.net"] }
+        if relays.isEmpty { relays = ["wss://relay.primal.net"] }
         _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
     }
 

@@ -1814,7 +1814,7 @@ final class ComposeViewModel {
             let top = board.scoredRelays.map(\.url)
             if !top.isEmpty { return top }
         }
-        return ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+        return ["wss://relay.primal.net", "wss://nos.lol"]
     }
 }
 

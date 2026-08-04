@@ -648,6 +648,7 @@ there's one place that doesn't.
 → **iOS action:** `AGENTS.md` gets a header pointing here as the system of
 record, in Concern 0.5.
 
+<<<<<<< HEAD
 **7.12 — ObjectBox shadows `Int64(_: UInt64)` under MemberImportVisibility.**
 ObjectBox declares `extension Swift.Int64: ObjectBox.UntypedIdBase {
 init(_ entityId: ObjectBox.Id) }` with `Id == UInt64`. Under Swift 6
@@ -660,6 +661,8 @@ trapping without importing ObjectBox.
 over this; never substitute `truncatingIfNeeded` (wraps) or `numericCast`
 (opaque). Prefer `Int64(exactly:)!`.
 
+=======
+>>>>>>> e6f2111 (Remove decommissioned relay.damus.io from production Swift)
 ---
 
 ## 8. Symbol map — Kotlin → Swift

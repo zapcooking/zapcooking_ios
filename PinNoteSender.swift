@@ -28,7 +28,7 @@ final class PinNoteSender {
             for entry in board.scoredRelays.prefix(5) { fetchSet.insert(entry.url) }
         }
         if fetchSet.isEmpty {
-            fetchSet = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+            fetchSet = ["wss://relay.primal.net", "wss://nos.lol"]
         }
 
         let filter = NostrFilter(kinds: [Nip10001.kindPinned], authors: [keypair.pubkey], limit: 1)

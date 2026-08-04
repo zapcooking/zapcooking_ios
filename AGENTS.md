@@ -1,5 +1,12 @@
 # AGENTS.md
 
+**System of record:** this repository is a fork of Wisp being adapted
+into Zap Cooking. The adaptation plan — protocol/API contracts, event
+kinds, backend endpoints, relay sets, App Store constraints, and the
+stop-gated phase breakdown — lives in `ZAPCOOKING_IOS_BUILD.md` at the
+repo root. Read it first; it wins over this file and the README wherever
+they disagree.
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project
@@ -62,9 +69,9 @@ Account state is keyed by hex pubkey throughout. `NostrKey` stores the active ke
 
 This is the central architectural idea for the home feed. Rather than fanning every query out to every relay:
 
-1. **Onboarding** (`OnboardingViewModel.startOutboxBuilding`): hit a hardcoded set of indexer relays (`indexer.nostrarchives.com`, `indexer.coracle.social`, `relay.damus.io`, `relay.primal.net`) to fetch the user's kind-0 (profile), kind-3 (contacts), then kind-10002 (relay lists) for every followed pubkey, in batches of 150.
+1. **Onboarding** (`OnboardingViewModel.startOutboxBuilding`): hit `RelayDefaults.indexers` to fetch the user's kind-0 (profile), kind-3 (contacts), then kind-10002 (relay lists) for every followed pubkey, in batches of 150.
 2. **`RelayScoreBoard`** inverts that data into `relayAuthors: [relayURL: Set<authorPubkey>]`, taking up to `redundancy=3` write relays per author, then ranks relays by author count. Persisted to UserDefaults as a tab-delimited string list.
-3. **Feed loading** (`FeedViewModel.loadFeed`): walks the top-20 scored relays, chunks each relay's authors into groups of 200, fires one `REQ` per (relay, author-chunk) in parallel via `withTaskGroup`, plus a safety-net query against `relay.damus.io` with the first 200 follows. The same indexer set is reused for kind-0 profile lookups.
+3. **Feed loading** (`FeedViewModel.loadFeed`): walks the top-20 scored relays, chunks each relay's authors into groups of 200, fires one `REQ` per (relay, author-chunk) in parallel via `withTaskGroup`, plus a safety-net fan-out across `RelayDefaults.indexers` for authors missing from the scoreboard. The same indexer set is reused for kind-0 profile lookups.
 
 If you add new feed surfaces, follow this same pattern: read `RelayScoreBoard.load(pubkey:)`, build relay-scoped author chunks, fan out via `RelayPool.query`. Do not re-query indexer relays for note feeds — they are for discovery (kinds 0/3/10002), not content.
 
