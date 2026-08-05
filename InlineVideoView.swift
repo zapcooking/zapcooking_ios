@@ -540,7 +540,7 @@ struct FullScreenVideoView: View {
     var body: some View {
         ZStack {
             Color.black
-                .opacity(1 - dismissProgress * 0.7)
+                .opacity(1 - Double(dismissProgress) * 0.7)
                 .ignoresSafeArea()
             if let player {
                 PiPPlayerViewController(

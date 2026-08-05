@@ -56,7 +56,7 @@ struct SwipeBackFromLeftEdgeModifier: ViewModifier {
                             .offset(x: -((geo.size.width - dragX) / 3.0))
                             .overlay(
                                 Color.black.opacity(
-                                    0.25 * (1 - min(1, dragX / geo.size.width))
+                                    0.25 * (1 - min(1, Double(dragX / geo.size.width)))
                                 )
                             )
                     }

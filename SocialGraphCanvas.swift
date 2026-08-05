@@ -118,7 +118,11 @@ struct SocialGraphCanvas: View {
 
     private func computeFirstAngles(count: Int) -> [Double] {
         guard count > 0 else { return [] }
-        return (0..<count).map { i in 2 * .pi * Double(i) / Double(count) - .pi / 2 }
+        let n = Double(count)
+        return (0..<count).map { i in
+            let t = Double(i) / n
+            return 2 * Double.pi * t - Double.pi / 2
+        }
     }
 
     private func computeSecondPositions(
