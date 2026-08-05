@@ -42,7 +42,7 @@ The iOS repo is an **untouched fork**. Nothing has been done yet. Specifically:
 | Product name / README | "Wisp" throughout |
 | `relay.wisp.talk` / `chat.wisp.talk` | **10 sites** across 8 files — still on upstream infra |
 | `relay.damus.io` | **35 Swift files** — and that relay **shut down end of July 2026** |
-| Deployment target | iOS **26.4** (extremely high; see Gate 0-C) |
+| Deployment target | iOS **18.0** (Gate 0-C answered; macOS/visionOS targets unchanged) |
 | NIP-98 | **Absent** — the membership linchpin does not exist |
 | NIP-22 | **Absent** — no comments |
 | Recipe / food domain | **Absent entirely** |
@@ -50,6 +50,23 @@ The iOS repo is an **untouched fork**. Nothing has been done yet. Specifically:
 Two of those are live breakage, not cosmetics: **damus is a dead relay in 41
 files**, and **the app phones home to Barry's relay infrastructure**. Both are
 Phase 0, before any feature work.
+
+### Build commands (headless / CI)
+
+Open `wisp.xcodeproj` in Xcode, or use `xcodebuild`. On Sequoia the eligible
+simulator SDK is currently **26.2** (Xcode **26.3** ceiling).
+
+```
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build
+```
+
+`-skipPackagePluginValidation` is required for headless/`xcodebuild` and CI:
+`swift-secp256k1` ships a `SharedSourcesPlugin` that fails SwiftPM plugin
+validation outside Xcode's interactive trust prompt. Xcode GUI builds that
+have already accepted the plugin do not need the flag.
 
 ---
 
@@ -216,7 +233,7 @@ Ranked. The cut line is after P1.
 
 ### P0 — Blocking. Nothing ships without these.
 1. Fork hygiene: bundle ID, team, dead relays, Wisp infra, rebrand
-2. Deployment-target decision (Gate 0-C)
+2. Deployment-target decision (Gate 0-C) — **answered: iOS 18.0**
 3. App Store payments posture (§4) — decided **before** any UI work, because
    it determines whether the wallet tab survives
 4. Recipe read path: parser → repository → detail screen
@@ -338,7 +355,7 @@ Rules that follow from it, and are **not negotiable in v1**:
 |---|---|---|
 | **0-A** | **Bundle identifier.** Records conflict: the Capacitor app was created as `com.zapcooking.app`; the passkey work references `cooking.zap.app` bound to Apple Team `Z26TJQZZWC` in the live AASA file. **Verify in App Store Connect which ID owns the shipped listing.** Reusing it ships the native app as an *update* (keeps ratings, installs, reviews); a new ID means a new listing from zero. | Permanent once shipped. Also drives the AASA/passkey binding. |
 | **0-B** | Does the native app **replace** the Capacitor listing, or ship alongside it? | Replacement = a hard cutover plan for existing users |
-| **0-C** | **Deployment target.** Fork is at **iOS 26.4** — a very small addressable base. Good news: there are **zero `@available` annotations** anywhere in the source and no Liquid Glass API usage, so lowering to 17/18 is likely a compile-and-fix exercise, not a rewrite. Someone should spend an hour measuring it. | Affects every screen built after |
+| **0-C** | **Answered: iOS 18.0.** Measured at 18.0 and 26.0 under Xcode 26.3 / Sequoia: identical breakage class (Swift 6.2.3 type-checker — fixed in Concern 0-C-pre / PR #3); **zero** `@available` in source; **zero** availability errors at 18.0. Hard dependency floor is ObjectBox at iOS 15. Xcode 26.3 is the Sequoia ceiling (cannot ship/build against an iOS 26.4 deployment target here). iPad support retained deliberately (`SUPPORTED_PLATFORMS` unchanged; only `IPHONEOS_DEPLOYMENT_TARGET` lowered; `MACOSX_DEPLOYMENT_TARGET` left alone). | Unblocks addressable-base sizing for every screen after |
 | **0-D** | **Read-only accounts.** iOS `Signer` is **local-key only** — no NIP-46 bunker, no NIP-55 (that's Android/Amber). Decide whether iOS supports a watch-only mode at all. Android gates NIP-98, Nourish, and recipe publish on "account has a signing key." | Determines how many `canSign` branches exist |
 | **0-E** | **Tab architecture.** Wisp is 5 tabs: home / wallet / search / messages / notifications. Food-first needs Recipes and Kitchen. Proposal: **Recipes / OnlyFood / Search / Kitchen / Notifications**, with Wallet and Messages moving into the sidebar drawer. This also reduces §4.2 zap surface area. | Every route lands somewhere |
 | **0-F** | **Zaps-on-posts** ship-or-flag (§4.2) | Kill switch must exist before the flag is needed |
@@ -690,7 +707,7 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
 
 1. **Gate 0-A** — which bundle ID owns the shipped App Store listing?
 2. **Gate 0-B** — replace or coexist with the Capacitor app?
-3. **Gate 0-C** — deployment target: keep 26.4 or drop to 17/18?
+3. **Gate 0-C** — **answered: iOS 18.0** (see §5 Gate 0 table).
 4. **Gate 0-D** — read-only accounts on iOS: supported or not?
 5. **Gate 0-E** — tab architecture (proposal in §5)
 6. **Gate 0-F** — zaps on posts: ship, or profile-only from day one?
