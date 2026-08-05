@@ -328,18 +328,18 @@ final class SparkWallet: Wallet {
         guard let parsed = await parseInput(input) else { return nil }
         switch parsed {
         case .bolt11Invoice(let d):
-            return .bolt11(amountSats: d.amountMsat.map { Int64($0 / 1000) })
+            return .bolt11(amountSats: d.amountMsat.map { Int64(exactly: $0 / 1000)! })
         case .lnurlPay(let d):
             return .sparkLnurl(info: ResolvedLnurlInfo(
-                minSats: Int64(d.minSendable / 1000),
-                maxSats: Int64(d.maxSendable / 1000),
+                minSats: Int64(exactly: d.minSendable / 1000)!,
+                maxSats: Int64(exactly: d.maxSendable / 1000)!,
                 label: d.address ?? d.domain
             ))
         case .lightningAddress(let d):
             let pr = d.payRequest
             return .sparkLnurl(info: ResolvedLnurlInfo(
-                minSats: Int64(pr.minSendable / 1000),
-                maxSats: Int64(pr.maxSendable / 1000),
+                minSats: Int64(exactly: pr.minSendable / 1000)!,
+                maxSats: Int64(exactly: pr.maxSendable / 1000)!,
                 label: pr.address ?? pr.domain
             ))
         default:

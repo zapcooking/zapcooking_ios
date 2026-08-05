@@ -90,7 +90,7 @@ struct AccentColorPickerView: View {
             .gesture(
                 DragGesture(minimumDistance: 0).onChanged { value in
                     saturation = max(0, min(1, value.location.x / size))
-                    brightness = max(0, min(1, 1 - value.location.y / size))
+                    brightness = max(0, min(1, 1 - Double(value.location.y / size)))
                 }
             )
         }
