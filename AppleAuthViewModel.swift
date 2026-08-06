@@ -1,19 +1,14 @@
 import Foundation
 import UIKit
 
-/// Orchestrates the "Continue with Apple" flow. Mirrors `GoogleAuthViewModel`
-/// state-for-state with two structural differences:
-///   - The identity layer is `AppleSignInManager` (Sign in with Apple) instead
-///     of Google sign-in. We surface the stable `appleIDCredential.user`
-///     identifier — Apple's analogue of Google's JWT `sub` claim — and feed
-///     it into `BackupCrypto.deriveBackupKey(appleUserID:pin:)`.
-///   - The storage layer is iCloud Keychain (`KeychainBackupService`)
-///     instead of Drive. Items are returned with the payload inline, so the
-///     restore-PIN decryption loop reads `BackupFile.payload` directly
-///     rather than issuing a separate download per file.
+/// Orchestrates the "Continue with Apple" flow:
+///   - Identity: `AppleSignInManager` → stable `appleIDCredential.user`,
+///     fed into `BackupCrypto.deriveBackupKey(appleUserID:pin:)`.
+///   - Storage: iCloud Keychain (`KeychainBackupService`); items return
+///     the ciphertext payload inline for the restore-PIN loop.
 ///
-/// State machine, error handling, and the decoy-profile fetch privacy
-/// mitigation are otherwise identical to the Google flow.
+/// Includes the decoy-profile fetch privacy mitigation so listing backups
+/// does not correlate an Apple ID with a bare set of npubs on the wire.
 @Observable
 @MainActor
 final class AppleAuthViewModel {
@@ -101,7 +96,7 @@ final class AppleAuthViewModel {
                         ))
                     } catch {
                         // Likely wrong PIN or an unrelated record — mirror
-                        // Google flow: silently skip; if every file fails,
+                        // Silently skip; if every file fails,
                         // the empty-set check surfaces "incorrect PIN".
                         continue
                     }
@@ -233,7 +228,7 @@ final class AppleAuthViewModel {
 
     // MARK: - Profile decoy fetch
     //
-    // Same privacy mitigation as the Google flow: pull a handful of decoy
+    // Privacy mitigation: pull a handful of decoy
     // profiles from a popular relay first, then issue one combined REQ
     // covering (real + decoys). The relay sees a mix of real backup pubkeys
     // and unrelated recent ones — blunting the "this Apple ID corresponds

@@ -1,15 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// Shared UI building blocks for the cloud-backup auth flows (Google +
-/// Apple). Lifted from `GoogleAuthView.swift` so both flows render the same
-/// PIN entry, account chooser, error, and loading screens. Provider-specific
-/// copy (e.g. "Google" vs "Apple", "Google Drive" vs "iCloud") is passed in
-/// as a `providerName` parameter where it appears in user-facing text.
+/// Shared UI building blocks for the Apple cloud-backup auth flow
+/// (Continue with Apple → iCloud Keychain): PIN entry, account chooser,
+/// error, and loading screens. Provider-facing copy is passed in as a
+/// `providerName` / `providerStorageName` where it appears in user text.
 
-/// One backup entry rendered in the account chooser. Provider-agnostic: the
-/// `backupID` is opaque (Drive file ID or iCloud Keychain account) and round
-/// trips back to the originating view-model when the user taps a row.
+/// One backup entry rendered in the account chooser. `backupID` is an opaque
+/// iCloud Keychain account name and round-trips to the view-model on tap.
 struct AuthBackupSummary: Identifiable, Equatable {
     let backupID: String
     let npub: String
@@ -303,7 +301,7 @@ extension String {
 }
 
 /// Walks the active foreground scene to find the top-most presented view
-/// controller. Google's SDK and Apple's `ASAuthorizationController` both
+/// controller. Apple's `ASAuthorizationController`
 /// need a real `UIViewController` to anchor their consent UI; SwiftUI
 /// doesn't hand us one directly.
 @MainActor

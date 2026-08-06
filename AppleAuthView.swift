@@ -1,9 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// SwiftUI screen for the "Continue with Apple" flow. Direct port of
-/// `GoogleAuthView`: same state machine, same shared subviews, only the
-/// provider-name copy and the underlying view-model differ.
+/// SwiftUI screen for the "Continue with Apple" flow.
 struct AppleAuthView: View {
     @State var viewModel = AppleAuthViewModel()
     var onCancel: () -> Void

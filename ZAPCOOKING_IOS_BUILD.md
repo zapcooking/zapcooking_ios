@@ -9,7 +9,7 @@ doc current as state evolves.
 **Premise:** the fork already ships a production-grade SwiftUI Nostr client
 (~86.6k LOC): Spark wallet, NIP-57 zaps, NIP-17 DMs, NIP-65 outbox routing,
 NIP-42 relay AUTH, NIP-23 article rendering, encrypted drafts, scheduled posts,
-on-device LightGBM spam filter, ObjectBox cache, Google + Apple sign-in.
+on-device LightGBM spam filter, ObjectBox cache, Apple key recovery (iCloud Keychain).
 Zap Cooking is a food-first layer on top. We do **not** rebuild Nostr plumbing
 and we do **not** port all 40+ web routes.
 
@@ -93,7 +93,7 @@ than Android did — but plan against that order of magnitude, not against
 | Mute / safety / spam | `SafetyFilter`, `MuteRepository`, `SpamScorer`, `NSpam*` | OnlyFood filtering is mute-only (§7.3) |
 | Hashtag feeds | `HashtagFeedViewModel`, `Nip51Hashtags` | OnlyFood feed is a hashtag feed with a curated tag set |
 | Deletion | `Nip09`, `DeletionSender` | Recipe delete/tombstone |
-| Google + **Apple** sign-in | `GoogleSignInManager`, `AppleSignInManager` | Apple Sign-In already present — Guideline 4.8 satisfied |
+| **Apple** sign-in (key recovery) | `AppleSignInManager`, `KeychainBackupService` | Google Sign-In removed (Concern 0.2); SIWA retained for iCloud Keychain nsec backup |
 | Drafts + **scheduled posts** | `Nip37`, `DraftsViewModel`, `ScheduleSheet`, `DraftsScheduledView` | iOS is *ahead* of Android here |
 
 ### Net-new for iOS (the actual work)
@@ -205,6 +205,32 @@ account cannot read Nourish at all. The inherited iOS AUTH retry covers
 **subscribe / read** path does *not* wait for AUTH — see §7.1 and
 https://github.com/zapcooking/zapcooking_ios/issues/6. Hard prerequisite for
 Phase 3.5.
+
+### iOS key recovery (Concern 0.2)
+
+Continue with Apple is the cloud recovery path. Architecture:
+
+- **Identity:** `AppleSignInManager` → stable `ASAuthorizationAppleIDCredential.user`.
+- **Ciphertext store:** Keychain service `com.wisp.apple-backup`, account
+  `wisp_bk_<uuid>`, value = NIP-44 ciphertext of the hex nsec.
+- **Sync:** `kSecAttrSynchronizable = true` +
+  `kSecAttrAccessibleAfterFirstUnlock` → **iCloud Keychain** (E2E Apple circle
+  of trust). Not CloudKit. Not device-only.
+- **Local active key:** `NostrKey` / `com.wisp.nostr` uses
+  `WhenUnlockedThisDeviceOnly` and is wiped on delete/reinstall; recovery
+  re-hydrates from `com.wisp.apple-backup` after SIWA + PIN.
+- **KDF:** `BackupCrypto.deriveBackupKey(appleUserID:pin:)` (PBKDF2 600k,
+  salt context `wisp-apple-backup`).
+- **`AppDataWipe` deliberately does not clear `com.wisp.apple-backup`** — only
+  `com.wisp.nostr` — so logout leaves cloud backups intact.
+- **Not interchangeable with Android Drive backups.** Android still uses Google
+  Drive `appDataFolder` + salt context `wisp-google-backup`. Same PIN on both
+  platforms will **not** cross-decrypt. An account created via Android Drive
+  cannot be restored on iOS via Continue with Apple (and vice versa). Manual
+  nsec export/import remains the cross-platform bridge.
+
+Google Sign-In / `DriveBackupService` / `GIDClientID` were removed from iOS;
+Gate 0-G is moot.
 
 ### Relays (role-based — do NOT collapse to one set)
 
@@ -324,10 +350,10 @@ Rules that follow from it, and are **not negotiable in v1**:
 
 ### 4.4 Other iOS-specific requirements
 
-- **Sign in with Apple** is required because Google Sign-In is offered
-  (Guideline 4.8). `AppleSignInManager` already exists — verify it is wired to
-  the same key-backup identity path as Google, and that Drive-backed nsec
-  restore has an iCloud-or-equivalent story.
+- **Sign in with Apple** is **no longer required by Guideline 4.8** — Google
+  Sign-In was removed (Concern 0.2), so no third-party login remains. SIWA is
+  **retained as the key-recovery path** (iCloud Keychain + PIN); see §2
+  "iOS key recovery".
 - **Account deletion in-app** (Guideline 5.1.1(v)). `zap.cooking/delete-account`
   is live and is the Android answer; iOS needs it reachable *in-app*, not just
   as a policy link.
@@ -360,7 +386,7 @@ Rules that follow from it, and are **not negotiable in v1**:
 | **0-D** | **Read-only accounts.** iOS `Signer` is **local-key only** — no NIP-46 bunker, no NIP-55 (that's Android/Amber). Decide whether iOS supports a watch-only mode at all. Android gates NIP-98, Nourish, and recipe publish on "account has a signing key." | Determines how many `canSign` branches exist |
 | **0-E** | **Tab architecture.** Wisp is 5 tabs: home / wallet / search / messages / notifications. Food-first needs Recipes and Kitchen. Proposal: **Recipes / OnlyFood / Search / Kitchen / Notifications**, with Wallet and Messages moving into the sidebar drawer. This also reduces §4.2 zap surface area. | Every route lands somewhere |
 | **0-F** | **Zaps-on-posts** ship-or-flag (§4.2) | Kill switch must exist before the flag is needed |
-| **0-G** | Apple **release + distribution certs**, and whether the Google Cloud project gets an iOS OAuth client registered for this bundle ID | Google sign-in silently fails otherwise (exactly the Android fork-identity bug) |
+| **0-G** | **Moot / struck.** Google Sign-In was removed from iOS (Concern 0.2), so no Google Cloud iOS OAuth client is needed. Remaining open piece under this number if reused later: Apple **release + distribution certs** only. | — |
 
 ---
 
@@ -530,7 +556,7 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - 4.1 NIP-56 reporting on posts, recipes, and profiles (**not** just groups)
 - 4.2 In-app account deletion path
 - 4.3 Privacy policy + child-safety links in-app; **web policy corrected first**
-- 4.4 App Privacy nutrition label: OpenAI, Blossom, Giphy, Google Sign-In/Drive,
+- 4.4 App Privacy nutrition label: OpenAI, Blossom, Giphy,
   Cloudflare analytics (IP + coarse location), crash-report DM relays
 - 4.5 `ITSAppUsesNonExemptEncryption`; export compliance
 - 4.6 App Review demo account (a seeded npub with recipes + an active Cook+
@@ -628,14 +654,13 @@ subId range across all connections.
 were opened on. Serialize load/toggle/pagination through one submit path that
 cancels the previous job before issuing the next REQ.
 
-**7.6 — Fork identity breaks OAuth silently.**
+**7.6 — Fork identity breaks OAuth silently (Android lesson; iOS moot).**
 Google validates the *calling app* (bundle ID + signing cert) against the Cloud
 project owning the client ID. The Android fork inherited Wisp's client ID, so
 every sign-in failed with an unhelpful "cancelled or unavailable."
-→ **iOS action:** register an **iOS OAuth client** for the new bundle ID in the
-Zap Cooking Cloud project (Gate 0-G) before testing Google sign-in. Drive
-`appdata` storage is scoped per project, so this is also what makes
-cross-platform nsec restore work at all.
+→ **iOS action:** **n/a** — Google Sign-In was removed from iOS (Concern 0.2 /
+Gate 0-G struck). Keep this lesson for Android and for any future third-party
+OAuth. iOS key recovery is Apple / iCloud Keychain only (see §2).
 
 **7.7 — Optional fields in real data.**
 `published_at` absent, `servings` absent, free-text prep/cook times. Live relay
