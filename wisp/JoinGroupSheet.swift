@@ -11,7 +11,7 @@ struct JoinGroupSheet: View {
         NavigationStack {
             Form {
                 Section("Invite link") {
-                    TextField("wss://chat.wisp.talk'groupid", text: $link, axis: .vertical)
+                    TextField("wss://pantry.zap.cooking'groupid?code=…", text: $link, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         .lineLimit(2...4)

@@ -445,7 +445,7 @@ final class GroupListViewModel {
                                                createdAt: NostrClock.now(),
                                                tags: tags, content: "") else { return }
 
-        // Publish to: known group relays + chat.wisp.talk + indexers (best-effort).
+        // Publish to: known group relays + default group relay + indexers (best-effort).
         var targets = Set<String>(Self.listLookupRelays)
         targets.insert(Nip29.defaultGroupRelay)
         for room in repository.joinedGroups { targets.insert(room.relayUrl) }

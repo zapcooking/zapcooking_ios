@@ -40,7 +40,7 @@ The iOS repo is an **untouched fork**. Nothing has been done yet. Specifically:
 | Bundle identifier | `barrydeen.wisp` (`build.xcconfig`) |
 | Development team | `G738XL8P49` (Barry's) |
 | Product name / README | "Wisp" throughout |
-| `relay.wisp.talk` / `chat.wisp.talk` | **10 sites** across 8 files — still on upstream infra |
+| `relay.wisp.talk` / `chat.wisp.talk` | **Removed** (Concern B) — default group relay is `wss://pantry.zap.cooking`; share URLs are `zap.cooking` shapes |
 | `relay.damus.io` | **35 Swift files** — and that relay **shut down end of July 2026** |
 | Deployment target | iOS **18.0** (Gate 0-C answered; macOS/visionOS targets unchanged) |
 | NIP-98 | **Absent** — the membership linchpin does not exist |
@@ -200,10 +200,11 @@ Scores are **8 dimensions**: gut, protein, realFood, antiInflammatory,
 bloodSugar, immuneSupportive, brainHealth, heartHealth + weighted overall.
 
 ⚠️ **Pantry requires NIP-42 AUTH on every read** — even kind 1. A READ_ONLY
-account cannot read Nourish at all. iOS already has the AUTH retry in
-`RelayPool`, but verify it against pantry specifically before building on it
-(Android's first three attempts all failed on stale-auth and resync ordering —
-§7.1).
+account cannot read Nourish at all. The inherited iOS AUTH retry covers
+**writes** (`publishWithAuthRetry` / publish-path challenge handling). The
+**subscribe / read** path does *not* wait for AUTH — see §7.1 and
+https://github.com/zapcooking/zapcooking_ios/issues/6. Hard prerequisite for
+Phase 3.5.
 
 ### Relays (role-based — do NOT collapse to one set)
 
@@ -387,10 +388,13 @@ accounts' prefs. On iOS the blast radius is higher: the dead relay can be
 signed into a published kind-10002. Filed separately; do not inherit the bug.
 
 **Concern 0.3 — Relay sovereignty.** Off Wisp infra entirely:
-`Nip29.defaultGroupRelay` (`chat.wisp.talk`) → `pantry.zap.cooking`;
-`RelayProber` / `SignUpViewModel` drop `relay.wisp.talk`; `ProfileView.shareURL`
-and `PostCardView` thread links (`wisp.talk/...`) → `zap.cooking/...`;
-group-sheet placeholder copy. **Gate: zero `*.wisp.talk` in source.**
+`Nip29.defaultGroupRelay` → `wss://pantry.zap.cooking`; `RelayProber` /
+`SignUpViewModel` drop `relay.wisp.talk`; share URLs remapped to real
+zap.cooking shapes (`/user/{npub1…}`, `/{nevent1…}` / `/{note1…}` — not a
+hostname swap of `/profile/` or `/thread/`); group-sheet placeholder copy.
+**Gate: zero `*.wisp.talk` in source.** Groups on pantry require a **signing
+account** (watch-only cannot AUTH — #6). Whether the groups UI ships in v1 at
+all is still an **open decision**.
 
 **Concern 0.4 — Relay sets.** Add the role-based sets from §2 as a
 `RelayConfig`-style enum alongside `RelayDefaults`: `articles`, `members`
@@ -510,6 +514,10 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   `#86EFAC`; soft language for low scores; no letter grades; "Not medical
   advice" footer). Renders **only when a score comes back** — a miss is quiet
   absence, never an error.
+  **Hard prerequisite:** fix
+  https://github.com/zapcooking/zapcooking_ios/issues/6 (subscribe path must
+  wait for / re-fire after NIP-42 AUTH). Without that, pantry reads silently
+  return empty — including Nourish.
 
 ---
 
@@ -569,15 +577,21 @@ Memories, recipe packs.
 Each of these cost real debugging time on Android. They are listed with the iOS
 action, not just the story.
 
-**7.1 — Relay AUTH is per-connection, and stale auth state lies.**
+**7.1 — Relay AUTH is per-connection, and the inherited iOS retry is writes-only.**
 Android's pantry reads failed three ways: `authenticatedRelays` was never
 cleared on a transient disconnect (so `isAuthenticated` stayed stale-true and
 queries fired onto an unauthed socket), and `resyncSubscriptions` re-sent the
 tracked REQ on reconnect *before* the fresh socket's AUTH.
-→ **iOS action:** iOS has `auth-required` retry in `RelayPool` and
-`GroupRelayPool` already, but verify it clears auth state on disconnect and
-that reconnect ordering puts AUTH before resubscribe. Test against pantry
-specifically, with a forced disconnect, before Phase 3.5.
+→ **iOS finding (Concern B):** `RelayPool` / `GroupRelayPool.publishWithAuthRetry`
+cover **writes**. The **subscribe / read** path does not: (1)
+`GroupRelayPool.subscribe` has no `waitForAuthIfNeeded`; (2) CLOSED
+`auth-required` sleeps 2s and replays once instead of awaiting AUTH; (3)
+`isAuthenticated` flips when the AUTH event is *sent*, not accepted; (4)
+reconnect clears auth then re-REQs filters before AUTH. Watch-only never AUTH
+(missing keypair) → silent empty rooms. Tracked as
+https://github.com/zapcooking/zapcooking_ios/issues/6 — **Phase 3.5 blocker**
+(Nourish reads pantry on the same path). Reference: Android
+`collectAuthCompleted` re-fire.
 
 **7.2 — Subscription IDs must be process-wide unique.**
 An instance-scoped counter restarted at 0 per nav back-stack entry, so

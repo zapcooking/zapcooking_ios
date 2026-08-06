@@ -1378,13 +1378,17 @@ struct PostCardView: View {
                 // and the dismissal tore down the presenter first. Dismiss the
                 // popover, then present a `UIActivityViewController` on the VC
                 // beneath it (next runloop tick so the dismissal has settled).
-                popoverMenuItem(title: "Share", systemImage: "square.and.arrow.up") {
-                    showOverflowMenu = false
-                    DispatchQueue.main.async {
-                        ShareSheetPresenter.present(url: shareItem)
+                // Omit Share entirely when neither nevent1 nor note1 encodes —
+                // never hand the user a dead zap.cooking link.
+                if let shareItem {
+                    popoverMenuItem(title: "Share", systemImage: "square.and.arrow.up") {
+                        showOverflowMenu = false
+                        DispatchQueue.main.async {
+                            ShareSheetPresenter.present(url: shareItem)
+                        }
                     }
+                    Divider()
                 }
-                Divider()
 
                 popoverMenuItem(
                     title: "Copy Note Text",
@@ -1880,15 +1884,21 @@ struct PostCardView: View {
         )
     }
 
-    private func shareURI(for target: NostrEvent) -> String {
+    /// Canonical zap.cooking note URL. Prefer `/{nevent1…}`; fall back to
+    /// `/{note1…}`. Returns nil (suppress Share) if neither encodes — never
+    /// emit a raw-hex path the web `[nip19]` catch-all will not render.
+    private func shareURI(for target: NostrEvent) -> String? {
         let relays = Array(NoteSourceTracker.shared.relays(for: target.id).prefix(2))
-        guard let idBytes = Hex.decode(target.id),
-              let authorBytes = Hex.decode(target.pubkey),
-              let nevent = Nip19.neventEncode(eventId32: Array(idBytes), relays: relays, author32: Array(authorBytes))
-        else {
-            return "https://wisp.talk/thread/\(target.id)"
+        if let idBytes = Hex.decode(target.id),
+           let authorBytes = Hex.decode(target.pubkey),
+           let nevent = Nip19.neventEncode(eventId32: Array(idBytes), relays: relays, author32: Array(authorBytes)) {
+            return "https://zap.cooking/\(nevent)"
         }
-        return "https://wisp.talk/thread/\(nevent)"
+        if let idBytes = Hex.decode(target.id),
+           let note = Nip19.noteEncode(eventId: Array(idBytes)) {
+            return "https://zap.cooking/\(note)"
+        }
+        return nil
     }
 
     private func combinedRelays(for eventId: String) -> [String] {

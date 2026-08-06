@@ -124,7 +124,6 @@ final class SignUpViewModel {
     private static let activeRelays = [
         "wss://premium.primal.net",
         "wss://nostr.wine",
-        "wss://relay.wisp.talk",
         "wss://pyramid.fiatjaf.com"
     ]
 
@@ -135,9 +134,6 @@ final class SignUpViewModel {
 
     private static let indexerRelays = RelayDefaults.onboarding
 
-    /// Always-on relay published into every new user's kind-10002 (read+write)
-    /// and kind-10050 list, regardless of RelayProber outcome.
-    private static let wispOutboxRelay = "wss://relay.wisp.talk"
     /// Shared with the login-time auto-seed in `RelaySettingsRepository` so new accounts and
     /// existing accounts that lack a kind-10050 converge on the same DM inbox relay.
     private static let wispDmRelay = RelaySettingsRepository.defaultDmRelay
@@ -202,24 +198,12 @@ final class SignUpViewModel {
             )
             await MainActor.run {
                 guard let self else { return }
-                let merged = Self.ensureWispOutbox(in: relays)
-                self.discoveredRelays = merged
+                self.discoveredRelays = relays
                 self.probingUrl = nil
                 if self.relayPhase != .failed { self.relayPhase = .ready }
-                self.seedRelayScoreBoard(relays: merged)
+                self.seedRelayScoreBoard(relays: relays)
             }
         }
-    }
-
-    /// Inject the wisp outbox relay into the discovered list (read+write) so
-    /// it always lands in the published kind-10002, regardless of probing
-    /// outcome. Idempotent: matches by normalised URL.
-    private static func ensureWispOutbox(in relays: [GeneralRelay]) -> [GeneralRelay] {
-        let target = Nip51Lists.normalize(wispOutboxRelay) ?? wispOutboxRelay
-        if relays.contains(where: { (Nip51Lists.normalize($0.url) ?? $0.url) == target }) {
-            return relays
-        }
-        return [GeneralRelay(url: wispOutboxRelay, read: true, write: true)] + relays
     }
 
     private func applyProbePhase(_ phase: RelayProber.Phase) {
@@ -639,8 +623,7 @@ final class SignUpViewModel {
             }
 
             // Always preserve the user's own outbox so their own intro note,
-            // boosts, and replies stay reachable on relay.wisp.talk + the
-            // discovered set.
+            // boosts, and replies stay reachable on the discovered set.
             if writeRelaysByAuthor[pubkey] == nil, !ownWriteRelays.isEmpty {
                 writeRelaysByAuthor[pubkey] = ownWriteRelays
             }
