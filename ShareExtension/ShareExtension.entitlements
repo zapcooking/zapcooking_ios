@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.barrydeen.wisp</string>
+		<string>group.cooking.zap.app</string>
 	</array>
 </dict>
 </plist>

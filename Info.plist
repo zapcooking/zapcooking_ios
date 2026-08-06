@@ -30,7 +30,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>barrydeen.wisp.share</string>
+			<string>cooking.zap.app.share</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>wisp</string>

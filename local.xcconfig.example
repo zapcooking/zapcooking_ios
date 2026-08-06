@@ -10,7 +10,8 @@
 //     for the parenthesized ID after "Apple Development: …".
 //
 // PRODUCT_BUNDLE_IDENTIFIER must be unique to your team — Personal Teams
-// won't sign someone else's bundle id.
+// won't sign someone else's bundle id. Production defaults are cooking.zap.app
+// / Z26TJQZZWC (see build.xcconfig).
 
-DEVELOPMENT_TEAM = ABCDEFGHIJ
-PRODUCT_BUNDLE_IDENTIFIER = yourname.wisp
+DEVELOPMENT_TEAM = Z26TJQZZWC
+PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app
