@@ -37,8 +37,8 @@ The iOS repo is an **untouched fork**. Nothing has been done yet. Specifically:
 |---|---|
 | Zap Cooking commits | **Zero.** Latest commit is upstream `barrydeen/wisp` PR #425 |
 | `zapcooking` string in Swift source | **2 matches**, both incidental (a spec doc + a comment) |
-| Bundle identifier | `barrydeen.wisp` (`build.xcconfig`) |
-| Development team | `G738XL8P49` (Barry's) |
+| Bundle identifier | `cooking.zap.app` (Concern 0.1; ShareExtension `cooking.zap.app.ShareExtension`) |
+| Development team | `Z26TJQZZWC` (Concern 0.1) |
 | Product name / README | "Wisp" throughout |
 | `relay.wisp.talk` / `chat.wisp.talk` | **Removed** (Concern B) — default group relay is `wss://pantry.zap.cooking`; share URLs are `zap.cooking` shapes |
 | `relay.damus.io` | **35 Swift files** — and that relay **shut down end of July 2026** |
@@ -233,7 +233,7 @@ collapsing onto `RelayDefaults.fallbacks`. Every other site is co-listed.
 Ranked. The cut line is after P1.
 
 ### P0 — Blocking. Nothing ships without these.
-1. Fork hygiene: bundle ID, team, dead relays, Wisp infra, rebrand
+1. Fork hygiene: bundle ID + team (**0.1 done**), dead relays, Wisp infra, rebrand
 2. Deployment-target decision (Gate 0-C) — **answered: iOS 18.0**
 3. App Store payments posture (§4) — decided **before** any UI work, because
    it determines whether the wallet tab survives
@@ -354,8 +354,8 @@ Rules that follow from it, and are **not negotiable in v1**:
 
 | # | Decision | Why it blocks |
 |---|---|---|
-| **0-A** | **Bundle identifier.** Records conflict: the Capacitor app was created as `com.zapcooking.app`; the passkey work references `cooking.zap.app` bound to Apple Team `Z26TJQZZWC` in the live AASA file. **Verify in App Store Connect which ID owns the shipped listing.** Reusing it ships the native app as an *update* (keeps ratings, installs, reviews); a new ID means a new listing from zero. | Permanent once shipped. Also drives the AASA/passkey binding. |
-| **0-B** | Does the native app **replace** the Capacitor listing, or ship alongside it? | Replacement = a hard cutover plan for existing users |
+| **0-A** | **Answered: `cooking.zap.app` / team `Z26TJQZZWC`.** Matches the live AASA/passkey binding. There is no shipped App Store listing (Capacitor never passed review); an orphaned ASC draft will be reused — not a migration. | Permanent once shipped. Also drives the AASA/passkey binding. |
+| **0-B** | **Answered / moot.** Capacitor never passed review, so there is no live listing to replace or coexist with. Native app reuses the orphaned ASC draft under `cooking.zap.app`. | No cutover plan required |
 | **0-C** | **Answered: iOS 18.0.** Measured at 18.0 and 26.0 under Xcode 26.3 / Sequoia: identical breakage class (Swift 6.2.3 type-checker — fixed in Concern 0-C-pre / PR #3); **zero** `@available` in source; **zero** availability errors at 18.0. Hard dependency floor is ObjectBox at iOS 15. Xcode 26.3 is the Sequoia ceiling (cannot ship/build against an iOS 26.4 deployment target here). iPad support retained deliberately (`SUPPORTED_PLATFORMS` unchanged; only `IPHONEOS_DEPLOYMENT_TARGET` lowered; `MACOSX_DEPLOYMENT_TARGET` left alone). | Unblocks addressable-base sizing for every screen after |
 | **0-D** | **Read-only accounts.** iOS `Signer` is **local-key only** — no NIP-46 bunker, no NIP-55 (that's Android/Amber). Decide whether iOS supports a watch-only mode at all. Android gates NIP-98, Nourish, and recipe publish on "account has a signing key." | Determines how many `canSign` branches exist |
 | **0-E** | **Tab architecture.** Wisp is 5 tabs: home / wallet / search / messages / notifications. Food-first needs Recipes and Kitchen. Proposal: **Recipes / OnlyFood / Search / Kitchen / Notifications**, with Wallet and Messages moving into the sidebar drawer. This also reduces §4.2 zap surface area. | Every route lands somewhere |
@@ -366,11 +366,15 @@ Rules that follow from it, and are **not negotiable in v1**:
 
 ### Phase 0 — Fork hygiene, rebrand, foundation
 
-**Concern 0.1 — Identity.** `build.xcconfig` bundle ID + team → Zap Cooking
-(per Gate 0-A). `local.xcconfig.example` updated. Display name "Zap Cooking".
-Xcode scheme/product name left alone for now — renaming the `wisp` target is a
-`project.pbxproj` minefield and buys nothing (Android made the same call:
-`applicationId` changed, class names didn't).
+**Concern 0.1 — Identity.** `cooking.zap.app` / team `Z26TJQZZWC` /
+display name "Zap Cooking". ShareExtension `cooking.zap.app.ShareExtension`;
+tests `cooking.zap.app.Tests` / `cooking.zap.app.UITests`; App Group
+`group.cooking.zap.app` (entitlements ×4 + `PendingShareStore`). Applied in
+`build.xcconfig`, `local.xcconfig.example`, and the matching
+`DEVELOPMENT_TEAM` / `PRODUCT_BUNDLE_IDENTIFIER` / display-name keys in
+`project.pbxproj` (target settings override xcconfig — both must move).
+Xcode scheme/product/`wisp/` folder names left alone — renaming buys nothing
+with no installed base to migrate.
 
 **Concern 0.2 — Kill the dead relay.** Remove `wss://relay.damus.io` from all
 35 Swift production files. Mechanical deletion, no replacement at co-listed
@@ -722,8 +726,8 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
 
 ## 9. Open questions Seth owns
 
-1. **Gate 0-A** — which bundle ID owns the shipped App Store listing?
-2. **Gate 0-B** — replace or coexist with the Capacitor app?
+1. **Gate 0-A** — **answered: `cooking.zap.app` / `Z26TJQZZWC`** (see §5 Gate 0).
+2. **Gate 0-B** — **answered / moot** — no live Capacitor listing; reuse orphaned ASC draft.
 3. **Gate 0-C** — **answered: iOS 18.0** (see §5 Gate 0 table).
 4. **Gate 0-D** — read-only accounts on iOS: supported or not?
 5. **Gate 0-E** — tab architecture (proposal in §5)
