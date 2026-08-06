@@ -137,7 +137,7 @@ final class EmojiRepository {
         if let board = RelayScoreBoard.load(pubkey: pubkey) {
             writeRelays = board.scoredRelays.prefix(8).map { $0.url }
         } else {
-            writeRelays = ["wss://relay.damus.io", "wss://relay.primal.net"]
+            writeRelays = ["wss://relay.primal.net"]
         }
         guard !writeRelays.isEmpty else { return }
 
@@ -325,7 +325,7 @@ final class EmojiRepository {
                 group.addTask { [author, refs] in
                     let authorWrites = await RelayListRepository.shared.getWriteRelays(author)
                     let relays = authorWrites.isEmpty
-                        ? ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+                        ? ["wss://relay.primal.net", "wss://nos.lol"]
                         : Array(authorWrites.prefix(5))
                     return await RelayPool.query(
                         relays: relays,
@@ -479,6 +479,6 @@ final class EmojiRepository {
             let top = board.scoredRelays.prefix(5).map { $0.url }
             if !top.isEmpty { return Array(top) }
         }
-        return ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+        return ["wss://relay.primal.net", "wss://nos.lol"]
     }
 }

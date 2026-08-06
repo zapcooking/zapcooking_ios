@@ -46,7 +46,7 @@ final class DeletionSender {
             for entry in board.scoredRelays.prefix(3) { set.insert(entry.url) }
         }
         if set.isEmpty {
-            set = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+            set = ["wss://relay.primal.net", "wss://nos.lol"]
         }
 
         let succeeded = await RelayPool.publish(event: event, to: Array(set), timeout: 8)
@@ -83,7 +83,7 @@ final class DeletionSender {
             for entry in board.scoredRelays.prefix(3) { set.insert(entry.url) }
         }
         if set.isEmpty {
-            set = ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+            set = ["wss://relay.primal.net", "wss://nos.lol"]
         }
 
         let succeeded = await RelayPool.publish(event: event, to: Array(set), timeout: 8)

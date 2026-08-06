@@ -21,7 +21,6 @@ enum RelayDefaults {
         "wss://purplepag.es",
         "wss://indexer.nostrarchives.com",
         "wss://indexer.coracle.social",
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol"
     ]
@@ -30,7 +29,6 @@ enum RelayDefaults {
     /// the indexer set isn't appropriate (e.g. notifications, mutes, extended
     /// network bootstrap).
     nonisolated static let fallbacks: [String] = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band"
@@ -44,7 +42,6 @@ enum RelayDefaults {
         "wss://relay.nos.social",
         "wss://nos.lol",
         "wss://indexer.nostrarchives.com",
-        "wss://relay.damus.io",
         "wss://relay.primal.net"
     ]
 }

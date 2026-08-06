@@ -109,7 +109,7 @@ enum ZapSender {
         let cap = isPrivate ? 8 : 5
         let dedupedRelays = relays.filter { seen.insert($0).inserted }.prefix(cap)
         let finalRelays = dedupedRelays.isEmpty
-            ? ["wss://relay.damus.io", "wss://nos.lol"]
+            ? ["wss://nos.lol"]
             : Array(dedupedRelays)
 
         // Build + sign the kind 9734 zap request via the Signer facade

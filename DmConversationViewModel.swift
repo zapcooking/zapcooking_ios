@@ -45,7 +45,6 @@ final class DmConversationViewModel: EmojiComposing {
     @ObservationIgnored private var localOutgoingMedia: [String: LocalOutgoingMedia] = [:]
 
     private static let indexerRelays = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band",

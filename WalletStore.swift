@@ -741,7 +741,6 @@ final class WalletStore {
         }
         // Fallback: a small set of high-availability public relays.
         return [
-            "wss://relay.damus.io",
             "wss://nos.lol",
             "wss://relay.primal.net",
             "wss://nostr.wine"

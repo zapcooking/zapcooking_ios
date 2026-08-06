@@ -50,7 +50,6 @@ final class NotificationsViewModel {
     @ObservationIgnored private var spamScoringInflight: Set<String> = []
 
     static let fallbackRelays = [
-        "wss://relay.damus.io",
         "wss://relay.primal.net",
         "wss://nos.lol",
         "wss://relay.nostr.band",
