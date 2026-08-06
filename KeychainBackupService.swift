@@ -3,8 +3,7 @@ import Security
 
 /// Thrown when the iCloud Keychain backup operation fails for an
 /// identity/availability reason (iCloud signed out) or for an unhandled
-/// Keychain `OSStatus`. Parallel to `DriveAuthorizationExpiredError` from
-/// the Google flow.
+/// Keychain `OSStatus`.
 struct KeychainBackupError: Error {
     enum Kind {
         case iCloudUnavailable
@@ -14,7 +13,7 @@ struct KeychainBackupError: Error {
     let op: String
 }
 
-/// iCloud-Keychain-backed equivalent of `DriveBackupService`. Each backup
+/// iCloud-Keychain-backed nsec backup store. Each backup
 /// is one generic-password Keychain item with `kSecAttrSynchronizable = true`,
 /// which iOS syncs across the user's Apple devices via the end-to-end
 /// encrypted iCloud Keychain "circle of trust." Apple itself cannot decrypt
@@ -25,8 +24,7 @@ struct KeychainBackupError: Error {
 ///   - Service: `"com.wisp.apple-backup"` (distinct from `NostrKey`'s
 ///     `"com.wisp.nostr"` so account enumeration doesn't bleed across).
 ///   - Account: `"wisp_bk_<UUID>"` — opaque per-backup identifier, mirrors
-///     the Drive filename convention (`wisp_bk_<uuid>.bin`) so the cloud
-///     provider can't infer the user's npub from the item name.
+///     so the cloud provider can't infer the user's npub from the item name.
 ///   - Value: UTF-8 bytes of the base64-encoded NIP-44 v2 ciphertext.
 ///   - Accessibility: `kSecAttrAccessibleAfterFirstUnlock` — required for
 ///     sync. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (which
@@ -71,13 +69,12 @@ struct KeychainBackupService {
             let createdAt = item[kSecAttrCreationDate as String] as? Date ?? .distantPast
             files.append((BackupFile(backupID: account, payload: payload), createdAt))
         }
-        // Newest first, matching `DriveBackupService` and Google flow UX.
+        // Newest first.
         return files.sorted { $0.createdAt > $1.createdAt }.map { $0.file }
     }
 
     /// Creates a new keychain item with a fresh UUID account name. Each call
-    /// writes a distinct item — no replace path, matching the Drive
-    /// convention.
+    /// writes a distinct item — no replace path.
     func uploadBackup(payload: String) async throws {
         try ensureICloudAvailable(op: "upload")
         let account = Self.prefix + UUID().uuidString.lowercased()

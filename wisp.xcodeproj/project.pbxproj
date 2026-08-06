@@ -79,18 +79,12 @@
 		4CDA88FB2F9C540000001100 /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000001100 /* OnboardingComponents.swift */; };
 		4CDA89AB2F9C540000001000 /* MissingProfileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA89AA2F9C540000001000 /* MissingProfileWatcher.swift */; };
 		4CDA9000000000000A100001 /* BackupCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100001 /* BackupCrypto.swift */; };
-		4CDA9000000000000A100002 /* GoogleAuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100002 /* GoogleAuthConfig.swift */; };
-		4CDA9000000000000A100003 /* GoogleSignInManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100003 /* GoogleSignInManager.swift */; };
-		4CDA9000000000000A100004 /* DriveBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100004 /* DriveBackupService.swift */; };
-		4CDA9000000000000A100005 /* GoogleAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100005 /* GoogleAuthViewModel.swift */; };
-		4CDA9000000000000A100006 /* GoogleAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100006 /* GoogleAuthView.swift */; };
 		4CDA9000000000000A100007 /* AppleAuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100007 /* AppleAuthConfig.swift */; };
 		4CDA9000000000000A100008 /* AppleSignInManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100008 /* AppleSignInManager.swift */; };
 		4CDA9000000000000A100009 /* KeychainBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100009 /* KeychainBackupService.swift */; };
 		4CDA9000000000000A10000A /* AppleAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B10000A /* AppleAuthViewModel.swift */; };
 		4CDA9000000000000A10000B /* AppleAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B10000B /* AppleAuthView.swift */; };
 		4CDA9000000000000A10000C /* AuthFlowComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B10000C /* AuthFlowComponents.swift */; };
-		4CDAD8F42FBE7EB30079A1BA /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 4CDAD8F32FBE7EB30079A1BA /* GoogleSignIn */; };
 		4CDD000100000000000000B1 /* P256K in Frameworks */ = {isa = PBXBuildFile; productRef = 4CDD000000000000000000B1 /* P256K */; };
 		4CDDDD010000000000000001 /* DmMessageEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDDDD000000000000000001 /* DmMessageEntity.swift */; };
 		4CDDDD010000000000000002 /* DmStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDDDD000000000000000002 /* DmStore.swift */; };
@@ -427,11 +421,6 @@
 		4CDA88FA2F9C540000001100 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingComponents.swift; sourceTree = "<group>"; };
 		4CDA89AA2F9C540000001000 /* MissingProfileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingProfileWatcher.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100001 /* BackupCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCrypto.swift; sourceTree = "<group>"; };
-		4CDA9000000000000B100002 /* GoogleAuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuthConfig.swift; sourceTree = "<group>"; };
-		4CDA9000000000000B100003 /* GoogleSignInManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInManager.swift; sourceTree = "<group>"; };
-		4CDA9000000000000B100004 /* DriveBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveBackupService.swift; sourceTree = "<group>"; };
-		4CDA9000000000000B100005 /* GoogleAuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuthViewModel.swift; sourceTree = "<group>"; };
-		4CDA9000000000000B100006 /* GoogleAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuthView.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100007 /* AppleAuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleAuthConfig.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100008 /* AppleSignInManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInManager.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100009 /* KeychainBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainBackupService.swift; sourceTree = "<group>"; };
@@ -682,7 +671,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4CDAD8F42FBE7EB30079A1BA /* GoogleSignIn in Frameworks */,
 				4CDA88092F9C6CFB0079A1BA /* ObjectBox.xcframework in Frameworks */,
 				4CDD000100000000000000B1 /* P256K in Frameworks */,
 				4CEE000100000000000000B1 /* BreezSdkSpark in Frameworks */,
@@ -731,11 +719,6 @@
 				4CDA87C52F9C4BC20079A1BA /* wispUITests */,
 				4CDA87AC2F9C4BC10079A1BA /* Products */,
 				4CDA9000000000000B100001 /* BackupCrypto.swift */,
-				4CDA9000000000000B100002 /* GoogleAuthConfig.swift */,
-				4CDA9000000000000B100003 /* GoogleSignInManager.swift */,
-				4CDA9000000000000B100004 /* DriveBackupService.swift */,
-				4CDA9000000000000B100005 /* GoogleAuthViewModel.swift */,
-				4CDA9000000000000B100006 /* GoogleAuthView.swift */,
 				4CDA9000000000000B100007 /* AppleAuthConfig.swift */,
 				4CDA9000000000000B100008 /* AppleSignInManager.swift */,
 				4CDA9000000000000B100009 /* KeychainBackupService.swift */,
@@ -1088,7 +1071,6 @@
 				4CDD000000000000000000B1 /* P256K */,
 				4CEE000000000000000000B1 /* BreezSdkSpark */,
 				4CFF610000000000000A0006 /* GiphyUISDK */,
-				4CDAD8F32FBE7EB30079A1BA /* GoogleSignIn */,
 			);
 			productName = wisp;
 			productReference = 4CDA87AB2F9C4BC10079A1BA /* wisp.app */;
@@ -1190,7 +1172,6 @@
 				4CDD000200000000000000B2 /* XCRemoteSwiftPackageReference "swift-secp256k1" */,
 				4CEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */,
 				4CFF610200000000000A0006 /* XCRemoteSwiftPackageReference "giphy-ios-sdk" */,
-				4CDAD8F22FBE7EB30079A1BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4CDA87AC2F9C4BC10079A1BA /* Products */;
@@ -1243,11 +1224,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				4CDA9000000000000A100001 /* BackupCrypto.swift in Sources */,
-				4CDA9000000000000A100002 /* GoogleAuthConfig.swift in Sources */,
-				4CDA9000000000000A100003 /* GoogleSignInManager.swift in Sources */,
-				4CDA9000000000000A100004 /* DriveBackupService.swift in Sources */,
-				4CDA9000000000000A100005 /* GoogleAuthViewModel.swift in Sources */,
-				4CDA9000000000000A100006 /* GoogleAuthView.swift in Sources */,
 				4CDA9000000000000A100007 /* AppleAuthConfig.swift in Sources */,
 				4CDA9000000000000A100008 /* AppleSignInManager.swift in Sources */,
 				4CDA9000000000000A100009 /* KeychainBackupService.swift in Sources */,
@@ -2019,14 +1995,6 @@
 				minimumVersion = 5.2.0;
 			};
 		};
-		4CDAD8F22FBE7EB30079A1BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 9.1.0;
-			};
-		};
 		4CDD000200000000000000B2 /* XCRemoteSwiftPackageReference "swift-secp256k1" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/21-DOT-DEV/swift-secp256k1";
@@ -2058,11 +2026,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4CDA88052F9C6CFB0079A1BA /* XCRemoteSwiftPackageReference "objectbox-swift-spm" */;
 			productName = ObjectBox.xcframework;
-		};
-		4CDAD8F32FBE7EB30079A1BA /* GoogleSignIn */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4CDAD8F22FBE7EB30079A1BA /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignIn;
 		};
 		4CDD000000000000000000B1 /* P256K */ = {
 			isa = XCSwiftPackageProductDependency;

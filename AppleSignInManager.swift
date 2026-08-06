@@ -2,9 +2,9 @@ import Foundation
 import UIKit
 import AuthenticationServices
 
-/// Sign in with Apple wrapper, parallel to `GoogleSignInManager`. Returns
+/// Sign in with Apple wrapper. Returns
 /// the team-scoped, opaque `ASAuthorizationAppleIDCredential.user`
-/// identifier — the Apple analogue of Google's JWT `sub` claim. Used as
+/// identifier — used as
 /// the per-account salt input for `BackupCrypto.deriveBackupKey(appleUserID:pin:)`.
 ///
 /// `ASAuthorizationController` is a UIKit-style delegate-based API, so we

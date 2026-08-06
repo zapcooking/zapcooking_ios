@@ -1,7 +1,6 @@
 import Foundation
 
-/// Configuration for the "Continue with Apple" flow. Parallel to
-/// `GoogleAuthConfig`, but unlike Google there are no client IDs to load —
+/// Configuration for the "Continue with Apple" flow.
 /// Sign in with Apple is an entitlement-gated capability requiring the paid
 /// Apple Developer Program. Personal Apple IDs cannot provision it.
 ///

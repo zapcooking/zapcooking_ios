@@ -18,7 +18,6 @@ struct SplashView: View {
     /// launch and sheet animations.
     @State private var lockedHeight: CGFloat?
     var onContinueWithNostr: () -> Void = {}
-    var onContinueWithGoogle: () -> Void = {}
     var onContinueWithApple: () -> Void = {}
 
     var body: some View {
@@ -85,33 +84,21 @@ struct SplashView: View {
                     Spacer().frame(height: 32)
 
                     VStack(spacing: 16) {
-                        // Apple HIG: when other third-party sign-in
-                        // options are present, the Sign in with Apple
-                        // button must be at least as prominent. Top of
-                        // the stack is the standard placement.
-                        //
-                        // We gate on `isConfigured` (entitlement present
-                        // in this build) — not on a live iCloud status
-                        // check — so the button mirrors Google's
-                        // always-on-when-configured behaviour. If iCloud
-                        // isn't signed in or the container isn't
-                        // provisioned, AppleAuthView surfaces a friendly
-                        // error after tap.
+                        // Continue with Apple is the cloud key-recovery
+                        // path (iCloud Keychain + PIN). Gated on
+                        // `AppleAuthConfig.isConfigured` (SIWA entitlement
+                        // present in this build). If iCloud isn't signed
+                        // in, AppleAuthView surfaces a friendly error after
+                        // tap — not a silent no-op.
                         VStack(spacing: 8) {
                             if AppleAuthConfig.isConfigured {
                                 ContinueWithAppleButton(action: onContinueWithApple)
                             }
-
-                            if GoogleAuthConfig.isConfigured {
-                                ContinueWithGoogleButton(action: onContinueWithGoogle)
-                            }
                         }
 
                         // Slightly larger gap before the Nostr button so
-                        // the federated identity options (Apple, Google)
-                        // read as one group and the protocol-native option
-                        // reads as its own choice rather than a third
-                        // entry in the same list.
+                        // Apple recovery and the protocol-native option
+                        // read as distinct choices.
                         ContinueWithNostrButton(action: onContinueWithNostr)
                     }
                 }
@@ -169,31 +156,6 @@ private struct ContinueWithAppleButton: View {
     }
 }
 
-/// Matches the Android "Continue with Google" pill from
-/// `SplashScreen.kt` (lines 211–238): black background, light-grey text
-/// and 1pt grey border, with the Google "G" mark to the left.
-private struct ContinueWithGoogleButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                GoogleGIcon()
-                    .frame(width: 20, height: 20)
-                Text("Continue with Google")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color(red: 0xE3/255.0, green: 0xE3/255.0, blue: 0xE3/255.0))
-            }
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }
-        .background(Color(red: 0x13/255.0, green: 0x13/255.0, blue: 0x14/255.0),
-                    in: Capsule())
-        .overlay(
-            Capsule().stroke(Color(red: 0x8E/255.0, green: 0x91/255.0, blue: 0x8F/255.0), lineWidth: 1)
-        )
-    }
-}
-
 /// Matches the Android "Continue with Nostr" pill from `SplashScreen.kt`
 /// (lines 242–269): dark-purple background, light-purple text and purple
 /// border, with the Nostr ostrich mark to the left.
@@ -219,110 +181,6 @@ private struct ContinueWithNostrButton: View {
     }
 }
 
-/// SwiftUI port of `res/drawable/ic_google_g.xml` — Google's four-colour "G"
-/// mark drawn from the same 24×24 viewport coordinates so the icon stays
-/// pixel-identical to Android.
-private struct GoogleGIcon: View {
-    private static let blue = Color(red: 0x42 / 255.0, green: 0x85 / 255.0, blue: 0xF4 / 255.0)
-    private static let green = Color(red: 0x34 / 255.0, green: 0xA8 / 255.0, blue: 0x53 / 255.0)
-    private static let yellow = Color(red: 0xFB / 255.0, green: 0xBC / 255.0, blue: 0x05 / 255.0)
-    private static let red = Color(red: 0xEA / 255.0, green: 0x43 / 255.0, blue: 0x35 / 255.0)
-
-    var body: some View {
-        Canvas { ctx, size in
-            let s = min(size.width, size.height) / 24.0
-            func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
-
-            var blue = Path()
-            blue.move(to: P(22.56, 12.25))
-            blue.addCurve(to: P(22.36, 10),
-                          control1: P(22.56, 11.47),
-                          control2: P(22.49, 10.72))
-            blue.addLine(to: P(12, 10))
-            blue.addLine(to: P(12, 14.26))
-            blue.addLine(to: P(17.92, 14.26))
-            blue.addCurve(to: P(15.71, 17.57),
-                          control1: P(17.66, 15.63),
-                          control2: P(16.88, 16.79))
-            blue.addLine(to: P(15.71, 20.34))
-            blue.addLine(to: P(19.28, 20.34))
-            blue.addCurve(to: P(22.56, 12.25),
-                          control1: P(21.36, 18.42),
-                          control2: P(22.56, 15.60))
-            blue.closeSubpath()
-            ctx.fill(blue, with: .color(Self.blue))
-
-            var green = Path()
-            green.move(to: P(12, 23))
-            green.addCurve(to: P(19.28, 20.34),
-                           control1: P(14.97, 23),
-                           control2: P(17.46, 22.02))
-            green.addLine(to: P(15.71, 17.57))
-            green.addCurve(to: P(12, 18.63),
-                           control1: P(14.73, 18.23),
-                           control2: P(13.48, 18.63))
-            green.addCurve(to: P(5.84, 14.10),
-                           control1: P(9.14, 18.63),
-                           control2: P(6.71, 16.70))
-            green.addLine(to: P(2.18, 14.10))
-            green.addLine(to: P(2.18, 16.94))
-            green.addCurve(to: P(12, 23),
-                           control1: P(3.99, 20.53),
-                           control2: P(7.70, 23))
-            green.closeSubpath()
-            ctx.fill(green, with: .color(Self.green))
-
-            var yellow = Path()
-            yellow.move(to: P(5.84, 14.09))
-            yellow.addCurve(to: P(5.49, 12),
-                            control1: P(5.62, 13.43),
-                            control2: P(5.49, 12.73))
-            // Smooth-cubic: first control reflected across current point
-            // from the previous segment's second control (5.49, 12.73) →
-            // (5.49, 11.27).
-            yellow.addCurve(to: P(5.84, 9.91),
-                            control1: P(5.49, 11.27),
-                            control2: P(5.62, 10.57))
-            yellow.addLine(to: P(5.84, 7.07))
-            yellow.addLine(to: P(2.18, 7.07))
-            yellow.addCurve(to: P(1, 12),
-                            control1: P(1.43, 8.55),
-                            control2: P(1, 10.22))
-            // Smooth-cubic: reflection of (1, 10.22) across (1, 12) → (1, 13.78).
-            yellow.addCurve(to: P(2.18, 16.93),
-                            control1: P(1, 13.78),
-                            control2: P(1.43, 15.45))
-            yellow.addLine(to: P(5.03, 14.71))
-            yellow.addLine(to: P(5.84, 14.09))
-            yellow.closeSubpath()
-            ctx.fill(yellow, with: .color(Self.yellow))
-
-            var red = Path()
-            red.move(to: P(12, 5.38))
-            red.addCurve(to: P(16.21, 7.02),
-                         control1: P(13.62, 5.38),
-                         control2: P(15.06, 5.94))
-            red.addLine(to: P(19.36, 3.87))
-            red.addCurve(to: P(12, 1),
-                         control1: P(17.45, 2.09),
-                         control2: P(14.97, 1))
-            red.addCurve(to: P(2.18, 7.07),
-                         control1: P(7.70, 1),
-                         control2: P(3.99, 3.47))
-            red.addLine(to: P(5.84, 9.91))
-            red.addCurve(to: P(12, 5.38),
-                         control1: P(6.71, 7.31),
-                         control2: P(9.14, 5.38))
-            red.closeSubpath()
-            ctx.fill(red, with: .color(Self.red))
-        }
-        .aspectRatio(1, contentMode: .fit)
-    }
-}
-
-/// SwiftUI port of `res/drawable/ic_nostr_ostrich.xml` — two-tone pixel
-/// ostrich rendered from the same 240×270 viewport coordinates so the icon
-/// stays pixel-identical to Android.
 private struct NostrOstrichIcon: View {
     private static let orange = Color(red: 0xFD/255.0, green: 0x96/255.0, blue: 0x2C/255.0)
     private static let purple = Color(red: 0xA2/255.0, green: 0x23/255.0, blue: 0xE9/255.0)

@@ -11,7 +11,7 @@ struct SignUpFlowView: View {
     @State private var viewModel: SignUpViewModel
     @State private var step = 0
 
-    /// `existingKeypair` lets cloud-backup flows (Apple / Google) hand the
+    /// `existingKeypair` lets the Apple key-recovery flow hand the
     /// already-generated, already-backed-up keypair to the wizard so the
     /// user runs the same profile / follows / hashtags / intro-note flow
     /// as a fresh "Create new account" tap, without minting a second key.

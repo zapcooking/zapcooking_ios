@@ -147,8 +147,8 @@ final class SignUpViewModel {
     // MARK: - Init
 
     /// Generate a fresh keypair, or use an injected one (when the caller has
-    /// already generated and stored it — e.g. the Apple / Google cloud
-    /// backup flows, which create the keypair as part of the backup-upload
+    /// already generated and stored it — e.g. the Apple key-recovery
+    /// flow, which creates the keypair as part of the backup-upload
     /// step before the wizard runs). Must be side-effect free: SwiftUI
     /// evaluates the `@State` default value on every parent-body
     /// reconstruction and discards every result except the first.
