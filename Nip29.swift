@@ -26,7 +26,7 @@ nonisolated enum Nip29 {
 
     // MARK: - Defaults
 
-    static let defaultGroupRelay = "wss://chat.wisp.talk"
+    static let defaultGroupRelay = "wss://pantry.zap.cooking"
 
     // MARK: - Identifiers
 

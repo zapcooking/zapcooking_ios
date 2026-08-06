@@ -46,7 +46,12 @@ struct ProfileView: View {
     private var visibleTabs: [ProfileTab] {
         isMe ? ProfileTab.allCases.filter { $0 != .conversation } : ProfileTab.allCases
     }
-    private var shareURL: String { "https://wisp.talk/profile/\(pubkey)" }
+    /// Canonical zap.cooking profile URL (`/user/{npub1…}`). Nil when the
+    /// pubkey cannot be encoded — suppress Share rather than emit a dead link.
+    private var shareURL: String? {
+        guard let npub else { return nil }
+        return "https://zap.cooking/user/\(npub)"
+    }
     private var npub: String? {
         guard let bytes = Hex.decode(pubkey) else { return nil }
         return Nip19.npubEncode(pubkey: Array(bytes))
@@ -153,8 +158,10 @@ struct ProfileView: View {
             }
 
             Menu {
-                ShareLink(item: shareURL) {
-                    Label("Share Profile", systemImage: "square.and.arrow.up")
+                if let shareURL {
+                    ShareLink(item: shareURL) {
+                        Label("Share Profile", systemImage: "square.and.arrow.up")
+                    }
                 }
                 Button {
                     if let npub {

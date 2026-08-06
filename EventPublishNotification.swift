@@ -16,7 +16,7 @@ extension Notification.Name {
     static let openWalletTab = Notification.Name("WispOpenWalletTab")
 
     /// Posted when the user taps a NIP-29 chat invite link (e.g.
-    /// `wss://chat.wisp.talk'<groupid>`) embedded in note content. Carries
+    /// `wss://pantry.zap.cooking'<groupid>`) embedded in note content. Carries
     /// `userInfo["relay"]`, `["group"]`, and optionally `["code"]`.
     /// `MainView` switches to the messages tab and `MessagesView` joins
     /// the group + navigates to the chat room.

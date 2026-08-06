@@ -26,7 +26,7 @@ struct CreateGroupSheet: View {
                         .keyboardType(.URL)
                 }
                 Section("Relay") {
-                    TextField("wss://chat.wisp.talk", text: $relay)
+                    TextField("wss://pantry.zap.cooking", text: $relay)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                 }

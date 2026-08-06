@@ -30,7 +30,6 @@ enum RelayProber {
     ]
 
     static let fallbackRelays: [GeneralRelay] = [
-        GeneralRelay(url: "wss://relay.wisp.talk"),
         GeneralRelay(url: "wss://relay.primal.net"),
         GeneralRelay(url: "wss://nos.lol"),
         GeneralRelay(url: "wss://relay.nos.social")
