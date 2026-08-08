@@ -43,7 +43,7 @@ The iOS repo is an **untouched fork**. Nothing has been done yet. Specifically:
 | `relay.wisp.talk` / `chat.wisp.talk` | **Removed** (Concern B) — default group relay is `wss://pantry.zap.cooking`; share URLs are `zap.cooking` shapes |
 | `relay.damus.io` | **35 Swift files** — and that relay **shut down end of July 2026** |
 | Deployment target | iOS **18.0** (Gate 0-C answered; macOS/visionOS targets unchanged) |
-| NIP-98 | **Absent** — the membership linchpin does not exist |
+| NIP-98 | **Present** (Concern 0.6) — `Nip98.swift` + `Nip98HeaderCache.swift` |
 | NIP-22 | **Absent** — no comments |
 | Recipe / food domain | **Absent entirely** |
 
@@ -67,6 +67,46 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 `swift-secp256k1` ships a `SharedSourcesPlugin` that fails SwiftPM plugin
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
+
+**Test baseline (post Concern 0.6):** default hermetic suite is **194 pass /
+1 fail**. The single failure is pre-existing `#4`
+(`FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). That is the prior
+174/1 plus the 20 NIP-98 goldens; the live NIP-98 round-trip is opt-in and
+**skipped** in the default run (so it does not add a pass or a network
+dependency). When the live round-trip is deliberately enabled and green, the
+run is **195 pass / 1 fail**. Future gate reports compare against **194/1**
+for the default suite, not 174/1.
+
+Default `xcodebuild test` (no network dependency — the live NIP-98 round-trip
+is opt-in via `.enabled(if:)` and stays skipped unless deliberately enabled):
+
+```
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES test
+```
+
+**Live NIP-98 round-trip** (opt-in; hits `https://zap.cooking`). Uses an
+ephemeral keypair — never a real nsec. Touch the sentinel, run only that
+suite, then remove the sentinel:
+
+```
+touch wispTests/.nip98_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -only-testing:wispTests/Nip98LiveRoundTripTests \
+  test
+rm -f wispTests/.nip98_live_enable
+```
+
+**Acceptance signal is `owner: true` in the JSON body, NOT bare HTTP 200.**
+`POST /api/membership/check-status` silently degrades to the public response
+shape on a missing/invalid/mismatched NIP-98 signature rather than returning
+401 — so a 200 with no `owner` field means the byte contract is wrong. A
+verified ephemeral non-member gets `{"found":false,"owner":true}`.
 
 ---
 
@@ -450,8 +490,10 @@ Start with `getPublicMembership` + `checkMembershipStatus` only.
 
 **GATE 0:** builds and installs on device; a real NIP-98 round-trip the backend
 accepts (`owner: true`); no "Wisp" in UI; zero damus; zero wisp.talk; brand
-applied. **Do not proceed to Phase 1 until the NIP-98 round-trip passes on a
-physical device** — the JVM/simulator can't prove it.
+applied. **Do not proceed to Phase 1 until the NIP-98 round-trip passes.** On
+iOS the simulator runs the same Swift and the same crypto over real networking,
+so a simulator round-trip is sufficient evidence (the Android "physical device"
+requirement was about JVM unit tests vs on-device JNI secp256k1).
 
 ---
 
@@ -691,7 +733,6 @@ there's one place that doesn't.
 → **iOS action:** `AGENTS.md` gets a header pointing here as the system of
 record, in Concern 0.5.
 
-<<<<<<< HEAD
 **7.12 — ObjectBox shadows `Int64(_: UInt64)` under MemberImportVisibility.**
 ObjectBox declares `extension Swift.Int64: ObjectBox.UntypedIdBase {
 init(_ entityId: ObjectBox.Id) }` with `Id == UInt64`. Under Swift 6
@@ -704,8 +745,6 @@ trapping without importing ObjectBox.
 over this; never substitute `truncatingIfNeeded` (wraps) or `numericCast`
 (opaque). Prefer `Int64(exactly:)!`.
 
-=======
->>>>>>> e6f2111 (Remove decommissioned relay.damus.io from production Swift)
 ---
 
 ## 8. Symbol map — Kotlin → Swift
