@@ -70,13 +70,6 @@
 		4CDA88042F9C6B770079A1BA /* ObjectBoxSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88032F9C6B770079A1BA /* ObjectBoxSetup.swift */; };
 		4CDA88092F9C6CFB0079A1BA /* ObjectBox.xcframework in Frameworks */ = {isa = PBXBuildFile; productRef = 4CDA88082F9C6CFB0079A1BA /* ObjectBox.xcframework */; };
 		4CDA880C2F9C70D80079A1BA /* EntityInfo-wisp.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA880B2F9C70D80079A1BA /* EntityInfo-wisp.generated.swift */; };
-		4CDA88FB2F9C540000000001 /* AppDataWipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000001 /* AppDataWipe.swift */; };
-		4CDA88FB2F9C540000000002 /* AnimatedImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000002 /* AnimatedImageView.swift */; };
-		4CDA88FB2F9C540000000003 /* MediaAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000003 /* MediaAudioSession.swift */; };
-		4CDA88FB2F9C540000000004 /* RelayProber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000004 /* RelayProber.swift */; };
-		4CDA88FB2F9C540000000005 /* SignUpFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000005 /* SignUpFlowView.swift */; };
-		4CDA88FB2F9C540000000006 /* SignUpViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000000006 /* SignUpViewModel.swift */; };
-		4CDA88FB2F9C540000001100 /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA88FA2F9C540000001100 /* OnboardingComponents.swift */; };
 		4CDA89AB2F9C540000001000 /* MissingProfileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA89AA2F9C540000001000 /* MissingProfileWatcher.swift */; };
 		4CDA9000000000000A100001 /* BackupCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100001 /* BackupCrypto.swift */; };
 		4CDA9000000000000A100007 /* AppleAuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA9000000000000B100007 /* AppleAuthConfig.swift */; };
@@ -220,6 +213,12 @@
 		4CFF610100000000000A000E /* PollOptionsEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000E /* PollOptionsEditor.swift */; };
 		4CFF98010000000000000001 /* Nip98.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000001 /* Nip98.swift */; };
 		4CFF98010000000000000002 /* Nip98HeaderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000002 /* Nip98HeaderCache.swift */; };
+		4CFF99010000000000000001 /* RecipeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000001 /* RecipeParser.swift */; };
+		4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000002 /* RecipeSerializer.swift */; };
+		4CFF99010000000000000003 /* IngredientScaler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000003 /* IngredientScaler.swift */; };
+		4CFF99010000000000000004 /* RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000004 /* RecipeFormat.swift */; };
+		4CFF99010000000000000005 /* RecipeFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000005 /* RecipeFormats.swift */; };
+		4CFF99010000000000000006 /* Nip23RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000006 /* Nip23RecipeFormat.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -414,13 +413,6 @@
 		4CDA88012F9C6B720079A1BA /* EventEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventEntity.swift; sourceTree = "<group>"; };
 		4CDA88032F9C6B770079A1BA /* ObjectBoxSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectBoxSetup.swift; sourceTree = "<group>"; };
 		4CDA880B2F9C70D80079A1BA /* EntityInfo-wisp.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntityInfo-wisp.generated.swift"; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000001 /* AppDataWipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDataWipe.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000002 /* AnimatedImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedImageView.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000003 /* MediaAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaAudioSession.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000004 /* RelayProber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayProber.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000005 /* SignUpFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignUpFlowView.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000000006 /* SignUpViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignUpViewModel.swift; sourceTree = "<group>"; };
-		4CDA88FA2F9C540000001100 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingComponents.swift; sourceTree = "<group>"; };
 		4CDA89AA2F9C540000001000 /* MissingProfileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingProfileWatcher.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100001 /* BackupCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCrypto.swift; sourceTree = "<group>"; };
 		4CDA9000000000000B100007 /* AppleAuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleAuthConfig.swift; sourceTree = "<group>"; };
@@ -563,6 +555,12 @@
 		4CFF610000000000000A000E /* PollOptionsEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollOptionsEditor.swift; sourceTree = "<group>"; };
 		4CFF98000000000000000001 /* Nip98.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98.swift; sourceTree = "<group>"; };
 		4CFF98000000000000000002 /* Nip98HeaderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98HeaderCache.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000001 /* RecipeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeParser.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000002 /* RecipeSerializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeSerializer.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000003 /* IngredientScaler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngredientScaler.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000004 /* RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormat.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000005 /* RecipeFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormats.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000006 /* Nip23RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip23RecipeFormat.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -743,13 +741,6 @@
 				4CAA00040002000000A1BA01 /* AudioPlayerStore.swift */,
 				4CDA87E52F9C54990079A1BA /* RelayScoreBoard.swift */,
 				4CDA87E82F9C549A0079A1BA /* RelayUrlValidator.swift */,
-				4CDA88FA2F9C540000000001 /* AppDataWipe.swift */,
-				4CDA88FA2F9C540000000002 /* AnimatedImageView.swift */,
-				4CDA88FA2F9C540000000003 /* MediaAudioSession.swift */,
-				4CDA88FA2F9C540000000004 /* RelayProber.swift */,
-				4CDA88FA2F9C540000000005 /* SignUpFlowView.swift */,
-				4CDA88FA2F9C540000000006 /* SignUpViewModel.swift */,
-				4CDA88FA2F9C540000001100 /* OnboardingComponents.swift */,
 				4CDA87E72F9C54B70079A1BA /* LoginView.swift */,
 				4CDA87E92F9C54B80079A1BA /* OnboardingViewModel.swift */,
 				4CDA87EB2F9C54DE0079A1BA /* OnboardingView.swift */,
@@ -888,6 +879,12 @@
 				4CFFEE0000000000000E0006 /* CustomEmojiSettingsView.swift */,
 				4CFFAA0000000000000A0001 /* NotificationSounds.swift */,
 				4CFFAA0000000000000A0002 /* Haptics.swift */,
+				4CFF99000000000000000001 /* RecipeParser.swift */,
+				4CFF99000000000000000002 /* RecipeSerializer.swift */,
+				4CFF99000000000000000003 /* IngredientScaler.swift */,
+				4CFF99000000000000000004 /* RecipeFormat.swift */,
+				4CFF99000000000000000005 /* RecipeFormats.swift */,
+				4CFF99000000000000000006 /* Nip23RecipeFormat.swift */,
 				4CFFA00000000000000A0001 /* Nip51Lists.swift */,
 				4CFFA00000000000000A0002 /* RelaySet.swift */,
 				4CFFA00000000000000A0003 /* RelaySetRepository.swift */,
@@ -1241,13 +1238,6 @@
 				4CDA87DE2F9C54700079A1BA /* Secp256k1.swift in Sources */,
 				4CDA87E62F9C54990079A1BA /* RelayScoreBoard.swift in Sources */,
 				4CDA87E72F9C549A0079A1BA /* RelayUrlValidator.swift in Sources */,
-				4CDA88FB2F9C540000000001 /* AppDataWipe.swift in Sources */,
-				4CDA88FB2F9C540000000002 /* AnimatedImageView.swift in Sources */,
-				4CDA88FB2F9C540000000003 /* MediaAudioSession.swift in Sources */,
-				4CDA88FB2F9C540000000004 /* RelayProber.swift in Sources */,
-				4CDA88FB2F9C540000000005 /* SignUpFlowView.swift in Sources */,
-				4CDA88FB2F9C540000000006 /* SignUpViewModel.swift in Sources */,
-				4CDA88FB2F9C540000001100 /* OnboardingComponents.swift in Sources */,
 				4CDA87DA2F9C546F0079A1BA /* Hex.swift in Sources */,
 				4CDA88022F9C6B720079A1BA /* EventEntity.swift in Sources */,
 				4CDA87F62F9C5CC70079A1BA /* MainView.swift in Sources */,
@@ -1394,6 +1384,12 @@
 				4CFFEE0100000000000E0006 /* CustomEmojiSettingsView.swift in Sources */,
 				4CFFAA0100000000000A0001 /* NotificationSounds.swift in Sources */,
 				4CFFAA0100000000000A0002 /* Haptics.swift in Sources */,
+				4CFF99010000000000000001 /* RecipeParser.swift in Sources */,
+				4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */,
+				4CFF99010000000000000003 /* IngredientScaler.swift in Sources */,
+				4CFF99010000000000000004 /* RecipeFormat.swift in Sources */,
+				4CFF99010000000000000005 /* RecipeFormats.swift in Sources */,
+				4CFF99010000000000000006 /* Nip23RecipeFormat.swift in Sources */,
 				4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */,
 				4CFFA00100000000000A0002 /* RelaySet.swift in Sources */,
 				4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */,
