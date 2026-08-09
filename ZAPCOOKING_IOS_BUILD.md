@@ -427,6 +427,7 @@ Rules that follow from it, and are **not negotiable in v1**:
 | **0-E** | **Tab architecture.** Wisp is 5 tabs: home / wallet / search / messages / notifications. Food-first needs Recipes and Kitchen. Proposal: **Recipes / OnlyFood / Search / Kitchen / Notifications**, with Wallet and Messages moving into the sidebar drawer. This also reduces §4.2 zap surface area. | Every route lands somewhere |
 | **0-F** | **Zaps-on-posts** ship-or-flag (§4.2) | Kill switch must exist before the flag is needed |
 | **0-G** | **Moot / struck.** Google Sign-In was removed from iOS (Concern 0.2), so no Google Cloud iOS OAuth client is needed. Remaining open piece under this number if reused later: Apple **release + distribution certs** only. | — |
+| **0-H** | **DM inbox relay (kind 10050).** *Definition added Aug 9 — the ruling is Seth's.* This is **not** a client-side constant. The app **signs and publishes a replaceable kind-10050 into the member's own account**, once per account, from `RelaySettingsRepository.ensureDmRelayList` (`:113-153`), reached at every launch via `MainView.swift:343` → `bootstrap`. A kind-10050 is cross-client and supersedes by `created_at`, so whatever we write there is where **every** Nostr client that member uses will route their DMs. Current value is the inherited Wisp constant `RelaySettingsRepository.defaultDmRelay = "wss://auth.nostr1.com"` (`:44`); its own NIP-11 (probed Aug 9) reads `auth_required: true`, `payment_required: false`, operator `7cc328a0…`, and describes itself as *"a 'DM Inbox Relay' running alpha software. By using it you can help us test the functionality."* **Three decisions, not one:** (a) do we publish a 10050 on the member's behalf **at all**, given DMs appear nowhere in §3's P0–P3 list; (b) if yes, **what value**; (c) **when** — at launch, as today, or at first use of Messages. **Prep's recommendation: (a) yes, (b) keep the inherited value for now, (c) move the seed to first use of Messages.** The record is permanent and cross-client, and today we write it before the member has opened Messages once. Deferring costs nothing until someone actually uses DMs, which is the moment it becomes true for them. **Pantry is not an available answer:** `rejectEventPolicy` falls through to "membership required" for kind 1059 (`member-relay relay/main.go:511-514` @ `06e70c8`), and the sender of a gift wrap AUTHs as an ephemeral key that is never a member — inbound DMs would be rejected. Two existing safeguards are sound and should survive any ruling: the seed runs at most once per account, and only on a **connectivity-confirmed** absence (`relaysResponded > 0`), so it cannot supersede a real list we merely failed to fetch. Watch-only accounts are already skipped (`:116`) — ties to **0-D**. | Blocks **nothing** in Phase 0 — see Concern 0.4. Blocks whichever phase Messages lands in. Note the seed is **already live in every build**, so "unruled" is not "not happening". |
 
 ---
 
@@ -471,6 +472,13 @@ all is still an **open decision**.
 (pantry), `discovery`, `profiles`. Keep `RelayDefaults.indexers` as discovery —
 do not merge them (Android's CLAUDE.md is explicit: these sets are not supersets
 of each other).
+**Not blocked on Gate 0-H** (Prep, Aug 9 — overridable). These four are
+client-side read-fanout constants. A DM inbox relay is a different kind of
+thing: a signed kind-10050 in the *member's* account, not our routing config.
+No 0-H outcome changes any of the four values. If a fifth `dm` role is wanted
+in the enum it can point at the existing `RelaySettingsRepository.defaultDmRelay`
+(`:44`) without knowing the ruling — the enum's shape does not depend on it.
+0.4 can start now.
 
 **Concern 0.5 — Branding.** App name, theme (brand primary `#ec4700` /
 `#ff5722`, danger `#dc2626`/`#ef4444`, ported from web `src/app.css` and
@@ -502,8 +510,18 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
 - **1.1 `RecipeParser.swift`** — byte-faithful port of the Kotlin, which is
   itself a port of the web `parseMarkdownForEditing`. **No UI.** Golden test
   against the real *Tuscan Peposo* event including the missing `published_at`,
-  missing `servings`, and the live U+FE0F emoji bytes. Android has 14 tests
-  here; port all of them.
+  missing `servings`, and the live U+FE0F emoji bytes. Android has **23** tests
+  here; port all 23. Source:
+  `app/src/test/kotlin/cooking/zap/app/nostr/RecipeParserTest.kt` at
+  `zap_cooking_android` **`4389530`** (the commit this doc is verified against).
+  ⚠️ An earlier revision of this line said 14 — that is the count of the block
+  *above* the `private fun event(...)` helper at `:199`, which sits mid-file and
+  reads like the end of it. Below the helper are **9 more**, all
+  `isRecipe_*` / `validate_*`. Those 9 are the ones with downstream teeth:
+  `RecipeParser.isRecipe` is the gate **1.6** uses to choose the recipe route
+  over the article route, and `isRecipe_rejectsArticleCarryingRecipeTag` is
+  exactly the case that otherwise lands a plain article on a recipe screen.
+  Port 14 and the gate function ships untested.
 - **1.2 `RecipeRepository.swift`** — `{kinds:[30023], #t:[zapcooking,nostrcooking]}`
   fanned out to the **articles union**, deduped by addressable coordinate
   (`kind:author:dTag`) newest-wins with the NIP-01 equal-`created_at`
@@ -796,6 +814,13 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
 4. **Gate 0-D** — read-only accounts on iOS: supported or not?
 5. **Gate 0-E** — tab architecture (proposal in §5)
 6. **Gate 0-F** — zaps on posts: ship, or profile-only from day one?
+   ⚠️ §4.2 already carries a written ruling (compile-time
+   `FeatureFlags.zapsOnPosts` kill switch, budget one rejection round). Confirm
+   §4.2 is a ruling and this closes; say it was a proposal and it stays open.
+6a. **Gate 0-H** — DM inbox relay (kind 10050): defined in §5 Gate 0 as of
+   Aug 9. Three parts — do we publish a 10050 on the member's behalf at all,
+   what value, and at launch or at first use of Messages. Prep recommends
+   moving the seed to first use.
 7. **Creator starter pack** — the curated food-creator list is still owed on
    *both* platforms
 8. **Privacy policy correction** — the two false retention claims block the
