@@ -618,6 +618,47 @@ regular relays. Two constraints from the surrounding view, both checkable:
   says "add one" is false for watch-only accounts. Ties to **0-D**.
 - Fixes the lowercased-enum rendering ("No dm relays yet") on the way through.
 
+**Copy delivered (Growth, Aug 9) — split accepted, one clause held.**
+
+*Structure — ruled, build to this.* Branch the DM case out of the shared
+interpolation rather than stretching one template over four tabs. Growth's
+reason is the right one and it is the same rule the Android settings row came
+down on: **general / search / blocked all mean "not set up yet," which is a
+correct to-do reading for them; after 0-H, dm empty is the intended steady
+state.** One template cannot carry both truths — soften it enough to be honest
+for dm and it goes vague for the other three.
+
+- **General / Search / Blocked — unchanged:** `"No \(tab) relays yet"`.
+- **DM — static, no interpolation.** Growth's draft: *"No DM relays set. You're
+  still reachable through your regular relays."*
+
+*Two amendments, both checkable against the view:*
+
+1. **"regular relays" → "General relays."** `Tab.general` has raw value
+   `"General"` (`:18`) and is rendered as a literal segment in the picker two
+   lines above the empty state (`:37`). "Regular" is a term that exists nowhere
+   in the app; "General" is on screen while the member reads the sentence.
+   Growth invited this swap explicitly — the term came from Prep's prose, not
+   from the product.
+2. **The second sentence is held pending Growth, and Sous must not ship it as
+   written.** *"You're still reachable"* is a claim about **other people's
+   clients**, and nothing in our code makes it true. Our own read path unions dm
+   with NIP-65 read relays (`MessagesViewModel:120-134`), so **we** will look
+   there — that half is verified. But whether a NIP-17 *sender* deposits there
+   depends on that sender's client falling back when it finds no kind-10050,
+   and some refuse to send at all. **We have not measured the distribution and
+   must not imply one.** Failure is silent on both ends. The honest form
+   describes what we do rather than what senders will do — e.g. *"No DM relays
+   set. We look for your messages on your General relays."* — which is true,
+   verifiable at `MessagesViewModel:120-134`, and still answers the only
+   question the member is asking ("am I broken?"). **Final wording is Growth's;
+   the constraint is that the string may not assert reachability.**
+
+*Antecedent verified:* the "General relays" referent exists for new accounts —
+`SignUpViewModel:402` publishes a kind-10002 at signup. An imported key with no
+NIP-65 list at all would make the sentence vacuous, but that account is
+degraded in every direction, not only DMs.
+
 *Not in scope, flagged:* accounts that already published a 10050 pointing at
 `auth.nostr1.com` keep it. Editing it for them is the same act the ruling
 forbids. iOS has not shipped, so the population is test accounts; surface it,
