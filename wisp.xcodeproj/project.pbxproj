@@ -218,6 +218,8 @@
 		4CFF610100000000000A000C /* PollVoteSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000C /* PollVoteSender.swift */; };
 		4CFF610100000000000A000D /* RelayRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000D /* RelayRouting.swift */; };
 		4CFF610100000000000A000E /* PollOptionsEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000E /* PollOptionsEditor.swift */; };
+		4CFF98010000000000000001 /* Nip98.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000001 /* Nip98.swift */; };
+		4CFF98010000000000000002 /* Nip98HeaderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000002 /* Nip98HeaderCache.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -559,6 +561,8 @@
 		4CFF610000000000000A000C /* PollVoteSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollVoteSender.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A000D /* RelayRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayRouting.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A000E /* PollOptionsEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollOptionsEditor.swift; sourceTree = "<group>"; };
+		4CFF98000000000000000001 /* Nip98.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98.swift; sourceTree = "<group>"; };
+		4CFF98000000000000000002 /* Nip98HeaderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98HeaderCache.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -834,6 +838,8 @@
 				4CFF0B0A0000000000000205 /* NwcConnection.swift */,
 				4CFF0B0C0000000000000206 /* Nip57.swift */,
 				4CFF0B0E0000000000000207 /* Nip78Backup.swift */,
+				4CFF98000000000000000001 /* Nip98.swift */,
+				4CFF98000000000000000002 /* Nip98HeaderCache.swift */,
 				4CFF0B100000000000000208 /* BreezConfig.swift */,
 				4CFF0B120000000000000209 /* Bip39.swift */,
 				4CFFFB000000000000000F10 /* BlurHash.swift */,
@@ -1338,6 +1344,8 @@
 				4CFF0B0B0000000000000205 /* NwcConnection.swift in Sources */,
 				4CFF0B0D0000000000000206 /* Nip57.swift in Sources */,
 				4CFF0B0F0000000000000207 /* Nip78Backup.swift in Sources */,
+				4CFF98010000000000000001 /* Nip98.swift in Sources */,
+				4CFF98010000000000000002 /* Nip98HeaderCache.swift in Sources */,
 				4CFF0B110000000000000208 /* BreezConfig.swift in Sources */,
 				4CFF0B130000000000000209 /* Bip39.swift in Sources */,
 				4CFFFB010000000000000F10 /* BlurHash.swift in Sources */,
