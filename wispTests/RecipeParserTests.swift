@@ -301,6 +301,57 @@ struct RecipeParserTests {
         #expect(RecipeParser.isRecipeContent(md))
     }
 
+    // MARK: - Gaps the Android golden set leaves open
+    //
+    // Both of these were found by mutation testing, not by reading: the
+    // implementation survived a mutant with all 24 ported tests green. Neither
+    // expected value comes from running the Swift — both were read off the WEB
+    // validator (`zapcooking-frontend@00b446c src/lib/parser.ts:230-318`), which
+    // is the authority the Kotlin and this file both port. Android has the same
+    // two gaps; flagged for Prep, not fixed here.
+
+    /// The final `directions.isEmpty || ingredients.isEmpty` guard is the only
+    /// thing rejecting a document that has one of the two lists and not the
+    /// other. The ported tests never reach it: `validate_rejectsProseDirections`
+    /// bails earlier inside the Directions branch, and
+    /// `validate_rejectsHeadingsThatArentRecipeSections` has neither list, so it
+    /// is rejected under `||` *and* under `&&`. Weaken the operator to `&&` and
+    /// every one of the 24 still passes — while an article carrying a
+    /// `## Ingredients` heading becomes a recipe.
+    ///
+    /// Web ground truth: both cases below return
+    /// `"Directions and/or ingredients list too short."`.
+    @Test func validate_rejectsWhenEitherListIsMissingEntirely() {
+        #expect(!RecipeParser.isRecipeContent("## Ingredients\n\n- flour\n- water\n"))
+        #expect(!RecipeParser.isRecipeContent("## Directions\n\n1. Mix.\n2. Bake.\n"))
+    }
+
+    /// `## Ingredients` uses the `slice(1, -1)` middle-slice while `## Directions`
+    /// uses `slice(1)`. That asymmetry is invisible in every ported test, because
+    /// there Ingredients is always followed by another section and the dropped
+    /// last line is the blank one the section regex captured. When Ingredients is
+    /// the **trailing** section and the body has no final newline, the dropped
+    /// last line is a real ingredient — the web loses it, so we lose it too.
+    ///
+    /// Pinned because "fixing" the middle-slice to `dropFirst()` looks strictly
+    /// more correct, ships green against the 24, and silently makes iOS accept a
+    /// different ingredient list than the site that published the recipe.
+    ///
+    /// Web ground truth: valid, `ingredients == ["flour"]` — `water` is dropped.
+    /// Adding the final newline restores it, and that half is asserted too so
+    /// this reads as the boundary it is rather than as a blanket "last
+    /// ingredient is lost".
+    @Test func validate_trailingIngredientsWithNoFinalNewline_dropsLastLine_webParity() {
+        let noNewline = "## Directions\n\n1. Mix.\n\n## Ingredients\n\n- flour\n- water"
+        #expect(RecipeParser.validateMarkdownTemplate(noNewline).template?.ingredients == ["flour"])
+
+        let withNewline = noNewline + "\n"
+        #expect(
+            RecipeParser.validateMarkdownTemplate(withNewline).template?.ingredients
+                == ["flour", "water"]
+        )
+    }
+
     // MARK: - iOS-only: regex-dialect guard (no Android counterpart)
 
     /// **Not a port — this test exists only on iOS**, because the bug it guards

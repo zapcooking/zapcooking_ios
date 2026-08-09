@@ -330,6 +330,22 @@ nonisolated enum RecipeParser {
         pattern: "## [A-Za-z\\s']+\\n[^#]+"
     )
     /// `[0-9]`, not `\d` — see the type doc.
+    ///
+    /// Measured caveat, so nobody "proves" this is dead and drops it: swapping
+    /// both of these to `\d` changes **no output**, and no test can be written
+    /// that it would fail. `Int64(_: String)` is ASCII-only, so a Unicode-digit
+    /// step yields `nil` → `Int64.max` → the order check rejects — the same
+    /// `.invalid`, with the same message, that `[0-9]` reaches by not matching
+    /// at all. The two spellings agree here **only because the regex and the
+    /// integer parser happen to share an alphabet.** Make the parse
+    /// Unicode-aware and `\d` starts accepting `١. Mix.` as step 1 while the web
+    /// that published it does not. This is the guard that keeps that change
+    /// safe, not a guard that is doing work today.
+    ///
+    /// `parseContent`'s ``numberedStep`` is the opposite case — there the
+    /// dialect **is** observable, and
+    /// `directions_unicodeDigitsAreNotStepNumbers_icuRegexDialectGuard` fails if
+    /// it is relaxed.
     private static let leadingStepNumber = try! NSRegularExpression(pattern: "^[0-9]+\\.")
     private static let leadingDigits = try! NSRegularExpression(pattern: "^[0-9]+")
 
