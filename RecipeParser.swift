@@ -280,8 +280,16 @@ nonisolated enum RecipeParser {
                 out.append(trimmed(step))
             } else if t.hasPrefix("- ") {
                 out.append(trimmed(String(t.dropFirst(2))))
-            } else if !t.isEmpty && !t.hasPrefix("#") && t.count > 10 {
+            } else if !t.isEmpty && !t.hasPrefix("#") && t.utf16.count > 10 {
                 // Lenient fallback for substantial unmarked lines.
+                //
+                // `utf16.count`, not `count`, for the same reason as the limits in
+                // ``validateMarkdownTemplate(_:)`` — web `parser.ts:214` and Kotlin
+                // `RecipeParser.kt:227` both compare `String.length`, which is UTF-16
+                // units. The direction inverts here, which is what hid it: in the
+                // validator `count` would let a *longer* string through, so it reads
+                // as the lax choice; here `count` *drops* short lines the web keeps.
+                // "Enjoy! 🎉🎊🥳" is 10 graphemes and 13 UTF-16 units.
                 out.append(t)
             }
         }

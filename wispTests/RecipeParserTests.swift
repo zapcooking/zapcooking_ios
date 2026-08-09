@@ -376,4 +376,55 @@ struct RecipeParserTests {
         let steps = RecipeParser.parseContent(md).directions
         #expect(steps == ["\u{0661}. Mix the flour and water thoroughly."])
     }
+
+    /// **Not a port — this test exists only on iOS**, for the same reason as the
+    /// dialect guard above: the bug it guards exists only on iOS.
+    ///
+    /// `parseDirections`' lenient fallback keeps an unmarked line when it is
+    /// longer than 10. Web `parser.ts:214` (`trimmed.length`) and Kotlin
+    /// `RecipeParser.kt:227` (`t.length`) both count **UTF-16 units**; Swift's
+    /// `count` counts grapheme clusters, and `count <= utf16.count` always — so
+    /// the wrong unit here can only ever **drop** lines the publishing site kept.
+    ///
+    /// The direction is what hides it. `validateMarkdownTemplate`'s five limits
+    /// have the same rule pointing the other way (there `count` would let a
+    /// *longer* string through), so `utf16.count` reads there as the strict,
+    /// obviously-diligent choice and reads here as needless ceremony. Without
+    /// this test the rule at ``RecipeParser/validateMarkdownTemplate(_:)`` is a
+    /// doc comment with nothing holding it in place one function away.
+    ///
+    /// Expected values are read off the web parser (frontend `88998b2`) via a
+    /// standalone node control whose two other cases reproduce
+    /// ``parsesDirections_strippingStepNumbers()`` and the dialect guard above —
+    /// not off this implementation.
+    @Test func directions_lenientFallbackCountsUTF16Units_notGraphemes() {
+        // 10 graphemes, 13 UTF-16 units. Web and Kotlin keep it.
+        let emojiSignoff = "Enjoy! \u{1F389}\u{1F38A}\u{1F973}"
+        #expect(emojiSignoff.count == 10 && emojiSignoff.utf16.count == 13)
+        #expect(
+            RecipeParser.parseContent("## Directions\n\n" + emojiSignoff).directions
+                == [emojiSignoff]
+        )
+
+        // 6 graphemes, 12 UTF-16 units — the same failure with no ASCII at all.
+        let allEmoji = "\u{1F345}\u{1F9C4}\u{1F9C5}\u{1F955}\u{1F33F}\u{1F9C0}"
+        #expect(allEmoji.count == 6 && allEmoji.utf16.count == 12)
+        #expect(
+            RecipeParser.parseContent("## Directions\n\n" + allEmoji).directions == [allEmoji]
+        )
+
+        // The threshold still bites: 8 graphemes / 9 UTF-16 units is dropped by
+        // web and Kotlin too. Asserted so this reads as "count the right units",
+        // not as "keep every short line".
+        let tooShort = "Enjoy! \u{1F389}"
+        #expect(tooShort.utf16.count == 9)
+        #expect(RecipeParser.parseContent("## Directions\n\n" + tooShort).directions == [])
+
+        // Pure-ASCII lines are unaffected in either unit — the golden shape the
+        // 23 ported tests cover, restated here as the control.
+        #expect(
+            RecipeParser.parseContent("## Directions\n\nStir it well").directions
+                == ["Stir it well"]
+        )
+    }
 }
