@@ -20,7 +20,7 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    @State private var selectedTab: BottomTab = .home
+    @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
@@ -1352,7 +1352,7 @@ struct MainView: View {
             Image(systemName: selectedTab.icon)
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
-            Text(selectedTab.rawValue.capitalized)
+            Text(selectedTab.title)
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.tertiary)
             Text("Coming soon")
@@ -1365,7 +1365,7 @@ struct MainView: View {
 
     private var bottomBar: some View {
         HStack {
-            ForEach(BottomTab.allCases.filter { !isWatchOnly || ($0 != .wallet && $0 != .messages) }, id: \.self) { tab in
+            ForEach(BottomTab.bottomBarCases, id: \.self) { tab in
                 Button {
                     if selectedTab == tab {
                         popToRoot(tab)
@@ -1410,6 +1410,7 @@ struct MainView: View {
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
         case .messages: break  // MessagesView owns its own NavigationStack
+        case .recipes, .onlyfood, .kitchen: placeholderPath = NavigationPath()
         }
     }
 
@@ -1458,29 +1459,63 @@ struct MainView: View {
 // MARK: - Bottom Tab Definition
 
 enum BottomTab: String, CaseIterable {
+    // Bottom-bar tabs (food-first layout, build spec §5 Gate 0-E — Spec
+    // proposal, locked 2026-08-11).
+    case recipes
+    case onlyfood
+    case search
+    case kitchen
+    case notifications
+
+    // Drawer-only destinations — NOT rendered in the bottom bar. `wallet`
+    // and `messages` were demoted out of the tab bar (food-first, and to
+    // reduce zap surface area for App Store review); `home` is the general
+    // Nostr feed, kept mounted and reachable one tap away in the drawer.
     case home
     case wallet
-    case search
     case messages
-    case notifications
+
+    /// The five cases rendered in the bottom bar, in display order.
+    /// Drawer-only destinations are intentionally excluded.
+    static let bottomBarCases: [BottomTab] = [.recipes, .onlyfood, .search, .kitchen, .notifications]
 
     var icon: String {
         switch self {
+        case .recipes: "book"
+        case .onlyfood: "leaf"
+        case .search: "magnifyingglass"
+        case .kitchen: "fork.knife"
+        case .notifications: "bell"
         case .home: "house"
         case .wallet: "creditcard"
-        case .search: "magnifyingglass"
         case .messages: "bubble.left.and.bubble.right"
-        case .notifications: "bell"
         }
     }
 
     var selectedIcon: String {
         switch self {
+        case .recipes: "book.fill"
+        case .onlyfood: "leaf.fill"
+        case .search: "magnifyingglass"
+        case .kitchen: "fork.knife"
+        case .notifications: "bell.fill"
         case .home: "house.fill"
         case .wallet: "creditcard.fill"
-        case .search: "magnifyingglass"
         case .messages: "bubble.left.and.bubble.right.fill"
-        case .notifications: "bell.fill"
+        }
+    }
+
+    /// Human-readable label for placeholder surfaces and accessibility.
+    var title: String {
+        switch self {
+        case .recipes: "Recipes"
+        case .onlyfood: "Only Food"
+        case .search: "Search"
+        case .kitchen: "My Kitchen"
+        case .notifications: "Notifications"
+        case .home: "Feed"
+        case .wallet: "Wallet"
+        case .messages: "Messages"
         }
     }
 }
