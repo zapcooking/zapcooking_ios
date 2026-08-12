@@ -111,4 +111,20 @@ enum HttpClientFactory {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
+
+    /// Long-timeout client for LLM / vision endpoints (Cheffy, Nourish,
+    /// extract-recipe, Note Review) where whole-response latency dominates.
+    /// Android learned the hard way that the general 15s client times out on
+    /// Nourish (LLM + awaited pantry publish) and Cheffy (whole-response, no
+    /// streaming) — build this tier on day one of the API work (build spec §2).
+    /// Used by `ZapCookingApi` for the AI surfaces; membership reads stay on
+    /// `generalClient`.
+    static let computeClient: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 75
+        config.timeoutIntervalForResource = 75
+        config.httpMaximumConnectionsPerHost = 4
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
 }

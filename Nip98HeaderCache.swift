@@ -19,6 +19,11 @@ import Foundation
 /// presented during its clock-skew-sensitive final seconds. Fresh signs
 /// always use a new `created_at` (never a cached timestamp).
 final class Nip98HeaderCache: @unchecked Sendable {
+    /// Process-wide singleton shared by `ZapCookingApi` (and future NIP-98
+    /// callers) so a signed header is reused across requests inside its TTL
+    /// window regardless of which call site issued it.
+    static let shared = Nip98HeaderCache()
+
     static let defaultTTLMillis: Int64 = 30_000
 
     /// A header value plus whether it was served from cache (drives the 401 retry rule).
