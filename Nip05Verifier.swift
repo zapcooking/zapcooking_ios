@@ -83,7 +83,7 @@ final class Nip05Verifier: ObservableObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 6
-        request.setValue("Mozilla/5.0 (compatible; Wisp/1.0)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 (compatible; ZapCooking-iOS/1.0)", forHTTPHeaderField: "User-Agent")
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) != false,
@@ -109,7 +109,7 @@ final class Nip05Verifier: ObservableObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 6
-        request.setValue("Mozilla/5.0 (compatible; Wisp/1.0)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 (compatible; ZapCooking-iOS/1.0)", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
