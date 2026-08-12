@@ -118,6 +118,9 @@ struct ContentView: View {
                 }
             }
         }
+        // Warm the splash food-photo cache on every launch (regardless of
+        // screen) so the intro has cached photos the moment it shows. 24h TTL.
+        .task { await FoodPhotoCache.shared.warmIfNeeded() }
         .fullScreenCover(isPresented: $showAddAccount) {
             LoginView { newKeypair in
                 showAddAccount = false

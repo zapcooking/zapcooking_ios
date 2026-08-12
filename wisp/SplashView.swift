@@ -1,7 +1,10 @@
 import SwiftUI
 
-private let avatarSize: CGFloat = 44
-private let avatarGap: CGFloat = 4
+private let tileSize: CGFloat = 76
+private let tileGap: CGFloat = 6
+private let tileRadius: CGFloat = 12
+/// Dark ink background matching Android's splash `BG_COLOR` (#111827).
+private let splashBG = Color(red: 0x11 / 255.0, green: 0x18 / 255.0, blue: 0x27 / 255.0)
 
 struct SplashView: View {
     @State private var viewModel = SplashViewModel()
@@ -10,40 +13,33 @@ struct SplashView: View {
     /// home indicator's safe-area inset stabilises during the initial
     /// presentation, jumping the buttons before the background is in place.
     @State private var actionsVisible = false
-    /// Captured *once* on first layout and held constant thereafter. Using
-    /// `UIScreen.main.bounds.height` directly is unreliable across split
-    /// screen / iPad multitasking, but freezing the first GeometryReader
-    /// reading gives a stable anchor that doesn't react to mid-transition
-    /// safe-area inset changes — the cause of the buttons jumping during
-    /// launch and sheet animations.
-    @State private var lockedHeight: CGFloat?
     var onContinueWithNostr: () -> Void = {}
     var onContinueWithApple: () -> Void = {}
 
     var body: some View {
         GeometryReader { geo in
-            let height = lockedHeight ?? geo.size.height
-            let cols = max(1, Int((geo.size.width + avatarGap) / (avatarSize + avatarGap)))
-            let maxVisibleRows = Int((height + avatarGap) / (avatarSize + avatarGap)) + 1
-            let maxVisibleCount = maxVisibleRows * cols
-            let pics: [String] = {
-                if viewModel.profilePictures.isEmpty {
-                    return Array(repeating: "", count: maxVisibleCount)
-                }
-                return Array(viewModel.profilePictures.prefix(maxVisibleCount))
-            }()
-            let rows = (pics.count + cols - 1) / cols
+            let cols = max(1, Int((geo.size.width + tileGap) / (tileSize + tileGap)))
+            // Size tiles so `cols` of them + gaps exactly fill the screen width —
+            // edge-to-edge, no centered side margins.
+            let edgeTileSize = (geo.size.width - tileGap * CGFloat(max(0, cols - 1))) / CGFloat(cols)
+            let rows = Int((geo.size.height + tileGap) / (edgeTileSize + tileGap)) + 1
+            let photos = viewModel.foodPhotos
 
             ZStack {
-                // Avatar grid pinned to top, clipped to screen bounds
-                VStack(spacing: avatarGap) {
+                // Animated food-photo tile grid, pinned to the top and clipped
+                // to the screen. Mirrors Android SplashScreen's AnimatedFoodTile
+                // grid: rounded tiles with a staggered cross-fade.
+                VStack(spacing: tileGap) {
                     ForEach(0..<rows, id: \.self) { row in
-                        HStack(spacing: avatarGap) {
+                        HStack(spacing: tileGap) {
                             ForEach(0..<cols, id: \.self) { col in
-                                let idx = row * cols + col
-                                if idx < pics.count {
-                                    AvatarCircle(url: pics[idx])
-                                }
+                                FoodPhotoTile(
+                                    photos: photos,
+                                    tileIndex: row * cols + col,
+                                    numCols: cols,
+                                    alpha: Self.tileAlpha(row: row, col: col),
+                                    size: edgeTileSize
+                                )
                             }
                         }
                     }
@@ -51,54 +47,51 @@ struct SplashView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .clipped()
 
-                // Gradient fades the collage into the background
+                // Full-height gradient: food tiles peek through at the top,
+                // the centered logo and sign-in buttons stay readable.
                 LinearGradient(
-                    colors: [.clear, Color.wispBackground],
-                    startPoint: UnitPoint(x: 0.5, y: 0.25),
-                    endPoint: UnitPoint(x: 0.5, y: 0.72)
+                    stops: [
+                        .init(color: .clear, location: 0.00),
+                        .init(color: .clear, location: 0.30),
+                        .init(color: splashBG.opacity(0.50), location: 0.50),
+                        .init(color: splashBG.opacity(0.88), location: 0.72),
+                        .init(color: splashBG, location: 1.00),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
 
-                // Logo, title, and action buttons pinned to bottom.
-                //
-                // The whole stack is held hidden until `actionsVisible`
-                // flips. The home indicator's safe-area inset settles
-                // during the first ~400ms of the launch / presentation
-                // animation, shifting whatever is anchored to the bottom
-                // edge as it does. Hiding everything (not just the
-                // buttons) means the user never sees the in-flight shift
-                // — only the final, stable layout.
+                // Centered logo + wordmark + tagline, sign-in buttons below.
+                // Matches Android's splash composition (logo with radial glow,
+                // wordmark, tagline, then buttons).
                 VStack(spacing: 0) {
                     Spacer()
 
                     AnimatedLogo()
 
-                    Text("Zap Cooking")
-                        .font(.system(size: 40, weight: .medium))
+                    Image("ZcWordmark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 240, maxHeight: 32)
+                        .padding(.top, 16)
+
+                    Text("Food is Open Source")
+                        .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
+                        .padding(.top, 10)
 
-                    if let online = viewModel.onlineCount {
-                        OnlineCard(count: online)
-                            .padding(.top, 16)
-                    }
+                    Spacer()
 
-                    Spacer().frame(height: 32)
-
-                    VStack(spacing: 16) {
-                        // Continue with Apple is the cloud key-recovery
-                        // path (iCloud Keychain + PIN). Gated on
+                    VStack(spacing: 10) {
+                        // Continue with Apple is the cloud key-recovery path
+                        // (iCloud Keychain + PIN). Gated on
                         // `AppleAuthConfig.isConfigured` (SIWA entitlement
-                        // present in this build). If iCloud isn't signed
-                        // in, AppleAuthView surfaces a friendly error after
-                        // tap — not a silent no-op.
-                        VStack(spacing: 8) {
-                            if AppleAuthConfig.isConfigured {
-                                ContinueWithAppleButton(action: onContinueWithApple)
-                            }
+                        // present in this build). If iCloud isn't signed in,
+                        // AppleAuthView surfaces a friendly error after tap.
+                        if AppleAuthConfig.isConfigured {
+                            ContinueWithAppleButton(action: onContinueWithApple)
                         }
 
-                        // Slightly larger gap before the Nostr button so
-                        // Apple recovery and the protocol-native option
-                        // read as distinct choices.
                         ContinueWithNostrButton(action: onContinueWithNostr)
                     }
                 }
@@ -107,26 +100,32 @@ struct SplashView: View {
                 .opacity(actionsVisible ? 1 : 0)
                 .allowsHitTesting(actionsVisible)
             }
-            // Lock the inner content to the height observed on first
-            // layout. After that point, safe-area inset transitions can no
-            // longer change the inner frame's bottom edge, so the
-            // bottom-anchored content stays put.
-            .frame(width: geo.size.width, height: height)
-            .onAppear {
-                if lockedHeight == nil { lockedHeight = geo.size.height }
-            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .background(Color.wispBackground)
+        .background(splashBG)
         .ignoresSafeArea()
         .task {
-            // Hold the bottom stack hidden until the screen has fully
-            // settled. 1.8s covers the launch animation, the home
-            // indicator inset stabilising, and any subsequent safe-area
-            // transitions — every shift happens behind a 0-opacity curtain.
+            // Hold the content hidden until the screen has settled (the home
+            // indicator's safe-area inset shifts during the first ~400ms of
+            // presentation); every shift happens behind a 0-opacity curtain.
             try? await Task.sleep(for: .milliseconds(1800))
             withAnimation(.easeOut(duration: 0.35)) { actionsVisible = true }
         }
-        .onDisappear { viewModel.cancel() }
+        // NOTE: the food-photo fetch is intentionally NOT cancelled on
+        // disappear — it runs to completion so the 24h cache populates even
+        // if the user logs in quickly. The view model is retained by the
+        // fetch task until it finishes.
+    }
+
+    /// Per-tile wash alpha, matching Android's `TILE_ALPHAS` table — subtle so
+    /// the grid reads as a textured backdrop, not a foreground collage.
+    private static let tileAlphas: [Double] = [
+        0.10, 0.06, 0.14, 0.08, 0.12, 0.05, 0.16, 0.07, 0.11, 0.09,
+        0.13, 0.07, 0.09, 0.15, 0.06, 0.11, 0.08, 0.14, 0.10, 0.12,
+    ]
+
+    private static func tileAlpha(row: Int, col: Int) -> Double {
+        tileAlphas[(row * 3 + col * 7) % tileAlphas.count]
     }
 }
 
@@ -215,55 +214,56 @@ private struct NostrOstrichIcon: View {
     }
 }
 
-private struct AvatarCircle: View {
-    let url: String
+/// One rounded, cross-fading food-photo tile. Mirrors Android's
+/// `AnimatedFoodTile`: a rounded square that holds one photo at a time and
+/// fades to another on a staggered timer, so the grid gently shuffles instead
+/// of feeling static.
+private struct FoodPhotoTile: View {
+    let photos: [String]
+    let tileIndex: Int
+    let numCols: Int
+    let alpha: Double
+    let size: CGFloat
+
+    @State private var displayURL: String?
 
     var body: some View {
-        if url.isEmpty {
-            Circle()
-                .fill(Color.wispSurfaceVariant)
-                .frame(width: avatarSize, height: avatarSize)
-        } else {
-            AsyncImage(url: URL(string: url)) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    Circle().fill(Color.wispSurfaceVariant)
-                default:
-                    Circle().fill(Color.wispSurfaceVariant)
+        RoundedRectangle(cornerRadius: tileRadius, style: .continuous)
+            .fill(Color.white.opacity(alpha))
+            .frame(width: size, height: size)
+            .overlay {
+                if let displayURL, let url = URL(string: displayURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Color.clear
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: tileRadius, style: .continuous))
+                    .transition(.opacity)
                 }
             }
-            .frame(width: avatarSize, height: avatarSize)
-            .clipShape(Circle())
-        }
-    }
-}
-
-private struct OnlineCard: View {
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color(red: 0x4C/255.0, green: 0xAF/255.0, blue: 0x50/255.0))
-                .frame(width: 8, height: 8)
-            Text("\(formatCount(count)) people online now")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color.wispSurface, in: RoundedRectangle(cornerRadius: 24))
+            .clipped()
+            // Restart cycling whenever the photo set changes (cache load → fetch).
+            .task(id: photos) { await cycle() }
     }
 
-    private func formatCount(_ n: Int) -> String {
-        switch n {
-        case 1_000_000...: String(format: "%.1fM", Double(n) / 1_000_000)
-        case 1_000...: String(format: "%.1fk", Double(n) / 1_000)
-        default: "\(n)"
+    private func cycle() async {
+        guard !photos.isEmpty else { displayURL = nil; return }
+        // Spread starting photos so adjacent tiles don't share an image.
+        let start = (tileIndex * 7 + (tileIndex / max(1, numCols)) * 13) % photos.count
+        displayURL = photos[start]
+        guard photos.count > 1 else { return }
+        var idx = start
+        // Stagger the first swap so tiles don't all flip at once.
+        try? await Task.sleep(for: .milliseconds((tileIndex * 371) % 8000))
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(2500 + (tileIndex * 197) % 3500))
+            if Task.isCancelled { break }
+            idx = (idx + 1) % photos.count
+            withAnimation(.easeInOut(duration: 0.7)) { displayURL = photos[idx] }
         }
     }
 }
@@ -273,13 +273,23 @@ private struct AnimatedLogo: View {
     @State private var sway = false
 
     var body: some View {
-        Image("WispLogo")
+        Image("ZcLogo")
             .resizable()
             .scaledToFit()
-            .frame(width: 96, height: 96)
+            .frame(width: 88, height: 88)
+            .background(
+                // Radial glow so the logo reads against the food collage,
+                // matching Android's `drawBehind` radial gradient.
+                RadialGradient(
+                    colors: [.black.opacity(0.85), .black.opacity(0.55), .black.opacity(0.15), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: 160
+                )
+                .frame(width: 300, height: 300)
+            )
             .offset(y: bob ? -8 : 0)
             .rotationEffect(.degrees(sway ? 3 : -3))
-            .shadow(color: .black.opacity(0.6), radius: 30, y: 10)
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                     bob = true
