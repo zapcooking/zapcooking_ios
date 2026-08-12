@@ -215,6 +215,7 @@
 		4CFF98010000000000000002 /* Nip98HeaderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000002 /* Nip98HeaderCache.swift */; };
 		4CFF99010000000000000001 /* RecipeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000001 /* RecipeParser.swift */; };
 		4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000002 /* RecipeSerializer.swift */; };
+		4CFF9A010000000000000002 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9A000000000000000002 /* FeatureFlags.swift */; };
 		4CFF99010000000000000003 /* IngredientScaler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000003 /* IngredientScaler.swift */; };
 		4CFF99010000000000000004 /* RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000004 /* RecipeFormat.swift */; };
 		4CFF99010000000000000005 /* RecipeFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000005 /* RecipeFormats.swift */; };
@@ -557,6 +558,7 @@
 		4CFF98000000000000000002 /* Nip98HeaderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98HeaderCache.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000001 /* RecipeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeParser.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000002 /* RecipeSerializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeSerializer.swift; sourceTree = "<group>"; };
+		4CFF9A000000000000000002 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000003 /* IngredientScaler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngredientScaler.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000004 /* RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormat.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000005 /* RecipeFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormats.swift; sourceTree = "<group>"; };
@@ -881,6 +883,7 @@
 				4CFFAA0000000000000A0002 /* Haptics.swift */,
 				4CFF99000000000000000001 /* RecipeParser.swift */,
 				4CFF99000000000000000002 /* RecipeSerializer.swift */,
+				4CFF9A000000000000000002 /* FeatureFlags.swift */,
 				4CFF99000000000000000003 /* IngredientScaler.swift */,
 				4CFF99000000000000000004 /* RecipeFormat.swift */,
 				4CFF99000000000000000005 /* RecipeFormats.swift */,
@@ -1386,6 +1389,7 @@
 				4CFFAA0100000000000A0002 /* Haptics.swift in Sources */,
 				4CFF99010000000000000001 /* RecipeParser.swift in Sources */,
 				4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */,
+				4CFF9A010000000000000002 /* FeatureFlags.swift in Sources */,
 				4CFF99010000000000000003 /* IngredientScaler.swift in Sources */,
 				4CFF99010000000000000004 /* RecipeFormat.swift in Sources */,
 				4CFF99010000000000000005 /* RecipeFormats.swift in Sources */,
