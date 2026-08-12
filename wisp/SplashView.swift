@@ -72,8 +72,8 @@ struct SplashView: View {
 
                     AnimatedLogo()
 
-                    Text("wisp")
-                        .font(.system(size: 56, weight: .medium))
+                    Text("Zap Cooking")
+                        .font(.system(size: 40, weight: .medium))
                         .foregroundStyle(.white)
 
                     if let online = viewModel.onlineCount {
