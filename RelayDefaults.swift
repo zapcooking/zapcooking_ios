@@ -31,7 +31,7 @@ enum RelayDefaults {
     nonisolated static let fallbacks: [String] = [
         "wss://relay.primal.net",
         "wss://nos.lol",
-        "wss://relay.nostr.band"
+        "wss://relay.nostr.net"
     ]
 
     /// Bootstrap relay set used at first-launch / sign-up — wider than `indexers`
@@ -43,5 +43,57 @@ enum RelayDefaults {
         "wss://nos.lol",
         "wss://indexer.nostrarchives.com",
         "wss://relay.primal.net"
+    ]
+
+    // MARK: - Zap Cooking role-based sets (build spec §2 "Relays")
+    //
+    // These are ROLE sets, not a single flattened pool. Android's CLAUDE.md is
+    // explicit (and the spec carries the rule): these sets are NOT supersets of
+    // each other — each carries its own membership. Do not merge them, and do
+    // not collapse `articles` onto `indexers`/`default`. `indexers` above stays
+    // the kind-0 / kind-3 / kind-10002 discovery pool and is NOT one of these.
+
+    /// `default` — the core read/write relays a fresh account talks to. Also
+    /// the fallback union for surfaces that don't need a specific role.
+    nonisolated static let defaults: [String] = [
+        "wss://nos.lol",
+        "wss://relay.primal.net",
+        "wss://relay.nostr.net"
+    ]
+
+    /// `members` — the Pantry, `wss://pantry.zap.cooking`. NIP-42 auth-gated;
+    /// used for Nourish reads (kind 30078) and as a mirror target for recipe
+    /// publishes. Reads here REQUIRE the subscribe-path AUTH fix (issue #6) —
+    /// without it pantry reads silently return empty.
+    nonisolated static let members: [String] = [
+        "wss://pantry.zap.cooking"
+    ]
+
+    /// `discovery` — food/content discovery (trend, exploration). Distinct from
+    /// `indexers` (which is for kind-0/3/10002 author discovery) and from
+    /// `articles` (the recipe read union).
+    nonisolated static let discovery: [String] = [
+        "wss://nostr.wine",
+        "wss://relay.primal.net",
+        "wss://purplepag.es"
+    ]
+
+    /// `profiles` — the canonical profiles relay other clients write kind-0 to
+    /// for cross-client discovery. Single relay by design.
+    nonisolated static let profiles: [String] = [
+        "wss://purplepag.es"
+    ]
+
+    /// `articles` — the **recipe** read union. Recipes are kind-30023 on the
+    /// PUBLIC article relays, NOT on Pantry (build spec §2). Treat as a union
+    /// — coverage is uneven (`nostr.wine` has probed at 0), so recipe reads fan
+    /// out across the whole set and dedupe by addressable coordinate. Adding
+    /// Pantry here would NOT help recipe loading and would add an auth hurdle.
+    nonisolated static let articles: [String] = [
+        "wss://relay.primal.net",
+        "wss://nos.lol",
+        "wss://nostr.wine",
+        "wss://eden.nostr.land",
+        "wss://relay.noswhere.com"
     ]
 }
