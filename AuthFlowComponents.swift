@@ -27,8 +27,8 @@ struct AuthFlowHeader: View {
                 .scaledToFit()
                 .frame(width: 96, height: 96)
                 .shadow(color: .black.opacity(0.6), radius: 30, y: 10)
-            Text("wisp")
-                .font(.system(size: 36, weight: .medium))
+            Text("Zap Cooking")
+                .font(.system(size: 30, weight: .medium))
                 .foregroundStyle(.white)
         }
     }

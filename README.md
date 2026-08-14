@@ -1,14 +1,14 @@
-# Wisp
+# Zap Cooking
 
-A minimal, performant iOS client for the [Nostr](https://nostr.com) protocol. Built natively with SwiftUI, Wisp prioritizes decentralization, intelligent relay routing, strong privacy, and a clean native experience across iPhone, iPad, and Apple Vision Pro.
+A food-first iOS client for [Nostr](https://nostr.com) — recipes, cooking, and the foodstr community, built natively with SwiftUI. Zap Cooking is a fork of [Wisp](https://github.com/barrydeen/wisp-ios) (MIT, © Barry Deen); it inherits Wisp's production Nostr plumbing and layers a food experience on top.
 
-> **Status:** v1.0 — initial release; actively developed.
+> **Status:** in-progress fork. The Nostr foundation — Spark wallet, NIP-57 zaps, NIP-17 DMs, NIP-65 outbox routing, NIP-42 AUTH, on-device spam filtering, ObjectBox cache, Apple iCloud Keychain recovery — is inherited from Wisp and ships as-is. The food layer (recipes, Sous Chef, Nourish, Cheffy, OnlyFood) is under active development. See [`ZAPCOOKING_IOS_BUILD.md`](ZAPCOOKING_IOS_BUILD.md) (the system of record) and [`PORT_ROADMAP.md`](PORT_ROADMAP.md) (living status).
 
 ---
 
 ## Table of Contents
 
-- [Why Wisp](#why-wisp)
+- [Why Zap Cooking](#why-zap-cooking)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Supported NIPs](#supported-nips)
@@ -20,11 +20,11 @@ A minimal, performant iOS client for the [Nostr](https://nostr.com) protocol. Bu
 
 ---
 
-## Why Wisp
+## Why Zap Cooking
 
-Most Nostr clients treat relays as interchangeable dumb pipes and lean on a small handful of "mega-relays." Wisp takes a different approach — it implements the full outbox/inbox relay model with reliability scoring, routes messages based on where users actually publish and read, and is built so that decentralization is the default path, not an opt-in.
+Zap Cooking puts food first. It inherits Wisp's full outbox/inbox relay model with reliability scoring — routing messages based on where users actually publish and read, so decentralization is the default path, not an opt-in — and focuses it on cooking: recipes as kind-30023 long-form posts, a food-tag social feed (foodstr), AI recipe import (Sous Chef), nutrition scoring (Nourish), and a kitchen companion (Cheffy).
 
-The result is faster event delivery, less wasted bandwidth, and a client that actively reinforces the architecture Nostr was designed for. Wisp is built to be fast, lightweight, and respectful of both your device and the relay network — and it ships natively for iPhone, iPad, and Apple Vision Pro from a single Swift codebase.
+The result is faster event delivery, less wasted bandwidth, and a client that actively reinforces the architecture Nostr was designed for — built natively for iPhone, iPad, and Apple Vision Pro from a single Swift codebase.
 
 ---
 
@@ -117,7 +117,7 @@ A built-in non-custodial Lightning wallet powered by [Breez SDK (Spark)](https:/
 
 ### Additional Features
 
-- **Tab-based navigation** with declarative routing per tab — Home, Wallet, Search, Messages, Notifications
+- **Food-first tab navigation** with declarative routing per tab — Recipes, Only Food, Search, My Kitchen, Notifications (Wallet and Messages live in the sidebar drawer; the general Nostr feed is a drawer destination)
 - **Sidebar drawer** for account switching, settings, and quick navigation
 - **Thread view** with NIP-10 root/reply resolution
 - **Notifications** aggregating mentions, reactions, zaps, and reposts
@@ -243,7 +243,7 @@ Also: **Blossom** media servers, **NWC** transport, and **bolt11** invoice parsi
 
 ### Requirements
 
-- iOS 26.4 / iPadOS 26.4 / visionOS 26.4 or later
+- iOS 18.0 / iPadOS 18.0 / visionOS 26.4 or later
 - A Nostr keypair (generate one in-app, or import an existing `nsec`)
 
 ### Installation
@@ -272,8 +272,8 @@ TestFlight and App Store availability will be announced on the [Releases](../../
 
 ```bash
 # Clone the repository
-git clone https://github.com/barrydeen/wisp-ios.git
-cd wisp-ios
+git clone https://github.com/zapcooking/zapcooking_ios.git
+cd zapcooking_ios
 
 # Open in Xcode
 open wisp.xcodeproj
@@ -357,7 +357,7 @@ Contributions are welcome. Wisp is open source and community help makes it bette
 |-----------|-----------|
 | Language | Swift 5 |
 | UI Framework | SwiftUI + Observation framework |
-| Platforms | iOS 26.4+, iPadOS 26.4+, visionOS 26.4+ |
+| Platforms | iOS 18.0+, iPadOS 18.0+, visionOS 26.4+ |
 | Networking | `URLSessionWebSocketTask` (Foundation) |
 | Persistence | ObjectBox (selective event store + dedicated group store), iOS Keychain (keys), UserDefaults (per-account prefs), per-account SQLite (social graph) |
 | Cryptography | [`swift-secp256k1`](https://github.com/21-DOT-DEV/swift-secp256k1) (Schnorr / ECDH), in-tree NIP-44 v2 (ChaCha20 + HMAC-SHA256), in-tree BIP-39 |
@@ -370,7 +370,7 @@ Contributions are welcome. Wisp is open source and community help makes it bette
 
 ## License
 
-Wisp is released under the [MIT License](LICENSE).
+Zap Cooking is released under the [MIT License](LICENSE), inherited from Wisp.
 
 ```
 MIT License
