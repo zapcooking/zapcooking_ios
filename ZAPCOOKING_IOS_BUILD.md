@@ -427,6 +427,7 @@ Rules that follow from it, and are **not negotiable in v1**:
 | **0-E** | **Tab architecture.** Wisp is 5 tabs: home / wallet / search / messages / notifications. Food-first needs Recipes and Kitchen. Proposal: **Recipes / OnlyFood / Search / Kitchen / Notifications**, with Wallet and Messages moving into the sidebar drawer. This also reduces §4.2 zap surface area. | Every route lands somewhere |
 | **0-F** | **Zaps-on-posts** ship-or-flag (§4.2) | Kill switch must exist before the flag is needed |
 | **0-G** | **Moot / struck.** Google Sign-In was removed from iOS (Concern 0.2), so no Google Cloud iOS OAuth client is needed. Remaining open piece under this number if reused later: Apple **release + distribution certs** only. | — |
+| **0-H** | ✅ **RULED (Seth, Aug 9): *"DMs should be open to any relay."*** Resolves all three parts — **(a) no**, we do not publish a kind-10050 on a member's behalf; **(b) moot**, there is no default value because there is no default list; **(c) moot**, nothing to reschedule. Publishing a kind-10050 *is* the act of narrowing a member's DM delivery to a named relay set, so "open to any relay" is the state of not having one. The member keeps the capability — `RelaySettingsView` already adds and broadcasts DM relays on their instruction (`:286`) — we simply stop guessing on their behalf. **Build spec: Concern 0.8.** *Reading note, correct me in one word if wrong:* the ruling could instead have meant "widen our DM read subscription to every relay." I did not take that reading — `MessagesViewModel:113-119` documents why the read set is bounded (an unbounded `kind:1059` REQ pinned open on every relay floods the main actor and starves the shared connection pool), and the ruling answers the seeding question that was on the table. **The definition and evidence below stand as the record of why.** ⤵<br><br>This is **not** a client-side constant. The app **signs and publishes a replaceable kind-10050 into the member's own account**, once per account, from `RelaySettingsRepository.ensureDmRelayList` (`:113-153`), reached at every launch via `MainView.swift:343` → `bootstrap`. A kind-10050 is cross-client and supersedes by `created_at`, so whatever we write there is where **every** Nostr client that member uses will route their DMs. Current value is the inherited Wisp constant `RelaySettingsRepository.defaultDmRelay = "wss://auth.nostr1.com"` (`:44`); its own NIP-11 (probed Aug 9) reads `auth_required: true`, `payment_required: false`, operator `7cc328a0…`, and describes itself as *"a 'DM Inbox Relay' running alpha software. By using it you can help us test the functionality."* **Three decisions, not one:** (a) do we publish a 10050 on the member's behalf **at all**, given DMs appear nowhere in §3's P0–P3 list; (b) if yes, **what value**; (c) **when** — at launch, as today, or at first use of Messages. **Prep's recommendation: (a) yes, (b) keep the inherited value for now, (c) move the seed to first use of Messages.** The record is permanent and cross-client, and today we write it before the member has opened Messages once. Deferring costs nothing until someone actually uses DMs, which is the moment it becomes true for them. **Pantry is not an available answer:** `rejectEventPolicy` falls through to "membership required" for kind 1059 (`member-relay relay/main.go:511-514` @ `06e70c8`), and the sender of a gift wrap AUTHs as an ephemeral key that is never a member — inbound DMs would be rejected. Two existing safeguards are sound and should survive any ruling: the seed runs at most once per account, and only on a **connectivity-confirmed** absence (`relaysResponded > 0`), so it cannot supersede a real list we merely failed to fetch. Watch-only accounts are already skipped (`:116`) — ties to **0-D**.<br><br>**Two publish paths, not one** *(Chief, Aug 9; verified).* `SignUpViewModel.finishProfileStep:357-360` also calls `addDmRelay(defaultDmRelay:)` during account creation. `addDmRelay` (`RelaySettingsRepository:237-243`) guards only on `normalize` and already-present — no once-flag, no connectivity check, no `dmRelays.isEmpty` gate — then publishes. It hits **every new account**, whereas `ensureDmRelayList` only fires for accounts that arrive without a 10050 (mostly imported keys). The silent-data-loss risk is nil on the signup path (a fresh key has no prior list), but any (c) ruling has to move **both** paths or it does not reach its own stated goal.<br><br>**The relay requires the *sender* to AUTH** *(Prep, Aug 9; probed).* Live probe of `wss://auth.nostr1.com` with a browser UA: the relay sends `["AUTH",<challenge>]` unprompted on connect, answers a pre-auth `REQ` with `CLOSED … "auth-required: you must auth"`, and answers a pre-auth `EVENT` with `OK false "auth-required: you must auth"` — returned **before** signature validation (the probe event carried an all-zero sig). So writes are gated too: a NIP-17 sender must complete NIP-42 with its **ephemeral** gift-wrap key to deposit into this inbox. **That is a design choice, not a defect** — read-AUTH keeps the member's gift-wrap `#p` index off public view, and write-AUTH is spam control. But it means the value we seed decides *whose client can reach our member*, and the failure is silent (`OK false` is a frame most clients never surface). **This is the substance of decision (b): deliverability vs. DM metadata privacy.** Either way it should not arrive as an inherited constant.<br><br>**Our own read path is not the exposure** *(Prep, Aug 9; answers Chief's issue #6 question).* Issue #6's four defects are in `GroupRelayPool`. The DM subscription does not use it — `MessagesViewModel.start:54` opens a persistent `RelayPool.subscribe`, which runs on `RelayConn`, and `RelayConn.receiveLoop` **does** handle NIP-42: it ignores a `CLOSED … auth-required` without tearing the sub down (`RelayPool.swift:593-596`) and re-issues every REQ after signing the challenge (`:603-611`). Against the frame order the probe actually observed — AUTH first, CLOSED second — that recovers. **Member DM reads are therefore not silently empty today, and #6's blast radius does not reach DMs.** Two bounded caveats: `RelayConn` shares #6's defect 2 in weaker form (recovery depends on the relay *volunteering* an AUTH frame, because the `auth-required` CLOSED branch waits rather than requesting one), and a watch-only account never AUTHs, so its DM subscription closes silently — ties to **0-D**. Verified by source read plus relay probe, not by running the app.<br><br>**Publishing nothing is not total unreachability.** `MessagesViewModel.resolveDmSubscriptionRelays:120-134` already unions the member's kind-10050 relays with their NIP-65 **read** relays, precisely so we catch copies a sender deposited in the NIP-65 inbox because they could not find a 10050. On our own read side we lose nothing by not seeding. Both options make reachability a property of the *sender's* client — one needs them to AUTH, the other needs them to fall back to NIP-65 — but only one of them writes a permanent record into the member's account. | ✅ **Closed Aug 9.** Build is **Concern 0.8** — three deletions, two fallbacks, one UI guard and one string; it is *not* a pure deletion (see 0.8). Blocks nothing, but the seed is **live in every build today**, so this lands before first TestFlight alongside issue #1. |
 
 ---
 
@@ -471,6 +472,13 @@ all is still an **open decision**.
 (pantry), `discovery`, `profiles`. Keep `RelayDefaults.indexers` as discovery —
 do not merge them (Android's CLAUDE.md is explicit: these sets are not supersets
 of each other).
+**Not blocked on Gate 0-H** (Prep, Aug 9 — overridable). These four are
+client-side read-fanout constants. A DM inbox relay is a different kind of
+thing: a signed kind-10050 in the *member's* account, not our routing config.
+No 0-H outcome changes any of the four values. If a fifth `dm` role is wanted
+in the enum it can point at the existing `RelaySettingsRepository.defaultDmRelay`
+(`:44`) without knowing the ruling — the enum's shape does not depend on it.
+0.4 can start now.
 
 **Concern 0.5 — Branding.** App name, theme (brand primary `#ec4700` /
 `#ff5722`, danger `#dc2626`/`#ef4444`, ported from web `src/app.css` and
@@ -488,6 +496,259 @@ vs general client, error mapping (401 → sign-in, 403 → members-only, 429 →
 rate limit, `{ok:false}`-on-200 → error), and the response models.
 Start with `getPublicMembership` + `checkMembershipStatus` only.
 
+**Concern 0.8 — Stop seeding a DM inbox relay (Gate 0-H).** *Spec Prep, Aug 9,
+verified at `654e4e4`; casualty analysis independently re-verified by Chief and
+extended, Aug 9. One PR. Lands before first TestFlight, with issue #1.*
+
+Seth ruled DMs open to any relay, so the app stops publishing a kind-10050 on a
+member's behalf. **This is not a pure deletion**, and that is the part worth
+reading: `dmRelays` is not only the DM inbox — it is also the delivery address
+for DIP-03 private zaps and private reactions. `RelaySettingsRepository.shared
+.dmRelays` is read at **eleven call sites across nine files** — five on the
+send side (`ZapSender:90`, `ZapSheet:171`, `DmReactionPublisher:107`,
+`PrivateReplyPublisher:57`, `PrivateReactionPublisher:33`), five on the read
+side (`MessagesViewModel:125`, `DmConversationViewModel:123` and `:497`,
+`NotificationsViewModel:609` via its own kind-10050 query, `RelaySettingsView
+:261`), and one in the repository's own broadcast path (`:402`). Three of the
+five send-side consumers already fall back correctly when it is empty and say
+so in their own comments; **two do not**, and the seed was hiding that. Delete
+the seed without them and two features go dark for every member on the same
+commit.
+
+*Delete:*
+- `RelaySettingsRepository.ensureDmRelayList` (`:113-153`) and its call from
+  `bootstrap` (`:100`); the `dmAutoSeedKey` helper (`:155`) goes with it.
+- `SignUpViewModel.finishProfileStep:357-360` — the `addDmRelay` call — and the
+  now-unused `wispDmRelay` constant (`:139`).
+- `RelaySettingsRepository.defaultDmRelay` (`:44`). Those three were its only
+  consumers, so **the app ends up with no default DM relay anywhere**, which is
+  the ruling stated as code.
+
+*Keep:* `addDmRelay` (`:296` add path) / `removeDmRelay` (`RelaySettingsView
+:296`) / `broadcastDm` (`:305`) — member-initiated. The ruling removes our
+guess, not their control. **One of the three needs a UI guard the seed was
+providing for free — see "The fourth publish path" below.**
+
+*The fourth publish path — the one the ruling itself opens* (Chief, Aug 9;
+re-verified by Prep at source, Aug 9). `publishDm` (`RelaySettingsRepository
+:398-409`) has **no empty guard**: `Nip51Lists.buildRelaySetListTags([])` is a
+`compactMap` over the input (`:156-158`), so an empty list yields `[]` tags and
+the repository **signs and publishes a kind-10050 carrying zero relay tags** at
+`max(dmUpdatedAt + 1, now)`. Three callers: `addDmRelay` (non-empty by
+construction), `removeDmRelay`, and `broadcastDm:253` — which is the
+**"Broadcast DM Relays"** button (`RelaySettingsView:113`, label `:270`, action
+`:305`), enabled, sitting on the DM tab. Today the seed guarantees a non-empty
+list, so the button cannot do this. **After 0.8, empty is every member's
+default state, so the first tap of a button that looks inert publishes a
+permanent, superseding, cross-client record saying their DM inbox list is
+empty** — the act the ruling forbids, reached through the UI instead of the
+bootstrap.
+
+Two things sharpen it, both checked rather than assumed:
+
+- **Where it goes.** `publish(...)` targets `Set(topWriteRelays + Self
+  .indexerRelays + extraRelays)` (`:435`). `extraRelays` is `dmRelays` — empty,
+  so it contributes nothing — but `RelaySettingsRepository.indexerRelays` is
+  `RelayDefaults.onboarding` (`:40`, **not** `RelayDefaults.indexers` despite
+  the name), which contains `indexer.coracle.social` and
+  `indexer.nostrarchives.com` alongside three high-volume general relays. So the
+  empty list lands **on indexer-grade relays** — precisely where another
+  client's kind-10050 lookup resolves.
+- **Why empty is plausibly worse than absent** (stated as a risk, not a
+  certainty). The whole reachability argument is that a sender deposits in the
+  NIP-65 inbox *because it could not find a kind-10050*. An empty one **is**
+  found. Whether a given client reads that as "no list, fall back" or as an
+  explicit empty answer is client-dependent, and it supersedes by `created_at`
+  — it cannot be unpublished, only replaced.
+
+**Ruled — hide the Broadcast button on the DM tab when `repo.dmRelays.isEmpty`;
+do not disable it.** A disabled control invites the member to work out how to
+enable it, and here there is nothing to enable; the same button is enabled one
+tab over, so a greyed-out one reads as a defect rather than as an honest
+"nothing to broadcast." Nothing is lost by hiding it: `addDmRelay` already
+publishes on add (`:243`), so Broadcast only ever re-announces an existing list.
+**Scope the hide to the Button at `:113` only — not the Section at `:110`**,
+which also contains "Sync Relay List (NIP-65)" (`:120-149`); that one is useful
+on every tab in every state, and a sloppy read of this instruction takes it out.
+
+*`removeDmRelay` stays unguarded, and that is deliberate* — a member deleting
+their last DM relay is instructing us to publish that. Guarding both is the
+tempting symmetric fix and it breaks the one that is correct. Same shape as the
+migration ruling: surface it, never rewrite it.
+
+*General / Search / Blocked share the missing `publishXxx` empty guard and stay
+out of 0.8* — none of them becomes an everyone-default state, so for those three
+an empty list still only arrives by member instruction. Recorded so the
+asymmetry reads as a decision rather than an oversight.
+
+*Fallbacks the deletion requires (both make "no kind-10050" a supported state,
+which today it only half is):*
+- `ZapSheet.privateZapAvailable:171` returns false when `dmRelays.isEmpty`, so
+  the `.private` zap type is filtered out of `availableZapTypes` — **private
+  zaps would vanish from the UI for everyone.** It also already contradicts
+  `ZapSender:87-98`, which explicitly refuses to refuse ("never refuse to send
+  when they're empty") and falls back to NIP-65 write + scoreboard. The sheet's
+  own doc comment states the premise — *"so the user never selects an option
+  that's guaranteed to fail at send time"* — and that premise is **false today,
+  before 0.8 touches anything** (Chief, Aug 9). **Delete exactly one line, not
+  the guard.** `privateZapAvailable` has four conditions and three are correct
+  and load-bearing: `eventId == nil` (`ZapSender:78` really does return
+  `.nostrZapsNotSupported` for profile and a-tag stream zaps), `NostrKey.load()`
+  failing, and `Hex.decode(privkey) == nil` (remote signer / watch-only — DIP-03
+  needs the real privkey to sign the inner kind-9733). Only
+  `if RelaySettingsRepository.shared.dmRelays.isEmpty { return false }` comes
+  out. The sender is right about relays; the sheet is right about everything
+  else.
+- `PrivateReactionPublisher:33-34` hard-`guard`s on `!ownRelays.isEmpty` and
+  throws `noOwnRelays`, with **no fallback** — unlike its three siblings
+  (`PrivateReplyPublisher:57-65`, `DmReactionPublisher:105-110`,
+  `ZapSender:90-98`), each of which falls back to NIP-65 write relays and
+  carries a comment explaining why. Port the same fallback verbatim — **and
+  port the line above it too.** `PrivateReplyPublisher:56` and
+  `DmReactionPublisher:106` both call
+  `RelaySettingsRepository.shared.ensureLoaded(pubkey:)` before reading
+  `dmRelays`; `PrivateReactionPublisher` does not. That is a **second,
+  pre-existing defect on the same line**: a member who *has* a kind-10050 list
+  can still hit the throw when the repository has not yet loaded from disk.
+  Copying only the fallback fixes the 0.8 casualty and leaves that one live.
+
+*Verified NOT casualties (do not "fix" these):* `MessagesViewModel:120-134`
+and `DmConversationViewModel.resolveOwnRelays:495-501` already union DM with
+NIP-65 read.
+
+`NotificationsViewModel:609-611` is the one that will look like a receive-side
+regression and is not — **it is in this list because it is the most plausible
+false positive in the change, and someone will "fix" it in six months** (Chief,
+Aug 9; verified at source). It gates `subDmZaps` on `!dmRelays.isEmpty`, and
+its own comment says the per-event engagement subscription never queries DM
+relays, so it reads like the only path by which a member sees an incoming
+private zap. Two things have to hold, and both do:
+
+- **Delivery.** `f4` is `kinds:[9735] pTags:[pubkey]` — the same event class as
+  `f1` (`:552`), differing only in relay set. After 0.8 a private-zap sender
+  hits `ZapSender:86-98` and falls back to the recipient's NIP-65 **read**
+  relays, and `notifRelays` (`:331-336`) is built from those same read relays.
+  The receipt lands where `f1` is already listening and `subDmZaps` correctly
+  goes dormant. **The same fallback chain that makes the ruling work covers the
+  receive side.** Same for `fanInZapReceiptToEngagement` (`:627`, called only on
+  the `f4` handler): the engagement subscription queries the target author's
+  read relays, which is now where the receipt is.
+- **Classification**, which "same event class" does *not* by itself buy. `f4`
+  ingests with `isFromDmRelay: true` (`:617`), `f1` with `false` (`:559`), and
+  that flag feeds `isPrivateZap: isPrivate || isFromDmRelay`
+  (`NotificationRepository:550`). It survives because `isPrivate` is decoded
+  from the receipt, not inferred from the relay: `classifyZap:532` takes it from
+  `Nip57.resolveZapSender(...)`, and our own sender always publishes DIP-03 for
+  private zaps (`ZapSender:75-88`). A private zap still renders as private.
+
+*Residue, one line so nobody restores it thinking it still does something:*
+`NotificationRepository:527-529` keeps `isFromDmRelay` as a defensive fallback
+for **legacy** receipts from the pre-DIP-03 homegrown private-zap path, which
+carry no `isPrivate` signal of their own. After 0.8 `dmRelays` is empty by
+default, so `f4` never opens and that fallback is structurally dead. Accepted:
+the population is non-DIP-03 clients, iOS has not shipped, and such a receipt
+would have been deposited on a DM relay we no longer subscribe to anyway.
+
+*Pre-existing, not introduced by 0.8, recorded so it is not discovered as a
+surprise* (Chief): `notifRelays = Array(combined.prefix(10)).sorted()` where
+`combined` is a **Set** — it takes ten in hash order and *then* sorts, so which
+read relays survive the cap is nondeterministic. The coverage argument above
+holds in the common case and rests on that cap.
+
+*One string, Growth's — and it is one string serving four surfaces.*
+`RelaySettingsView:73` is `Text("No \(tab.rawValue.lowercased()) relays yet")`,
+interpolated across **general / dm / search / blocked** (`currentUrls:258-265`).
+Rewriting it for the DM case rewrites the other three, so the work is either a
+dm-specific branch or copy that reads correctly for all four tabs. After this
+ruling the dm empty state is **every member's default state**, not an edge case,
+and must not read as though DMs are broken. Two constraints from the surrounding
+view, both checkable:
+
+- The add-relay field sits **above** the empty state (`:57`), so the affordance
+  already exists — the string does not need to teach the member how to add one.
+- That field is `.disabled(keypair.isWatchOnly)` at 0.4 opacity (`:63-64`), so
+  **the same empty state renders with and without a usable exit.** Copy that
+  says "add one" is false for watch-only accounts. Ties to **0-D**.
+- Fixes the lowercased-enum rendering ("No dm relays yet") on the way through.
+
+**Copy delivered (Growth, Aug 9) — split accepted, one clause held.**
+
+*Structure — ruled, build to this.* Branch the DM case out of the shared
+interpolation rather than stretching one template over four tabs. Growth's
+reason is the right one and it is the same rule the Android settings row came
+down on: **general / search / blocked all mean "not set up yet," which is a
+correct to-do reading for them; after 0-H, dm empty is the intended steady
+state.** One template cannot carry both truths — soften it enough to be honest
+for dm and it goes vague for the other three.
+
+- **General / Search / Blocked — unchanged:** `"No \(tab) relays yet"`.
+- **DM — static, no interpolation. FINAL, ship this literal:**
+
+```swift
+"No DM relays set. We look for your messages on the General relays you read from."
+```
+
+*Locked by Growth, Aug 9 (`b9773ad4`), after two amendments it survived. Both
+are recorded because each one killed a version that read as finished:*
+
+1. **"regular relays" → "General relays."** `Tab.general` has raw value
+   `"General"` (`:18`) and is rendered as a literal segment in the picker two
+   lines above the empty state (`:37`). "Regular" is a term that exists nowhere
+   in the app; it came from Prep's prose, not from the product.
+2. **No reachability claim, and no whole-General-list implication.** *"You're
+   still reachable"* is a claim about **other people's clients** — whether a
+   NIP-17 sender deposits in the NIP-65 inbox depends on that sender falling
+   back when it finds no kind-10050, and some refuse to send at all. We have
+   not measured the distribution and must not imply one. The replacement then
+   overclaimed one notch narrower: `resolveDmSubscriptionRelays:120-134` unions
+   `dmRelays` with `RelayListRepository.getReadRelays(pubkey)` — the
+   **read-marked** subset — and its own comment says it deliberately does not
+   union the whole general list (an unbounded `kind:1059` REQ pinned open on
+   every relay floods the main actor). "Your General relays" is therefore false
+   for any relay the member has marked write-only. The shipped wording asserts
+   only what **we** do, verifiable at `MessagesViewModel:120-134`, and still
+   answers the only question the member is asking ("am I broken?").
+
+*Superseded draft — do not pick this up* (`e98694e7`, 15:56:51, composed before
+the resolution and posted after it): *"No DM relays added — your messages
+already send fine using your regular relays."* It regresses on both amendments
+at once — "already send fine" is the reachability claim, "regular relays" is the
+word that was wrong twice. Recorded here because a superseded draft that reads
+like a finished recommendation is exactly what gets found six months later.
+
+*Antecedent verified:* the "General relays" referent exists for new accounts —
+`SignUpViewModel:402` publishes a kind-10002 at signup.
+
+*Two residues on the string, both accepted, neither a fix* (Prep, Aug 9, at
+source):
+
+- **"the General relays you read from" is not the set in one case, and it fails
+  in the safe direction.** `getReadRelays:38-43` is not a pure read-marked
+  filter — when the read list is empty it **falls back to write relays**
+  ("so that anyone who follows them still has a chance"). A member who has
+  turned the `read` chip off on every relay (`RelaySettingsView:216-220`,
+  reachable from our own UI) therefore reads a sentence naming an empty set
+  while we are in fact searching their write relays. It **underclaims** rather
+  than overclaims — it never promises coverage we do not have — and the state is
+  deliberate and self-inflicted. Not worth a second branch.
+- **The chips the sentence points at are on a different tab.** `relayRow` renders
+  the read/write chips only when `tab == .general` (`:215`), so a member reading
+  the DM empty state has to switch tabs to check the claim. Checkable, one tap
+  away, not on-screen.
+
+*Correction to the flagged 0-D edge case — it does not exist as stated.* "A
+member with no read-marked general relay has no coverage at all" is false for
+the reason above: `getReadRelays` cross-falls back to write. The genuine
+zero-coverage account is one with **no kind-10002 at all**, which is degraded in
+every direction rather than only in DMs, and is already recorded in the
+antecedent note. **Nothing goes to 0-D from this string.** Recorded explicitly
+so nobody builds for a hole that isn't there.
+
+*Not in scope, flagged:* accounts that already published a 10050 pointing at
+`auth.nostr1.com` keep it. Editing it for them is the same act the ruling
+forbids. iOS has not shipped, so the population is test accounts; surface it,
+never rewrite it.
+
 **GATE 0:** builds and installs on device; a real NIP-98 round-trip the backend
 accepts (`owner: true`); no "Wisp" in UI; zero damus; zero wisp.talk; brand
 applied. **Do not proceed to Phase 1 until the NIP-98 round-trip passes.** On
@@ -502,8 +763,18 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
 - **1.1 `RecipeParser.swift`** — byte-faithful port of the Kotlin, which is
   itself a port of the web `parseMarkdownForEditing`. **No UI.** Golden test
   against the real *Tuscan Peposo* event including the missing `published_at`,
-  missing `servings`, and the live U+FE0F emoji bytes. Android has 14 tests
-  here; port all of them.
+  missing `servings`, and the live U+FE0F emoji bytes. Android has **23** tests
+  here; port all 23. Source:
+  `app/src/test/kotlin/cooking/zap/app/nostr/RecipeParserTest.kt` at
+  `zap_cooking_android` **`4389530`** (the commit this doc is verified against).
+  ⚠️ An earlier revision of this line said 14 — that is the count of the block
+  *above* the `private fun event(...)` helper at `:199`, which sits mid-file and
+  reads like the end of it. Below the helper are **9 more**, all
+  `isRecipe_*` / `validate_*`. Those 9 are the ones with downstream teeth:
+  `RecipeParser.isRecipe` is the gate **1.6** uses to choose the recipe route
+  over the article route, and `isRecipe_rejectsArticleCarryingRecipeTag` is
+  exactly the case that otherwise lands a plain article on a recipe screen.
+  Port 14 and the gate function ships untested.
 - **1.2 `RecipeRepository.swift`** — `{kinds:[30023], #t:[zapcooking,nostrcooking]}`
   fanned out to the **articles union**, deduped by addressable coordinate
   (`kind:author:dTag`) newest-wins with the NIP-01 equal-`created_at`
@@ -796,6 +1067,15 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
 4. **Gate 0-D** — read-only accounts on iOS: supported or not?
 5. **Gate 0-E** — tab architecture (proposal in §5)
 6. **Gate 0-F** — zaps on posts: ship, or profile-only from day one?
+   ⚠️ §4.2 already carries a written ruling (compile-time
+   `FeatureFlags.zapsOnPosts` kill switch, budget one rejection round). Confirm
+   §4.2 is a ruling and this closes; say it was a proposal and it stays open.
+6a. **Gate 0-H** — **CLOSED Aug 9: "DMs should be open to any relay."** We stop
+   publishing a kind-10050 on a member's behalf; there is no default DM relay.
+   Build is **Concern 0.8** (three deletions + two fallbacks + one UI guard +
+   one string — not a pure deletion; private zaps and private reactions ride
+   the same list, and the "Broadcast DM Relays" button becomes a fourth publish
+   path the moment the seed is gone).
 7. **Creator starter pack** — the curated food-creator list is still owed on
    *both* platforms
 8. **Privacy policy correction** — the two false retention claims block the
