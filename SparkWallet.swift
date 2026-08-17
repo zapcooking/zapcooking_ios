@@ -372,8 +372,7 @@ final class SparkWallet: Wallet {
             ))
             emit("Sending payment…")
             let response = try await sdk.lnurlPay(request: LnurlPayRequest(prepareResponse: prepare))
-            // sendPayment waits up to completionTimeoutSecs and then returns
-            // whatever status it has — a FAILED payment comes back WITHOUT
+            // lnurlPay returns a payment whose status may be FAILED without
             // throwing. Returning .success for it told the user their sats had
             // been sent when they had not.
             switch response.payment.status {
@@ -418,7 +417,25 @@ final class SparkWallet: Wallet {
                     idempotencyKey: nil
                 )
             )
-            return .success(response.payment.id)
+            // sendPayment waits up to completionTimeoutSecs and then returns
+            // whatever status it has — a FAILED payment comes back WITHOUT
+            // throwing, so it never reaches the catch below. Returning
+            // .success for it told the user their sats had been sent when
+            // they had not.
+            switch response.payment.status {
+            case .completed:
+                emit("Payment completed")
+                return .success(response.payment.id)
+            case .pending:
+                // Accepted but not settled. Reported as success so the caller
+                // doesn't show a failure for a payment that may still land —
+                // see the note in the PR about surfacing pending distinctly.
+                emit("Payment pending")
+                return .success(response.payment.id)
+            default:
+                emit("Payment failed (\(response.payment.status))")
+                return .failure(.other("Payment failed — your sats were not sent"))
+            }
         } catch {
             let friendly = Self.friendlyPayError(error)
             emit("Payment failed: \(friendly)")
