@@ -253,22 +253,36 @@ final class RecipeRepository {
     /// Resolve one recipe by coordinate, cache-first, then through the same
     /// union and the same dedup.
     ///
-    /// Deliberately **not** `ArticleCache`: that path fans out to a hardcoded
-    /// relay list that is not the articles union (it misses
-    /// `relay.noswhere.com` and adds five relays this union does not carry),
-    /// and its `store()` keeps the **first-seen** event when two relays
-    /// disagree at equal `created_at` — the exact nondeterminism the NIP-01
-    /// lower-id tiebreaker exists to remove.
+    /// **There are exactly two sources here and that is the contract, not an
+    /// omission.** ``byCoordinate`` is the cache; the articles union is the
+    /// truth. Anything that resolves a recipe without going through
+    /// ``deduped(_:)`` is a second resolution path with its own tiebreaker,
+    /// which is the drift this concern exists to prevent.
+    ///
+    /// Two persistent stores are deliberately **not** consulted:
+    ///
+    /// - `EventStore.loadAddressable` resolves with `.max(by: createdAt)` and
+    ///   **no lower-id tiebreaker** (`EventStore.swift:530`), so two stored
+    ///   versions at equal `created_at` resolve by row order. It is also
+    ///   persistent, written by ~20 other subsystems, and cleared only on
+    ///   logout — and a hit would return without ever asking a relay. An
+    ///   addressable event is *replaceable* by definition, so a store with no
+    ///   revalidation cannot answer the only question this method asks: an
+    ///   author fixes a wrong quantity and a reader whose device holds the old
+    ///   copy keeps reading the wrong quantity until they log out. Reachable
+    ///   exactly on the cold deep link — which is what an `naddr` share is.
+    /// - `ArticleCache` fans out to a hardcoded relay list that is not the
+    ///   articles union (it misses `relay.noswhere.com` and adds five relays
+    ///   this union does not carry), and its `store()` keeps the
+    ///   **first-seen** event when two relays disagree at equal `created_at` —
+    ///   the exact nondeterminism the NIP-01 tiebreaker exists to remove.
+    ///
+    /// Offline resolution is a real thing to want, but it is a *fallback after*
+    /// the union comes back empty, not a source consulted before it, and it
+    /// needs a tiebreaker of its own. That is a different concern's design.
     func requestRecipe(author: String, dTag: String) async -> NostrEvent? {
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
         if let cached = byCoordinate[key] { return cached }
-
-        if let stored = await EventStore.shared.loadAddressable(
-            kind: RecipeParser.recipeKind, author: author, dTag: dTag
-        ), RecipeParser.isRecipe(stored) {
-            byCoordinate[key] = stored
-            return stored
-        }
 
         let filter = format.coordinateFilter(author: author, dTag: dTag)
         let events = await RelayPool.query(
