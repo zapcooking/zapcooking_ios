@@ -20,7 +20,15 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    @State private var selectedTab: BottomTab = .recipes
+    // Interim launch tab. `.recipes` is the intended default under the
+    // food-first layout, but the Recipes tab is not built yet — `.recipes`,
+    // `.onlyfood` and `.kitchen` all fall through to `placeholderTab`
+    // ("Coming soon"). `.search` is the only bottom-bar tab that is both
+    // functional and highlights correctly on launch. Flip this back to
+    // `.recipes` in the same PR that lands **Concern 1.5** (`RecipeFeedView`
+    // + `RecipeCard` — the Recipes tab). Not 1.3: 1.3 is `RecipeDetailView`,
+    // the screen behind a tap, and lands while this tab is still a placeholder.
+    @State private var selectedTab: BottomTab = .search
     @State private var feedPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
