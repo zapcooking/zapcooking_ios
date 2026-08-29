@@ -220,6 +220,7 @@
 		4CFF99010000000000000004 /* RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000004 /* RecipeFormat.swift */; };
 		4CFF99010000000000000005 /* RecipeFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000005 /* RecipeFormats.swift */; };
 		4CFF99010000000000000006 /* Nip23RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000006 /* Nip23RecipeFormat.swift */; };
+		4CFF99010000000000000007 /* RecipeRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000007 /* RecipeRepository.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -563,6 +564,7 @@
 		4CFF99000000000000000004 /* RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormat.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000005 /* RecipeFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormats.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000006 /* Nip23RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip23RecipeFormat.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000007 /* RecipeRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRepository.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -888,6 +890,7 @@
 				4CFF99000000000000000004 /* RecipeFormat.swift */,
 				4CFF99000000000000000005 /* RecipeFormats.swift */,
 				4CFF99000000000000000006 /* Nip23RecipeFormat.swift */,
+				4CFF99000000000000000007 /* RecipeRepository.swift */,
 				4CFFA00000000000000A0001 /* Nip51Lists.swift */,
 				4CFFA00000000000000A0002 /* RelaySet.swift */,
 				4CFFA00000000000000A0003 /* RelaySetRepository.swift */,
@@ -1394,6 +1397,7 @@
 				4CFF99010000000000000004 /* RecipeFormat.swift in Sources */,
 				4CFF99010000000000000005 /* RecipeFormats.swift in Sources */,
 				4CFF99010000000000000006 /* Nip23RecipeFormat.swift in Sources */,
+				4CFF99010000000000000007 /* RecipeRepository.swift in Sources */,
 				4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */,
 				4CFFA00100000000000A0002 /* RelaySet.swift in Sources */,
 				4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */,
