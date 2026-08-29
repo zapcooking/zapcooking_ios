@@ -61,17 +61,56 @@ struct RecipeKey: Hashable {
     var slug: String
 }
 
+/// Extract the ``RecipeKey`` from an event (author + its `d` tag value).
 func recipeKey(_ event: NostrEvent) -> RecipeKey {
-    fatalError("unimplemented")
+    let d = event.tags.first { $0.count >= 2 && $0[0] == "d" }?[1] ?? ""
+    return RecipeKey(author: event.pubkey, slug: d)
 }
 
-/// Collapse same-logical-recipe events across formats by
-/// `(formatRank desc, created_at desc, id asc)`.
+/// Collapse events that are the **same logical recipe across formats**, keyed by
+/// ``RecipeKey`` (author + slug, kind-independent). The winner per key is chosen
+/// by `(formatRank desc, created_at desc, id asc)` — the migration-target format
+/// wins when a recipe exists in both, else newest-wins, with the lower id as a
+/// deterministic final tiebreak.
 ///
-/// Dual-write caveat: rank-before-recency can mask a newer low-rank edit.
+/// `rankOf` resolves an event's format rank (`RecipeFormats.rankOf`); events
+/// whose format isn't active resolve to nil and are dropped.
+///
+/// **Pass-through while one format is active:** every key maps to a single
+/// format, so each survives unchanged and the feed is byte-for-byte what it is
+/// today. The cross-format pick only ever fires once a second format registers.
+///
+/// Dual-write caveat: rank-before-recency means a stale higher-rank event could
+/// mask a newer edit of the lower-rank one. When dual-write is turned on, either
+/// keep both events in lockstep or put a recency check ahead of rank.
 func dedupeAcrossFormats(
     _ events: [NostrEvent],
     rankOf: (NostrEvent) -> Int?
 ) -> [NostrEvent] {
-    fatalError("unimplemented")
+    // Kotlin uses a `LinkedHashMap`, which keeps a key's ORIGINAL insertion
+    // position when its value is overwritten. Swift's `Dictionary` is unordered,
+    // so the key order is tracked alongside it — otherwise the output order of
+    // the feed would depend on hashing.
+    var order: [RecipeKey] = []
+    var byKey: [RecipeKey: NostrEvent] = [:]
+    for event in events {
+        guard let rank = rankOf(event) else { continue }
+        let key = recipeKey(event)
+        guard let current = byKey[key] else {
+            order.append(key)
+            byKey[key] = event
+            continue
+        }
+        if isMoreCanonical(event, rank, current, rankOf(current) ?? Int.min) {
+            byKey[key] = event
+        }
+    }
+    return order.compactMap { byKey[$0] }
+}
+
+/// The `(rank desc, created_at desc, id asc)` canonical-pick comparison.
+private func isMoreCanonical(_ a: NostrEvent, _ aRank: Int, _ b: NostrEvent, _ bRank: Int) -> Bool {
+    if aRank != bRank { return aRank > bRank }
+    if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
+    return a.id < b.id
 }
