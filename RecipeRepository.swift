@@ -84,13 +84,26 @@ final class RecipeRepository {
 
     @ObservationIgnored private let format: any RecipeFormat
 
-    /// `format` defaults to `RecipeFormats.primary`, resolved in the body rather
-    /// than as a default argument: default arguments are evaluated in the
-    /// caller's context, and this module defaults to `MainActor` isolation, so
-    /// naming an isolated static there is an error under Swift 6.
-    init(relays: [String] = RelayDefaults.articles, format: (any RecipeFormat)? = nil) {
+    /// The mute predicate, injected for the same reason `relays` and `format`
+    /// are: `MuteRepository.shared` is a singleton whose state is `private(set)`
+    /// and written through UserDefaults and a relay republish, so without this
+    /// the divergence between what is *held* and what is *shown* — the thing
+    /// ``oldestHeldCreatedAt`` exists to keep separate — has no test that can
+    /// fail.
+    @ObservationIgnored private let isMuted: @MainActor (String) -> Bool
+
+    /// `format` and `isMuted` default in the body rather than as default
+    /// arguments: default arguments are evaluated in the caller's context, and
+    /// this module defaults to `MainActor` isolation, so naming an isolated
+    /// static there is an error under Swift 6.
+    init(
+        relays: [String] = RelayDefaults.articles,
+        format: (any RecipeFormat)? = nil,
+        isMuted: (@MainActor (String) -> Bool)? = nil
+    ) {
         self.relays = relays
         self.format = format ?? RecipeFormats.primary
+        self.isMuted = isMuted ?? { MuteRepository.shared.isBlocked($0) }
     }
 
     // MARK: - Coordinate
@@ -141,8 +154,7 @@ final class RecipeRepository {
     /// visibility policy stays a policy — and so a direct recipe link is not
     /// silently resolved to nil by a mute.
     func visible(_ events: [NostrEvent]) -> [NostrEvent] {
-        let mutes = MuteRepository.shared
-        return events.filter { !mutes.isBlocked($0.pubkey) }
+        events.filter { !isMuted($0.pubkey) }
     }
 
     // MARK: - Feed
@@ -165,12 +177,38 @@ final class RecipeRepository {
         submit { await self.fetchPage(until: nil, limit: limit, reset: true) }
     }
 
-    /// Page backwards in time from the oldest event held. Scroll fires this
+    /// Page backwards in time from ``oldestHeldCreatedAt``. Scroll fires this
     /// repeatedly, so it yields to a job already in flight for the same reason
     /// ``load(limit:)`` does.
     func loadMore(limit: Int = 50) {
-        guard !isLoading, let oldest = recipes.last?.createdAt else { return }
+        guard !isLoading, let oldest = oldestHeldCreatedAt else { return }
         submit { await self.fetchPage(until: oldest, limit: limit, reset: false) }
+    }
+
+    /// The paging cursor: the oldest event **held**, not the oldest *shown*.
+    ///
+    /// Those are different values and the difference is load-bearing. `recipes`
+    /// is `visible(merged)`, so `recipes.last` is the oldest event that survived
+    /// the mute filter. Paging from that:
+    ///
+    /// - **degrades** as soon as a prolific author is blocked — `until` sits
+    ///   newer than the true oldest held event, so every subsequent page
+    ///   re-fetches ground already covered, and it worsens as the muted
+    ///   fraction rises;
+    /// - **strands the feed entirely** when page one filters to nothing.
+    ///   `recipes` is empty, so the cursor is nil and `loadMore` returns at its
+    ///   guard; `load` no-ops because `hasLoaded` is true; `refresh` re-fetches
+    ///   page one with `until: nil` and filters it away again. Empty forever,
+    ///   with no control that advances it, and it reads to the member as
+    ///   "there are no recipes."
+    ///
+    /// The cursor is a fact about what we **fetched**; visibility is a fact
+    /// about what we **display**. They must not be the same value, and they
+    /// diverge exactly when a member has exercised a mute.
+    ///
+    /// Internal rather than private so the divergence has a test that can fail.
+    var oldestHeldCreatedAt: Int? {
+        byCoordinate.values.map(\.createdAt).min()
     }
 
     /// §7.4 / §7.5 — one submit path. The previous job is cancelled before the

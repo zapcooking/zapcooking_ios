@@ -211,6 +211,54 @@ struct RecipeRepositoryTests {
         #expect(repo.hasLoaded)
     }
 
+    // MARK: - The paging cursor vs. the mute filter
+
+    /// The cursor is a fact about what we fetched; visibility is a fact about
+    /// what we display. Blocking the author of the oldest held recipe must not
+    /// move the cursor forward, or every later page re-fetches ground already
+    /// covered — and it gets worse as the muted fraction rises.
+    @Test func pagingCursor_isOldestHeld_notOldestVisible() {
+        let blocked = String(repeating: "b", count: 64)
+        let repo = RecipeRepository(relays: [], isMuted: { $0 == blocked })
+
+        repo.ingest([
+            recipe(id: "aa", dTag: "newer", createdAt: 300),
+            recipe(id: "bb", author: blocked, dTag: "oldest", createdAt: 100),
+        ])
+
+        #expect(repo.recipes.map(\.id) == ["aa"])        // the block is applied
+        #expect(repo.recipes.last?.createdAt == 300)      // oldest VISIBLE
+        #expect(repo.oldestHeldCreatedAt == 100)          // oldest HELD
+    }
+
+    /// The failure that ends the feed rather than narrowing it. When page one
+    /// filters to nothing, a cursor taken from `recipes.last` is nil, so
+    /// `loadMore` returns at its guard — and `load` no-ops on `hasLoaded` while
+    /// `refresh` re-fetches page one and filters it away again. Empty forever,
+    /// with no control that advances it, reading as "there are no recipes."
+    @Test func loadMore_stillPagesWhenEveryHeldRecipeIsMuted() {
+        let repo = RecipeRepository(relays: [], isMuted: { _ in true })
+        repo.ingest([
+            recipe(id: "aa", dTag: "one", createdAt: 300),
+            recipe(id: "bb", dTag: "two", createdAt: 100),
+        ])
+
+        #expect(repo.recipes.isEmpty)
+        #expect(repo.oldestHeldCreatedAt == 100)
+
+        repo.loadMore()
+        #expect(repo.isLoading)  // a job was submitted; the feed is not stranded
+    }
+
+    /// The guard still holds when there is genuinely nothing to page from, so
+    /// the fix does not turn an empty union into an endless re-query.
+    @Test func loadMore_isANoOpWhenNothingIsHeld() {
+        let repo = RecipeRepository(relays: [])
+        #expect(repo.oldestHeldCreatedAt == nil)
+        repo.loadMore()
+        #expect(!repo.isLoading)
+    }
+
     /// A completed load is not re-queried. `hasLoaded` is set regardless of
     /// event count, so a legitimately empty union does not look like "never
     /// loaded" and get re-throttled (§7.4).
