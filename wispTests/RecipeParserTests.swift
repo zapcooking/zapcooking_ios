@@ -14,11 +14,12 @@ import Testing
 ///    field must be nil, not an empty string or a crash.
 ///
 /// **The fixture is an inline string literal, not a bundle resource.** Android
-/// loads it off the test classpath; iOS has no equivalent that does not require
-/// registering a resource in `project.pbxproj` (build doc §6: that file is a
-/// trap, and a hand-merged conflict can silently drop a file from a build
-/// phase). `NSpamTests` already documents that test-bundle resources here are
-/// unreliable. The bytes are identical to
+/// loads it off the test classpath. Inline here because these bytes are
+/// hand-frozen and nothing under `wispTests/` has ever shipped as a bundle
+/// resource — and the failure mode of an absent one is a probe that finds
+/// nothing and returns green (`NSpamTests:76-96`, where an early `return` in
+/// Swift Testing is a pass, not a skip). An inline literal cannot fail to ship.
+/// The bytes are identical to
 /// `app/src/test/resources/recipes/tuscan_peposo.json` @ `4389530`
 /// (sha256 63c21e626f06216e2e52c1a370b6ce2e99586cee90109664c367127356a9f642),
 /// and `realEmojiDetails_...` below fails loudly if the hard bytes are ever
@@ -33,7 +34,12 @@ struct RecipeParserTests {
     // MARK: - Fixture
 
     /// The real Tuscan Peposo event, verbatim as the relay sent it.
-    private static let tuscanPeposoJSON = #"{"content": "\n## Chef's notes\n\nPeposo comes from Impruneta near Florence, traditionally cooked for hours over low heat. The secret is time, black pepper, and patience. A little tomato paste adds depth without changing its rustic identity.\n\n## Details\n\n- ⏲️ Prep time: 10 min\n- 🍳 Cook time: 3 hours\n\n## Ingredients\n\n- 1 kg beef for stewing (chuck or similar)\n- 750 ml red wine\n- 4 garlic cloves\n- 2 tbsp black pepper (coarsely ground)\n- 1 tbsp tomato paste\n- Salt\n- Extra virgin olive oil\n\n\n## Directions\n\n1. Cut beef into large chunks.\n2. Place in a pot with garlic, black pepper, tomato paste, and a drizzle of olive oil.\n3. Add red wine to almost cover the meat.\n4. Cook on very low heat for about 3 hours.\n5. Stir occasionally, add a little water if needed.\n6. Rest 10 minutes, adjust salt, serve hot.\n", "created_at": 1776632470, "id": "19fec9967054f84cedf6c74c095f544f9630464913c7c9543b2e1cc6640ff2bb", "kind": 30023, "pubkey": "1852d83e2b9d12fa561071bfe159ff5ae510af1fc9b51b85539cb6a81486f207", "sig": "40fbacfe1d01511f4194d3fc44174a7e93a82f27c8c1caed27b1a3d09340af75cd3e900ed179b7d51186ed83fe2692a6e6116303c5c856465ea6e9bc734a35a1", "tags": [["d", "tuscan-peposo-(black-pepper-beef-stew)"], ["title", "Tuscan Peposo (Black Pepper Beef Stew)"], ["t", "zapcooking"], ["t", "zapcooking-tuscan-peposo-(black-pepper-beef-stew)"], ["summary", "A bold Tuscan beef stew cooked with red wine, garlic, black pepper, and a touch of tomato. Simple ingredients, deep flavour."], ["image", "https://image.nostr.build/95df427de745f56529810d928a4b6dd059f972fd5aee86efc618cd92023486ad.jpg"], ["t", "zapcooking-italian"], ["t", "zapcooking-beef"], ["t", "zapcooking-stew"], ["t", "zapcooking-slowcooked"], ["client", "zap.cooking"]]}"#
+    ///
+    /// Not `private`: `RecipeSerializerTests` round-trips against these exact
+    /// bytes. Sharing the one literal beats transcribing a second copy — a copy
+    /// drifts, and the diff that breaks a transcribed literal looks like
+    /// whitespace.
+    static let tuscanPeposoJSON = #"{"content": "\n## Chef's notes\n\nPeposo comes from Impruneta near Florence, traditionally cooked for hours over low heat. The secret is time, black pepper, and patience. A little tomato paste adds depth without changing its rustic identity.\n\n## Details\n\n- ⏲️ Prep time: 10 min\n- 🍳 Cook time: 3 hours\n\n## Ingredients\n\n- 1 kg beef for stewing (chuck or similar)\n- 750 ml red wine\n- 4 garlic cloves\n- 2 tbsp black pepper (coarsely ground)\n- 1 tbsp tomato paste\n- Salt\n- Extra virgin olive oil\n\n\n## Directions\n\n1. Cut beef into large chunks.\n2. Place in a pot with garlic, black pepper, tomato paste, and a drizzle of olive oil.\n3. Add red wine to almost cover the meat.\n4. Cook on very low heat for about 3 hours.\n5. Stir occasionally, add a little water if needed.\n6. Rest 10 minutes, adjust salt, serve hot.\n", "created_at": 1776632470, "id": "19fec9967054f84cedf6c74c095f544f9630464913c7c9543b2e1cc6640ff2bb", "kind": 30023, "pubkey": "1852d83e2b9d12fa561071bfe159ff5ae510af1fc9b51b85539cb6a81486f207", "sig": "40fbacfe1d01511f4194d3fc44174a7e93a82f27c8c1caed27b1a3d09340af75cd3e900ed179b7d51186ed83fe2692a6e6116303c5c856465ea6e9bc734a35a1", "tags": [["d", "tuscan-peposo-(black-pepper-beef-stew)"], ["title", "Tuscan Peposo (Black Pepper Beef Stew)"], ["t", "zapcooking"], ["t", "zapcooking-tuscan-peposo-(black-pepper-beef-stew)"], ["summary", "A bold Tuscan beef stew cooked with red wine, garlic, black pepper, and a touch of tomato. Simple ingredients, deep flavour."], ["image", "https://image.nostr.build/95df427de745f56529810d928a4b6dd059f972fd5aee86efc618cd92023486ad.jpg"], ["t", "zapcooking-italian"], ["t", "zapcooking-beef"], ["t", "zapcooking-stew"], ["t", "zapcooking-slowcooked"], ["client", "zap.cooking"]]}"#
 
     private func loadEvent() -> NostrEvent {
         guard let event = NostrEvent.fromJSON(Self.tuscanPeposoJSON) else {
