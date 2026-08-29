@@ -793,7 +793,9 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   returns the line **verbatim when unparseable** — never crashes, never mangles.
   Servings chip scales; free-text prep/cook do not.
 - **1.5 `RecipeFeedView` + `RecipeCard`** — the Recipes tab. Infinite scroll,
-  pull-to-refresh, cache-seeded first paint.
+  pull-to-refresh, cache-seeded first paint. **Also flips the default launch
+  tab back to `.recipes`** (`MainView.swift`) in the same PR — it is parked on
+  `.search` while this tab is a placeholder.
 - **1.6 Tap rewiring** — any kind-30023 opens the *recipe* route when
   `RecipeParser.isRecipe`, else the article route, **with a cache-miss guard**
   (evicted event → article fallback, never a recipe screen with no event).
@@ -845,10 +847,13 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   semantics) — ⚠️ port the **first-save cold-session guard**: a cold session
   must not overwrite an existing saved-recipe collection (Android 1.3.5 fix).
 - 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner / Nourish
-  land in P2).
+  land in P2). Retires the `.kitchen` placeholder; the tab becomes a valid
+  launch/deep-link destination in the same PR.
 - 3.3 **OnlyFood feed** — kind-1 feed over the ~85-tag `FoodHashtags` set,
   Global | Following modes, **mute-only filtering** (no spam scorer — §7.3),
-  per-mode result cache, pull-to-refresh as the only re-query path.
+  per-mode result cache, pull-to-refresh as the only re-query path. Retires
+  the `.onlyfood` placeholder; the tab becomes a valid launch/deep-link
+  destination in the same PR.
 - 3.4 Food-first onboarding: curated creator starter pack (**Seth owes the
   list** — Android's is still the inherited generic set), food-framed copy,
   topic picker, save-a-recipe first-run step.
