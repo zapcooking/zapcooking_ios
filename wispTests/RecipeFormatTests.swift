@@ -110,6 +110,30 @@ struct RecipeFormatTests {
         #expect(same(out, [highRankOlder]))
     }
 
+    /// Multi-key output order: a key that is overwritten by a more canonical
+    /// event keeps its **original** position.
+    ///
+    /// Not in the Android suite, and deliberately so rather than by oversight.
+    /// Kotlin gets this free from `LinkedHashMap`, whose `values` are in
+    /// first-insertion order with overwrite-in-place. Swift's `Dictionary` is
+    /// unordered, so the port has to reproduce the ordering by hand — and
+    /// invented behaviour needs its own golden. Nothing else here would catch
+    /// it: `dedupe_singleFormat_isPassThrough` is the only other multi-element
+    /// case and asserts count plus membership, not order, and the remaining
+    /// three assert single-element results.
+    ///
+    /// An implementation that appended on overwrite instead would return
+    /// `[b, aNewer]` and pass every other test in this file.
+    @Test func dedupe_multiKey_overwriteKeepsFirstInsertionPosition() {
+        let aOlder = stub(id: "aa", createdAt: 100, d: "recipe-a")
+        let b = stub(id: "bb", createdAt: 100, d: "recipe-b")
+        let aNewer = stub(id: "cc", createdAt: 200, d: "recipe-a")
+
+        // `recipe-a` is seen first, then `recipe-b`, then a better `recipe-a`.
+        let out = dedupeAcrossFormats([aOlder, b, aNewer]) { RecipeFormats.rankOf($0) }
+        #expect(same(out, [aNewer, b]))
+    }
+
     @Test func dedupe_sameRank_newerWins_thenLowerId() {
         let older = stub(id: "ff", createdAt: 100)
         let newer = stub(id: "aa", createdAt: 200)
