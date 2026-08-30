@@ -65,6 +65,24 @@ struct RecipeCardView: View {
     }
 }
 
+/// Emoji + label chip for a curated browse category.
+struct RecipeTagChip: View {
+    let tag: RecipeTag
+
+    var body: some View {
+        Text("\(tag.emoji) \(tag.label)")
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Color.wispSurfaceVariant.opacity(0.6),
+                in: Capsule()
+            )
+            .foregroundStyle(Color.wispOnSurface)
+            .accessibilityLabel(tag.label)
+    }
+}
+
 /// Neutral pulsing 2:3 tile used while an image loads and for the grid's
 /// initial loading state.
 struct RecipePosterSkeleton: View {

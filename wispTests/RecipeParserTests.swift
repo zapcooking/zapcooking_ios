@@ -88,6 +88,21 @@ struct RecipeParserTests {
         #expect(recipe.hashtags.contains("zapcooking-tuscan-peposo-(black-pepper-beef-stew)"))
     }
 
+    /// The slug tag is on the event (`zapcooking-<dTag>`) and must not
+    /// count as a browse category — otherwise every recipe appears in a
+    /// feed named after itself.
+    @Test func matchesCategory_acceptsDerivedCategories_excludesSlug() {
+        let event = loadEvent()
+        #expect(RecipeParser.matchesCategory(event, "italian"))
+        #expect(RecipeParser.matchesCategory(event, "ITALIAN"))
+        #expect(RecipeParser.matchesCategory(event, "beef"))
+        #expect(RecipeParser.matchesCategory(event, "stew"))
+        #expect(RecipeParser.matchesCategory(event, "slowcooked"))
+        #expect(!RecipeParser.matchesCategory(event, "tuscan-peposo-(black-pepper-beef-stew)"))
+        #expect(!RecipeParser.matchesCategory(event, "zapcooking"))
+        #expect(!RecipeParser.matchesCategory(event, ""))
+    }
+
     @Test func parsesChefNotes() {
         #expect(
             recipe.content.chefNotes

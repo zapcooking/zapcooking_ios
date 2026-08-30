@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Recipes tab. Cookbook-style poster grid, cache-seeded first paint,
-/// pull-to-refresh, infinite scroll.
+/// pull-to-refresh, infinite scroll, curated category chips (Concern 1.7).
 ///
 /// Empty vs loading are different screens: "No recipes yet" only after a
 /// load has completed with nothing to show. A slow union shows the skeleton
@@ -14,6 +14,7 @@ struct RecipeFeedView: View {
 
     @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var showMoreTags = false
 
     init(
         keypair: Keypair,
@@ -40,24 +41,86 @@ struct RecipeFeedView: View {
             .wispTopHeader { header }
             .toolbar(.hidden, for: .navigationBar)
             .task { viewModel.start() }
+            .sheet(isPresented: $showMoreTags) {
+                allCategoriesSheet
+            }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Button(action: onOpenDrawer) {
-                CachedAvatarView(url: avatarURL, size: 32, alwaysLoad: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Button(action: onOpenDrawer) {
+                    CachedAvatarView(url: avatarURL, size: 32, alwaysLoad: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open menu")
+
+                Text("Recipes")
+                    .font(AppFont.titleMedium)
+                    .foregroundStyle(Color.wispOnSurface)
+
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open menu")
-
-            Text("Recipes")
-                .font(AppFont.titleMedium)
-                .foregroundStyle(Color.wispOnSurface)
-
-            Spacer(minLength: 0)
+            categoryChips
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(RecipeTagCatalog.popularRecipeTags, id: \.tag) { tag in
+                    NavigationLink(value: RecipeTagFeedRoute(tag: tag.tag)) {
+                        RecipeTagChip(tag: tag)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    showMoreTags = true
+                } label: {
+                    Text("More ⌄")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Color.wispSurfaceVariant.opacity(0.6),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(Color.wispOnSurface)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("More categories")
+            }
+        }
+    }
+
+    private var allCategoriesSheet: some View {
+        NavigationStack {
+            ScrollView {
+                FlowLayout(spacing: 8) {
+                    ForEach(RecipeTagCatalog.recipeTags, id: \.tag) { tag in
+                        Button {
+                            showMoreTags = false
+                            path.append(RecipeTagFeedRoute(tag: tag.tag))
+                        } label: {
+                            RecipeTagChip(tag: tag)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color.wispBackground)
+            .navigationTitle("All categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showMoreTags = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     @ViewBuilder

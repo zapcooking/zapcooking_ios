@@ -804,6 +804,13 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   (evicted event → article fallback, never a recipe screen with no event).
   Apply at every article-tap site.
 - **1.7 `RecipeTagFeedView`** + tag catalog browse.
+  **Landed:** `RecipeTagCatalog` (Android curated list; per-recipe
+  `<root>-<slug>` tags are not browse categories), `RecipeTagFeedView` /
+  VM over `RecipeRepository.loadTagFeed` (`tagFeedFilter`, cache-first,
+  mute-only, own submit path so the mounted Recipes tab is not cancelled).
+  Popular chips + More sheet on the Recipes tab; detail category chips
+  push the same route. **Gate:** browse at least three categories with
+  real results off live relays.
 - **1.8 Cook mode** — keep-screen-on (`isIdleTimerDisabled`), step paging,
   inline timers, scaling carried through. Timers need a **Live Activity /
   background story** on iOS that Android didn't need — scope it explicitly.

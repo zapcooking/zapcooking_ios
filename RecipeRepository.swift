@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// The recipe read path — the one place recipes are fetched, deduped and
-/// cached. Feed, detail, and tag-feed surfaces will consume this; none of
+/// cached. Feed, detail, and tag-feed surfaces consume this; none of
 /// them should query relays or dedupe on its own.
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.2):
@@ -17,6 +17,9 @@ import Observation
 /// - The **feed** paints from ObjectBox before any relay is contacted
 ///   (Concern 1.5 / §4.1). An empty union does not wipe that paint — the
 ///   grid is cache ∪ live and never shrinks below the cached set.
+/// - The **tag feed** (Concern 1.7) is a separate session: same union,
+///   `tagFeedFilter`, same mute-only / newest-wins rules, own submit path
+///   so opening a category does not cancel the mounted Recipes tab.
 ///
 /// **The dedup is not implemented here.** `dedupeAcrossFormats` (Concern 2.2)
 /// already is this contract: its comparator is `rank desc, created_at desc,
@@ -61,6 +64,22 @@ final class RecipeRepository {
     /// legitimately empty result must not look like "never loaded" or the feed
     /// re-queries and gets throttled (§7.4).
     private(set) var hasLoaded = false
+
+    /// Independent category-feed state. Browsing `#italian` must not
+    /// rewrite ``recipes`` — the Recipes tab stays mounted (§7.4 / 1.5).
+    private(set) var tagRecipes: [NostrEvent] = []
+    private(set) var isTagLoading = false
+    private(set) var hasTagLoaded = false
+    private(set) var tagExhausted = false
+
+    /// The slug ``loadTagFeed(tag:limit:)`` last started, already normalized.
+    /// Internal so tests can assert a blank tag is a no-op.
+    @ObservationIgnored private(set) var activeTag: String?
+
+    @ObservationIgnored private var tagByCoordinate: [String: NostrEvent] = [:]
+
+    @ObservationIgnored private(set) var tagInFlight: Task<Void, Never>?
+    @ObservationIgnored private var tagSubmitGeneration = 0
 
     /// Every recipe event seen this session, keyed by addressable coordinate.
     /// This is what makes `requestRecipe` cache-first for anything the feed has
@@ -363,7 +382,7 @@ final class RecipeRepository {
     /// needs a tiebreaker of its own. That is a different concern's design.
     func requestRecipe(author: String, dTag: String) async -> NostrEvent? {
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
-        if let cached = byCoordinate[key] { return cached }
+        if let cached = byCoordinate[key] ?? tagByCoordinate[key] { return cached }
 
         let filter = format.coordinateFilter(author: author, dTag: dTag)
         let events = await RelayPool.query(
@@ -381,7 +400,125 @@ final class RecipeRepository {
     }
 
     /// The cached event for a coordinate, without touching the network.
+    /// Checks the main-feed map first, then the active tag session — so a
+    /// card opened from a category feed is cache-first without moving the
+    /// main feed's paging cursor.
     func cached(author: String, dTag: String) -> NostrEvent? {
-        byCoordinate[Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)]
+        let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
+        return byCoordinate[key] ?? tagByCoordinate[key]
+    }
+
+    // MARK: - Tag feed (Concern 1.7)
+
+    /// Relay filter for one category, from the format seam — `#t` is
+    /// `<root>-<tag>` for every recipe root (`zapcooking-italian`,
+    /// `nostrcooking-italian`). The per-recipe slug tag collides with that
+    /// shape on the wire; ``RecipeParser/matchesCategory(_:_:)`` drops those
+    /// after the union answers.
+    func tagFeedFilter(tag: String, limit: Int, until: Int? = nil) -> NostrFilter {
+        format.tagFeedFilter(tag: tag, limit: limit, until: until)
+    }
+
+    /// Oldest event **held** on the tag session, not the oldest shown.
+    /// Same mute-cursor reason as ``oldestHeldCreatedAt``.
+    var oldestHeldTagCreatedAt: Int? {
+        tagByCoordinate.values.map(\.createdAt).min()
+    }
+
+    /// Cache-first + union-backed category feed. Clears the previous tag
+    /// session (a different chip is a different query) and paints matching
+    /// ObjectBox / already-held events before any relay is contacted.
+    ///
+    /// Own submit path — must not cancel the main-feed job. The Recipes
+    /// tab stays mounted while this screen is pushed.
+    func loadTagFeed(tag: String, limit: Int = 50) {
+        let normalized = RecipeTagCatalog.normalize(tag)
+        guard !normalized.isEmpty else { return }
+
+        activeTag = normalized
+        tagExhausted = false
+        hasTagLoaded = false
+        tagByCoordinate = [:]
+        tagRecipes = []
+
+        submitTag {
+            await self.paintTagFromCache(normalized)
+            await self.fetchTagPage(tag: normalized, until: nil, limit: limit, reset: false)
+        }
+    }
+
+    /// Pull-to-refresh for the active tag. Merges — an empty union must
+    /// not blank a cache-painted grid.
+    func refreshTagFeed(limit: Int = 50) {
+        guard let tag = activeTag else { return }
+        tagExhausted = false
+        submitTag { await self.fetchTagPage(tag: tag, until: nil, limit: limit, reset: false) }
+    }
+
+    /// Page backwards from ``oldestHeldTagCreatedAt``.
+    func loadMoreTagFeed(limit: Int = 50) {
+        guard !isTagLoading, !tagExhausted, let tag = activeTag,
+              let oldest = oldestHeldTagCreatedAt
+        else { return }
+        submitTag { await self.fetchTagPage(tag: tag, until: oldest, limit: limit, reset: false) }
+    }
+
+    /// Local ingest for the active tag. Does not mark the tag feed loaded
+    /// and does not open a socket.
+    func paintTagFromCache(_ tag: String) async {
+        let cached = await seedCache()
+        guard !Task.isCancelled, activeTag == tag else { return }
+        let held = Array(byCoordinate.values)
+        let matches = Self.deduped(cached + held).filter { RecipeParser.matchesCategory($0, tag) }
+        guard !matches.isEmpty else { return }
+        ingestTag(matches, reset: false)
+    }
+
+    /// Fold events into the tag session. Does **not** rewrite ``recipes``
+    /// and does **not** move the main feed's paging cursor. Slug-only
+    /// matches (`<root>-<dTag>` with no real category) are dropped.
+    func ingestTag(_ events: [NostrEvent], reset: Bool = false) {
+        guard let tag = activeTag else { return }
+        let matching = events.filter { RecipeParser.matchesCategory($0, tag) }
+        let held = reset ? [] : Array(tagByCoordinate.values)
+        let merged = Self.deduped(held + matching)
+        tagByCoordinate = Dictionary(
+            merged.map { (Self.coordinate($0), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        tagRecipes = visible(merged)
+    }
+
+    private func submitTag(_ work: @escaping @MainActor () async -> Void) {
+        tagInFlight?.cancel()
+        tagSubmitGeneration += 1
+        let generation = tagSubmitGeneration
+        isTagLoading = true
+        tagInFlight = Task { @MainActor in
+            await work()
+            if generation == self.tagSubmitGeneration { self.isTagLoading = false }
+        }
+    }
+
+    private func fetchTagPage(tag: String, until: Int?, limit: Int, reset: Bool) async {
+        let filter = tagFeedFilter(tag: tag, limit: limit, until: until)
+        let heldBefore = Set(tagByCoordinate.keys)
+        let events = await RelayPool.query(
+            relays: relays,
+            filter: filter,
+            timeout: 12,
+            waitForAllRelays: true
+        )
+
+        guard !Task.isCancelled, activeTag == tag else { return }
+
+        let matched = events.filter { RecipeParser.matchesCategory($0, tag) }
+        ingestTag(matched, reset: reset)
+        persist(matched)
+        hasTagLoaded = true
+        if until != nil {
+            let added = tagByCoordinate.keys.contains { !heldBefore.contains($0) }
+            if !added { tagExhausted = true }
+        }
     }
 }
