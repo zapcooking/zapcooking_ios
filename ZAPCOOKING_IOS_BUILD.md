@@ -121,7 +121,20 @@ shape on a missing/invalid/mismatched NIP-98 signature rather than returning
 verified ephemeral non-member gets `{"found":false,"owner":true}`.
 
 **Live recipe publish** (opt-in; Concern 2.3). Uses an ephemeral keypair —
-never a real nsec. Touches public article relays and `https://zap.cooking/r/{naddr}`:
+never a real nsec, never printed, never persisted. Touches public article
+relays and `https://zap.cooking/r/{naddr}`. **Publish, verify, then delete
+in the same process** — the key is held in memory until
+`RecipePublisher.delete` (blanked replacement + kind-5) has been accepted
+by at least one articles relay and a re-query of that coordinate is no
+longer an `isRecipe`. A gate that only publishes leaves real recipe cards
+on the production feed; the first 2.3 run did that (§7.13).
+
+Why this shape, not the alternatives:
+- A `t`-tag our own feed filter excludes would still render on zap.cooking
+  unless the web also changed, and would stop proving the Recipes-tab path
+  (that path *is* `#t zapcooking` + `isRecipe`).
+- A test-only relay would not render on zap.cooking, so it would no longer
+  prove the gate.
 
 ```
 touch wispTests/.recipe_publish_live_enable
@@ -1142,6 +1155,19 @@ trapping without importing ObjectBox.
 → **iOS action:** never `import ObjectBox` into non-storage files to paper
 over this; never substitute `truncatingIfNeeded` (wraps) or `numericCast`
 (opaque). Prefer `Int64(exactly:)!`.
+
+**7.13 — Live-write gates need a cleanup step designed in from the start.**
+The first 2.3 live publish used a fresh `SecRandomCopyBytes` key, printed
+only naddr / relay URLs, and dropped the privkey when the process exited.
+Eight real recipes (`iOS 2.3 Live Publish <timestamp>`, eight distinct
+pubkeys) landed on `relay.primal.net` and `nos.lol` as normal Recipes-tab
+cards (kind 30023, `#t zapcooking`, cover, ingredients, directions).
+NIP-09 cannot remove them without that key — they are permanent unless a
+relay operator intervenes. The same class of miss exists on any platform.
+→ **iOS action:** a test that writes a public event holds the key until it
+has published the matching delete (blanked replacement + kind-5) and
+confirmed the coordinate is gone. Passing is not enough; cleanup is part
+of the gate. Apply the same rule on Android live-write tests.
 
 ---
 

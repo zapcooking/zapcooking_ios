@@ -7,13 +7,20 @@ import Testing
 ///
 /// Isolated from the default suite: `.enabled(if:)` stays false unless the
 /// operator opts in (`touch wispTests/.recipe_publish_live_enable` or
-/// `RECIPE_PUBLISH_LIVE=1`). Uses an ephemeral keypair — never a real nsec.
+/// `RECIPE_PUBLISH_LIVE=1`). Uses an ephemeral keypair — never a real nsec,
+/// never printed, never written to disk. The key is held in memory until
+/// this test has published the matching delete and confirmed the coordinate
+/// is gone from the articles union. Publish-without-delete is how the first
+/// 2.3 run left eight real recipes on primal / nos.lol (§7.13).
 ///
-/// Confirms all three:
+/// Confirms all four:
 ///  1. the event renders at `https://zap.cooking/r/{naddr}`
 ///  2. it is fetchable from the articles union the Recipes tab reads
 ///  3. which relays accepted vs rejected/timed out (partial success is a
 ///     finding, not a failure to paper over)
+///  4. the same key then deletes the recipe (blanked replacement + kind-5)
+///     and the articles union no longer serves an `isRecipe` at that
+///     coordinate
 @Suite(.tags(.liveNetwork))
 struct RecipePublisherLiveTests {
 
@@ -156,5 +163,42 @@ struct RecipePublisherLiveTests {
         print("RecipePublisher live: accepted=\(accepted)")
         print("RecipePublisher live: rejectedOrTimeout=\(rejected)")
         print("RecipePublisher live: articlesUnionHit=\(found) articlesAccepted=\(articlesHit)")
+
+        // Cleanup is part of the gate. The privkey lives only in `keypair`
+        // above; if we return without deleting, this recipe stays on the
+        // production feed forever (NIP-09 needs this same pubkey).
+        let deleted = try await publisher.delete(event: event, keypair: keypair)
+        guard case .deleted(let delTargeted, let delAccepted) = deleted else {
+            Issue.record("delete failed: \(deleted) — recipe remains live at \(webURL)")
+            return
+        }
+        let delAcceptedSet = Set(delAccepted.map { RecipePublisher.normalizeRelay($0) })
+        let delRejected = delTargeted.filter { !delAcceptedSet.contains(RecipePublisher.normalizeRelay($0)) }
+        print("RecipePublisher live: deleteTargeted=\(delTargeted)")
+        print("RecipePublisher live: deleteAccepted=\(delAccepted)")
+        print("RecipePublisher live: deleteRejectedOrTimeout=\(delRejected)")
+        #expect(
+            !delAccepted.isEmpty,
+            "no relay accepted the delete. targeted=\(delTargeted) accepted=\(delAccepted) — recipe remains live"
+        )
+
+        var leftover: [NostrEvent] = []
+        for attempt in 1...3 {
+            let after = await RelayPool.query(
+                relays: RelayDefaults.articles,
+                filter: RecipeFormats.primary.coordinateFilter(author: author, dTag: dTag),
+                timeout: 15,
+                waitForAllRelays: true
+            )
+            leftover = after.filter { RecipeParser.isRecipe($0) }
+            if leftover.isEmpty { break }
+            if attempt < 3 {
+                try await Task.sleep(for: .seconds(2))
+            }
+        }
+        #expect(
+            leftover.isEmpty,
+            "articles union still serving an isRecipe after delete. leftover=\(leftover.map(\.id))"
+        )
     }
 }
