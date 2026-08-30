@@ -133,6 +133,27 @@ nonisolated enum Nip19 {
         return try? bech32Encode(hrp: "nprofile", data: tlv)
     }
 
+    /// Encode a NIP-19 `naddr` for an addressable event. TLV order matches
+    /// `parseTlvAddress`: identifier, optional relays, pubkey, kind.
+    /// Inverse of `naddrDecode`. Used to build `https://zap.cooking/r/{naddr}`.
+    static func naddrEncode(kind: Int, pubkeyHex: String, dTag: String, relays: [String] = []) -> String? {
+        guard let pub = Hex.decode(pubkeyHex), pub.count == 32 else { return nil }
+        var tlv: [UInt8] = []
+        appendTlv(&tlv, type: 0x00, value: Array(dTag.utf8))
+        for relay in relays {
+            appendTlv(&tlv, type: 0x01, value: Array(relay.utf8))
+        }
+        appendTlv(&tlv, type: 0x02, value: Array(pub))
+        let kindBytes: [UInt8] = [
+            UInt8((kind >> 24) & 0xFF),
+            UInt8((kind >> 16) & 0xFF),
+            UInt8((kind >> 8) & 0xFF),
+            UInt8(kind & 0xFF)
+        ]
+        appendTlv(&tlv, type: 0x03, value: kindBytes)
+        return try? bech32Encode(hrp: "naddr", data: tlv)
+    }
+
     private static func appendTlv(_ buf: inout [UInt8], type: UInt8, value: [UInt8]) {
         guard value.count <= 255 else { return }
         buf.append(type)

@@ -29,6 +29,7 @@ model-wisp.json.bak
 ## Local notes
 temp/
 
-## Opt-in sentinel for the live NIP-98 round-trip test (see ZAPCOOKING_IOS_BUILD.md)
+## Opt-in sentinels for live network tests (see ZAPCOOKING_IOS_BUILD.md)
 wispTests/.nip98_live_enable
+wispTests/.recipe_publish_live_enable
 

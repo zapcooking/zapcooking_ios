@@ -68,15 +68,17 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
 
-**Test baseline (post Concern 1.8b):** default hermetic suite is **430 pass /
-1 fail**. The single failure is pre-existing `#4`
-(`FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). The live NIP-98
-round-trip is opt-in and **skipped** in the default run (so it does not add
-a pass or a network dependency). When the live round-trip is deliberately
-enabled and green, the run is **431 pass / 1 fail**. Future gate reports
-compare against **430/1** for the default suite. Post-0.6 was 194/1; the
-delta is Phase 1 recipe/food tests (parser through cook mode) on top of
-that NIP-98 floor.
+**Test baseline (post Concern 2.3).** Three numbers, do not mix them:
+
+| Number | What it is |
+|---|---|
+| **456/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 456 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **457/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
+| **459** | `@Test` annotations on disk. Includes the skipped live NIP-98 test and the skipped live recipe-publish test. Not a pass count. |
+
+The two live network tests are opt-in and **skipped** in the default run (so
+they do not add a pass or a network dependency). Future hermetic gate reports
+compare against **456/1**. Post-1.8b was 430/1; post-0.6 was 194/1.
 
 Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
 executes `wispUITests`; that target is **not** in the baseline. Isolated
@@ -116,6 +118,20 @@ rm -f wispTests/.nip98_live_enable
 shape on a missing/invalid/mismatched NIP-98 signature rather than returning
 401 — so a 200 with no `owner` field means the byte contract is wrong. A
 verified ephemeral non-member gets `{"found":false,"owner":true}`.
+
+**Live recipe publish** (opt-in; Concern 2.3). Uses an ephemeral keypair —
+never a real nsec. Touches public article relays and `https://zap.cooking/r/{naddr}`:
+
+```
+touch wispTests/.recipe_publish_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -only-testing:wispTests/RecipePublisherLiveTests \
+  test
+rm -f wispTests/.recipe_publish_live_enable
+```
 
 ---
 
@@ -886,13 +902,24 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - **2.3 `RecipePublisher.swift`** — Blossom re-host of the cover image
   (**fallback to source URL so Save never blocks**) → sign kind-30023 → cache
   optimistically → publish to write relays **+ broadcast to the articles
-  relays** so it appears in the feed.
+  relays** so it appears in the feed. Deletion (§7.9) derives `deleteKind`
+  from `event.kind` and tombstones carry both `a` and `k`. **§7.8 is
+  recorded, not solved:** same title ⇒ same d-tag ⇒ silent replace; the
+  "make your title unique" caption is a 2.4 UI concern.
 - **2.4 `RecipeComposeView`** — dedicated full-screen form (**not** an extension
   of the note composer): title, categories, summary, chef's notes,
   prep/cook/servings, add/remove ingredient & direction rows, multi-image
   picker, additional resources. Images upload to Blossom **as picked**;
   publish is **blocked while any upload is pending or failed**. Validation
   shows the **reason** on the button — never a silent disable.
+  **§7.8 caption:** same title ⇒ same slug ⇒ same d-tag ⇒ silent replace;
+  the form must show the web's "make your title unique" hint (2.3 records
+  this, does not build the warning).
+  **Delete must refresh the feed explicitly.** `RecipeRepository.ingest`
+  drops non-recipes, so a blanked replacement cannot evict the live
+  coordinate. If 2.4 deletes and then relies on ingest, the card stays and
+  reads as a failed delete. After `RecipePublisher.delete` returns, reload
+  the feed. Do not add an evict API on ingest to paper over this.
 - **2.5 Sous Chef** — URL field → free anon `/api/extract-recipe/public` →
   structured preview via the shared recipe body → Save routes into 2.4.
   Image/text import is NIP-98 + member-gated (P2).
