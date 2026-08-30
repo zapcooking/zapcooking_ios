@@ -655,6 +655,7 @@ struct MainView: View {
             .navigationDestination(for: ArticleRoute.self) { route in
                 ArticleView(route: route, keypair: keypair, path: $feedPath)
             }
+            .recipeNavigation(keypair: keypair, path: $feedPath)
             .navigationDestination(for: HashtagFeedRoute.self) { route in
                 hashtagFeedView(for: route)
             }
@@ -748,6 +749,7 @@ struct MainView: View {
                             .navigationDestination(for: ArticleRoute.self) { route in
                                 ArticleView(route: route, keypair: keypair, path: $searchPath)
                             }
+                            .recipeNavigation(keypair: keypair, path: $searchPath)
                             .toolbar(.hidden, for: .navigationBar)
                     }
                 case .notifications:
@@ -794,6 +796,7 @@ struct MainView: View {
                         .navigationDestination(for: ArticleRoute.self) { route in
                             ArticleView(route: route, keypair: keypair, path: $notificationsPath)
                         }
+                        .recipeNavigation(keypair: keypair, path: $notificationsPath)
                         .toolbar(.hidden, for: .navigationBar)
                     }
                 case .wallet:
@@ -820,6 +823,7 @@ struct MainView: View {
                             .navigationDestination(for: ArticleRoute.self) { route in
                                 ArticleView(route: route, keypair: keypair, path: $placeholderPath)
                             }
+                            .recipeNavigation(keypair: keypair, path: $placeholderPath)
                             .toolbar(.hidden, for: .navigationBar)
                     }
                 }

@@ -382,11 +382,16 @@ struct ArticleView: View {
 /// the shared services (`EngagementRepository`, `ReactionSender`,
 /// `RepostSender`, `ComposePresenter`, `ZapSheet`) without extracting the
 /// card's deeply-coupled private bar.
-private struct ArticleActionBar: View {
+///
+/// Internal so `RecipeDetailView` (Concern 1.3) reuses this bar rather than
+/// forking it. `zapsOnPosts` is Gate 0-F: when false, the zap is profile-level
+/// (`eventId` nil) instead of attached to the post.
+struct ArticleActionBar: View {
     let article: NostrEvent
     let keypair: Keypair
     let replyCount: Int
     let authorProfile: ProfileData?
+    var zapsOnPosts: Bool = FeatureFlags.zapsOnPosts
 
     @Environment(ComposePresenter.self) private var composePresenter: ComposePresenter?
     @Environment(WalletStore.self) private var walletStore: WalletStore?
@@ -501,7 +506,7 @@ private struct ArticleActionBar: View {
                     recipientPubkey: article.pubkey,
                     recipientLud16: authorProfile?.lud16,
                     recipientName: authorProfile?.displayString,
-                    eventId: article.id,
+                    eventId: zapsOnPosts ? article.id : nil,
                     extraTags: [],
                     forcePrivate: false,
                     onSuccess: { _ in },
