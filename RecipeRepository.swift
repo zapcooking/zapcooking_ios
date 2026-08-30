@@ -2,8 +2,8 @@ import Foundation
 import Observation
 
 /// The recipe read path — the one place recipes are fetched, deduped and
-/// cached. `RecipeFeedView`, `RecipeDetailView` and `RecipeTagFeedView` all
-/// consume this; none of them queries relays or dedupes on its own.
+/// cached. Feed, detail, and tag-feed surfaces will consume this; none of
+/// them should query relays or dedupe on its own.
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.2):
 /// - `{kinds:[30023], #t:[zapcooking, nostrcooking]}` fanned out to the
@@ -78,8 +78,8 @@ final class RecipeRepository {
     /// current one when it finishes. See ``submit(_:)``.
     @ObservationIgnored private var submitGeneration = 0
 
-    /// The recipe read union. Coverage is deliberately uneven — `nostr.wine`
-    /// has probed at zero — and that is not a failure.
+    /// The recipe read union. Coverage is deliberately uneven — a relay
+    /// returning nothing is normal — and that is not a failure.
     @ObservationIgnored private let relays: [String]
 
     @ObservationIgnored private let format: any RecipeFormat
