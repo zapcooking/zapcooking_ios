@@ -387,6 +387,93 @@ struct RecipeBookmarkRepositoryTests {
         #expect(!rendered.contains { RecipeRepository.coordinate($0) == hiddenCoord })
     }
 
+    @Test func createList_unconfirmedCold_signsNothing() async {
+        let probe = Probe()
+        probe.confirm = .unconfirmed
+        let repo = RecipeBookmarkRepository(env: probe.env)
+        let kp = try! makeKeypair()
+        let dTag = await repo.createList(title: "Weeknight", seedEvent: seedRecipe(), keypair: kp)
+        #expect(dTag == nil)
+        #expect(probe.signed.isEmpty)
+        #expect(probe.published.isEmpty)
+        #expect(repo.lastWriteError == RecipeBookmarkRepository.writeUnconfirmedMessage)
+    }
+
+    @Test func createList_coldSession_populatedRemote_appendsSeed() async {
+        let remote = listEvent(
+            tags: [
+                ["d", "weeknight"],
+                ["title", "Weeknight"],
+                ["t", "zapcooking"],
+                ["a", coordA],
+                ["a", coordB],
+            ],
+            content: "existing collection"
+        )
+        let probe = Probe()
+        probe.confirm = .found(remote)
+        let repo = RecipeBookmarkRepository(env: probe.env)
+        let kp = try! makeKeypair()
+        let dTag = await repo.createList(title: "Weeknight", seedEvent: seedRecipe(dTag: "meatloaf"), keypair: kp)
+        #expect(dTag == "weeknight")
+        #expect(probe.signed.count == 1)
+        let coords = probe.signed[0].tags.compactMap { $0.count >= 2 && $0[0] == "a" ? $0[1] : nil }
+        #expect(coords == [coordA, coordB, coordC])
+        #expect(coords != [coordC], "cold createList must not replace the remote collection")
+        #expect(probe.signed[0].content == "existing collection")
+        #expect(repo.lastWriteError == nil)
+    }
+
+    @Test func applyEvent_sameCreatedAt_lowerIdWins() {
+        let probe = Probe()
+        let repo = RecipeBookmarkRepository(env: probe.env)
+        let olderId = listEvent(
+            tags: [
+                ["d", RecipeBookmarkRepository.defaultListDTag],
+                ["title", "Saved"],
+                ["a", coordA],
+            ],
+            createdAt: 1_700_000_000,
+            id: "ff".appending(String(repeating: "0", count: 62))
+        )
+        let newerId = listEvent(
+            tags: [
+                ["d", RecipeBookmarkRepository.defaultListDTag],
+                ["title", "Saved"],
+                ["a", coordA],
+                ["a", coordB],
+            ],
+            createdAt: 1_700_000_000,
+            id: "00".appending(String(repeating: "1", count: 62))
+        )
+        repo.applyEvent(olderId)
+        repo.applyEvent(newerId)
+        #expect(repo.bookmarkedCoordinates == Set([coordA, coordB]))
+        #expect(repo.lists.first?.event.id == newerId.id)
+
+        let later = listEvent(
+            tags: [
+                ["d", RecipeBookmarkRepository.defaultListDTag],
+                ["title", "Saved"],
+                ["a", coordC],
+            ],
+            createdAt: 1_700_000_001,
+            id: "ee".appending(String(repeating: "2", count: 62))
+        )
+        repo.applyEvent(later)
+        #expect(repo.bookmarkedCoordinates == Set([coordC]))
+    }
+
+    @Test func isNewerReplaceable_equalCreatedAt_lowerIdWins() {
+        let high = listEvent(tags: [["d", RecipeBookmarkRepository.defaultListDTag]], createdAt: 10, id: "ff")
+        let low = listEvent(tags: [["d", RecipeBookmarkRepository.defaultListDTag]], createdAt: 10, id: "00")
+        #expect(RecipeBookmarkRepository.isNewerReplaceable(low, than: high))
+        #expect(!RecipeBookmarkRepository.isNewerReplaceable(high, than: low))
+        let later = listEvent(tags: [["d", RecipeBookmarkRepository.defaultListDTag]], createdAt: 11, id: "ff")
+        #expect(RecipeBookmarkRepository.isNewerReplaceable(later, than: low))
+        #expect(!RecipeBookmarkRepository.isNewerReplaceable(low, than: later))
+    }
+
     @Test func coordinateForEvent_usesTheRecipeDTag_notTheListHelper() {
         let event = NostrEvent(
             id: "aa",
@@ -398,6 +485,18 @@ struct RecipeBookmarkRepositoryTests {
             sig: String(repeating: "0", count: 128)
         )
         #expect(RecipeBookmarkRepository.coordinateForEvent(event) == coordA)
+    }
+
+    private func seedRecipe(dTag: String = "tuscan-peposo") -> NostrEvent {
+        NostrEvent(
+            id: "cc",
+            pubkey: author,
+            kind: RecipeParser.recipeKind,
+            createdAt: 1,
+            tags: [["d", dTag], ["t", "zapcooking"]],
+            content: bookmarkTestRecipeBody,
+            sig: String(repeating: "0", count: 128)
+        )
     }
 
     private func makeKeypair() throws -> Keypair {

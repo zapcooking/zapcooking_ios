@@ -110,6 +110,16 @@ final class RecipeBookmarkRepository {
 
     // MARK: - Pure planners (Android companion; the hermetic gate)
 
+    /// NIP-01 replaceable newest-wins: higher `createdAt` wins; equal
+    /// `createdAt`, lower event id wins. Same-second rapid toggles must not
+    /// drop the event relays will serve.
+    nonisolated static func isNewerReplaceable(_ incoming: NostrEvent, than current: NostrEvent) -> Bool {
+        if incoming.createdAt != current.createdAt {
+            return incoming.createdAt > current.createdAt
+        }
+        return incoming.id < current.id
+    }
+
     /// A streamed event wins regardless of EOSE. Absence is only confirmed
     /// when at least one targeted relay EOSE'd. No event and no EOSE is
     /// unconfirmed — a replaceable create must not proceed on that.
@@ -342,7 +352,7 @@ final class RecipeBookmarkRepository {
     func applyEvent(_ event: NostrEvent) {
         guard event.kind == Self.listKind, Self.isRecipeList(event) else { return }
         guard let dTag = Self.dTagOf(event) else { return }
-        if let current = listsByDTag[dTag], event.createdAt <= current.createdAt { return }
+        if let current = listsByDTag[dTag], !Self.isNewerReplaceable(event, than: current) { return }
         listsByDTag[dTag] = event
         env.persist(event)
         publishListsState()
@@ -401,6 +411,8 @@ final class RecipeBookmarkRepository {
 
     /// Create a named collection (slug `d`-tag + recipe `t` tag). Colliding
     /// slugs add to the existing list. Never creates the default Saved list.
+    /// Cold-cache: same relay check as ``mutateList`` so a colliding slug
+    /// cannot publish a one-item replaceable over an unfetched copy.
     func createList(title: String, seedEvent: NostrEvent?, keypair: Keypair?) async -> String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let keypair else { return nil }
@@ -410,7 +422,11 @@ final class RecipeBookmarkRepository {
         writeBusy = true
         defer { writeBusy = false }
         let author = keypair.pubkey
-        let base = listsByDTag[dTag] ?? env.cachedList(author, dTag)
+        let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
+        if base == nil && !absenceConfirmed {
+            lastWriteError = Self.writeUnconfirmedMessage
+            return nil
+        }
         var nextCoords = base.map { Self.parseCoordinates($0) } ?? []
         if let seedEvent, let coord = Self.coordinateForEvent(seedEvent),
            !nextCoords.contains(coord) {
@@ -447,18 +463,7 @@ final class RecipeBookmarkRepository {
         writeBusy = true
         defer { writeBusy = false }
         let author = keypair!.pubkey
-        var base = listsByDTag[dTag] ?? env.cachedList(author, dTag)
-        var absenceConfirmed = false
-        if base == nil {
-            switch await confirmList(author: author, dTag: dTag) {
-            case .found(let event):
-                base = event
-            case .confirmedAbsent:
-                absenceConfirmed = true
-            case .unconfirmed:
-                break
-            }
-        }
+        let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
         switch Self.planMutation(
             base: base,
             absenceConfirmed: absenceConfirmed,
@@ -487,6 +492,23 @@ final class RecipeBookmarkRepository {
     }
 
     // MARK: - Internals
+
+    /// Memory, then on-device cache, then the bounded relay check. A nil
+    /// base with `absenceConfirmed == false` is the overwrite hazard —
+    /// callers must not sign.
+    private func resolveCarryForward(author: String, dTag: String) async -> (NostrEvent?, Bool) {
+        if let local = listsByDTag[dTag] ?? env.cachedList(author, dTag) {
+            return (local, false)
+        }
+        switch await confirmList(author: author, dTag: dTag) {
+        case .found(let event):
+            return (event, false)
+        case .confirmedAbsent:
+            return (nil, true)
+        case .unconfirmed:
+            return (nil, false)
+        }
+    }
 
     private func confirmList(author: String, dTag: String) async -> RelayListCheck {
         if let last = lastUnconfirmedCheckMs[dTag],
@@ -632,7 +654,7 @@ enum RecipeBookmarkCache {
         for existing in load(author: event.pubkey) {
             if let d = RecipeBookmarkRepository.dTagOf(existing) { byD[d] = existing }
         }
-        if let current = byD[dTag], event.createdAt <= current.createdAt { return }
+        if let current = byD[dTag], !RecipeBookmarkRepository.isNewerReplaceable(event, than: current) { return }
         byD[dTag] = event
         UserDefaults.standard.set(byD.values.map { $0.toJSON() }, forKey: key(event.pubkey))
     }
