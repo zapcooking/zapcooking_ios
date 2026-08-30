@@ -16,6 +16,8 @@ struct SidebarDrawerView: View {
     var onOpenInterface: () -> Void = {}
     var onOpenKeys: () -> Void = {}
     var onOpenDraftsScheduled: () -> Void = {}
+    /// Gadgets sheet — timers (1.8a). Converter is a follow-up.
+    var onOpenGadgets: () -> Void = {}
     var onOpenCustomEmojis: () -> Void = {}
     var onOpenLists: () -> Void = {}
     var onOpenPolls: () -> Void = {}
@@ -346,6 +348,9 @@ struct SidebarDrawerView: View {
             }
             DrawerRow(icon: "pencil", label: "Drafts & Scheduled") {
                 onOpenDraftsScheduled()
+            }
+            DrawerRow(icon: "timer", label: "Gadgets") {
+                onOpenGadgets()
             }
             DrawerRow(
                 icon: "gearshape",
