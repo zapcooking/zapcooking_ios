@@ -873,6 +873,26 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   per-mode result cache, pull-to-refresh as the only re-query path. Retires
   the `.onlyfood` placeholder; the tab becomes a valid launch/deep-link
   destination in the same PR.
+  **Landed:** `FoodHashtags` / `FoodTopics` / `OnlyFoodFilter` (mute / block /
+  structural / reply; WoT wired as a no-op in v1); `OnlyFoodFeedViewModel` +
+  `OnlyFoodFeedView` with per-mode cache, process-wide subId sequence (§7.2),
+  serialized submit that CLOSEs only opened subIds (§7.5). Empty Following
+  invites Global instead of spinning. The tab stays mounted so `.task` cannot
+  re-issue the REQ.
+  **Live gate (search.nostrarchives.com):** Global returned 100 kind-1 events.
+  Decision histogram (structuralSpam and reply counted separately; threshold
+  unchanged at `maxHashtags = 5`): accept 30, **structuralSpam 69**, **reply 1**,
+  futureDated / blockedPubkey / userBlocked / mutedWord / threadMuted / deleted
+  / wotFiltered / noFoodTag / notKind1 all 0. All 69 structuralSpam were
+  hashtagCap (`max(content #tags, t-tags) > 5`); hellthread (p ≥ 25) was 0.
+  Of those 69, ~61 were 100+ t-tag aggregator spam; the 6–20 band includes
+  real food posts (e.g. a `#food #foodstr` photo with 7 tags). Evidence only
+  — cap not raised. Hashtag REQ is **single-relay** (`search.nostrarchives.com`)
+  matching Android's hashtag path; Android's extra `nos.lol` / primal /
+  nostr.net set is the skipped keyword firehose. Empty (EOSE, 0 accepted) vs
+  error (no EOSE) are distinct UI states; a timeout is no longer a stuck
+  spinner. Hermetic test `toggle_globalFollowingGlobal_doesNotRequeryGlobal`
+  is the proof that the second Global render issues no REQ.
 - 3.4 Food-first onboarding: curated creator starter pack (**Seth owes the
   list** — Android's is still the inherited generic set), food-framed copy,
   topic picker, save-a-recipe first-run step.
@@ -974,6 +994,14 @@ threshold, and an exception there could cancel the whole stream.
 is added later, it goes in a `try/catch` with keep-on-error, and the threshold
 is validated against real food posts first. Also audit any *existing* iOS
 `SpamScorer`-inside-collector sites for the same latent cancellation bug.
+
+**Audit (Concern 3.3):** no `SpamScorer` call exists inside a feed collector.
+`FeedViewModel` / `RecipeRepository` / `HashtagFeedViewModel` / the new
+`OnlyFoodFeedViewModel` never invoke it. The two existing `SpamScorer.shared.score`
+sites are `NotificationsViewModel.maybeScoreReplyForSpam` and
+`ThreadViewModel.maybeScoreReplyForSpam` — they run in a detached `Task` after
+ingest, gated by `SafetyPreferences.spamFilterEnabled`, and cannot cancel the
+subscription. Left untouched (out of scope).
 
 **7.4 — Search relays rate-limit per connection.**
 Identical filter, same connection: 99 events, then 0 events twelve seconds

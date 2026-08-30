@@ -690,8 +690,12 @@ actor RelayConnectionPool {
     /// guaranteed a connection (evicting an idle conn first, else temporarily
     /// overflowing the cap). Reserved for the active user-selected relay feed,
     /// which is a single explicit choice that must always connect.
+    ///
+    /// Returns the number of relays actually registered. Can be less than
+    /// `relays.count` (or zero) when the connection cap refuses new sockets.
+    @discardableResult
     func register(subId: String, relays: [(url: URL, req: String)], sink: RelaySink,
-                  bypassConnectionCap: Bool = false) async {
+                  bypassConnectionCap: Bool = false) async -> Int {
         startReaperIfNeeded()
         #if DEBUG
         let connsBefore = conns.count
@@ -720,7 +724,9 @@ actor RelayConnectionPool {
         // which is exactly the kind of leaked no-`since` stream that caused regression #266.
         if cancelledSubs.remove(subId) != nil {
             await deregister(subId: subId)
+            return 0
         }
+        return registered.count
     }
 
     func deregister(subId: String) async {
