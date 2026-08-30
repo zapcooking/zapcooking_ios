@@ -6,9 +6,11 @@ import Observation
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.7):
 /// - Queries go through the repository's category filter. This type does
 ///   not open sockets, does not dedupe, and does not own an error surface.
-/// - One-shot ``start()`` per tag. A second call for the same slug is a
-///   no-op so `.task` cannot re-issue the filter (§7.4).
-/// - Pull-to-refresh is the only re-query path.
+/// - ``start()`` is a no-op while the shared tag session is already
+///   this slug, so `.task` cannot re-issue the filter (§7.4). If a
+///   deeper tag feed stole the session, ``activeTag`` has moved and
+///   we reload — otherwise pop-back paints the wrong category.
+/// - Pull-to-refresh is the only deliberate re-query path.
 @Observable
 @MainActor
 final class RecipeTagFeedViewModel {
@@ -16,7 +18,6 @@ final class RecipeTagFeedViewModel {
     static let loadMorePrefetch = 6
 
     private let repository: RecipeRepository
-    @ObservationIgnored private var startedTag: String?
 
     let tag: String
     let tagInfo: RecipeTag
@@ -39,8 +40,7 @@ final class RecipeTagFeedViewModel {
     var isEmpty: Bool { events.isEmpty && hasLoaded }
 
     func start() {
-        guard !tag.isEmpty, startedTag != tag else { return }
-        startedTag = tag
+        guard !tag.isEmpty, repository.activeTag != tag else { return }
         repository.loadTagFeed(tag: tag)
     }
 

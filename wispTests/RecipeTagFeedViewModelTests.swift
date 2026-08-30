@@ -51,7 +51,7 @@ struct RecipeTagFeedViewModelTests {
         #expect(vm.hasLoaded)
     }
 
-    @Test func start_isOneShotPerTag() async {
+    @Test func start_isOneShotWhileTheSharedSessionIsThisTag() async {
         let repo = RecipeRepository(relays: [])
         let vm = RecipeTagFeedViewModel(tag: "italian", repository: repo)
 
@@ -61,6 +61,31 @@ struct RecipeTagFeedViewModelTests {
 
         vm.start()
         #expect(!repo.isTagLoading)
+    }
+
+    /// Italian → recipe → beef chip → pop. `.task` re-runs `start()` on
+    /// the Italian VM; a one-shot `startedTag` would leave beef recipes
+    /// under the Italian header.
+    @Test func start_reloadsWhenSharedSessionMovedToAnotherTag() async {
+        let italian = recipe(id: "aa", dTag: "peposo", createdAt: 100, categories: ["italian"])
+        let beef = recipe(id: "bb", dTag: "steak", createdAt: 100, categories: ["beef"])
+        let repo = RecipeRepository(relays: [], seedCache: { [italian, beef] })
+
+        let italianVM = RecipeTagFeedViewModel(tag: "italian", repository: repo)
+        italianVM.start()
+        await repo.tagInFlight?.value
+        #expect(italianVM.events.map(\.id) == ["aa"])
+
+        let beefVM = RecipeTagFeedViewModel(tag: "beef", repository: repo)
+        beefVM.start()
+        await repo.tagInFlight?.value
+        #expect(repo.activeTag == "beef")
+        #expect(repo.tagRecipes.map(\.id) == ["bb"])
+
+        italianVM.start()
+        await repo.tagInFlight?.value
+        #expect(repo.activeTag == "italian")
+        #expect(italianVM.events.map(\.id) == ["aa"])
     }
 
     @Test func start_doesNotQueryABlankTag() {
