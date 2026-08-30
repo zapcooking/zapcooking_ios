@@ -181,24 +181,63 @@ nonisolated enum ZapCookingApi {
 
     // MARK: - Error mapping
 
-    /// Non-2xx → typed error. 401 → sign-in, 403 → members-only, 429 → rate
-    /// limit (build spec §2). Callers that need a 200-with-`{ok:false}`
-    /// rejection (the AI endpoints) decode the body themselves — the
-    /// membership endpoints never use that shape.
+    /// Non-2xx → typed error. Dispatches on the body's additive `code`
+    /// first (the stable vocabulary from zapcooking/frontend), then
+    /// falls back to HTTP status for responses that don't carry one.
+    ///
+    /// Status-only branching is the fragility the extract-recipe
+    /// re-taxonomy (400 → 400/422/503/500) is queued behind: Android
+    /// still body-parses only in its 400 branch. Codes stay put when
+    /// statuses move.
+    ///
+    /// Known codes that already have dedicated cases:
+    ///   `NOT_MEMBER` → `membersOnly`
+    ///   `RATE_LIMITED` → `rateLimited`
+    /// Everything else with a `code` — including
+    /// `MEMBERSHIP_UNAVAILABLE` — uses `apiRejected`, the same case as
+    /// 200-with-`{ok:false}`. A bare 403 (no code) is also
+    /// `apiRejected`, not `membersOnly`: a pantry outage must not
+    /// render as a definitive membership denial.
+    ///
+    /// Callers that need a 200-with-`{ok:false}` rejection still decode
+    /// the body themselves — membership endpoints never use that shape.
     static func throwErrorIfNeeded(status: Int, body: Data) throws {
+        guard !(200..<300).contains(status) else { return }
+
+        let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: body)
+        if let code = envelope?.code?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !code.isEmpty {
+            throw error(forCode: code, message: envelope?.error, retryAfter: envelope?.retryAfter)
+        }
+
         switch status {
-        case 200..<300:
-            return
         case 401:
-            throw ZapCookingApiError.notSignedIn(nil)
+            throw ZapCookingApiError.notSignedIn(envelope?.error)
         case 403:
-            throw ZapCookingApiError.membersOnly
+            throw ZapCookingApiError.apiRejected(code: nil, message: envelope?.error)
         case 429:
-            throw ZapCookingApiError.rateLimited(retryAfter: nil)
+            throw ZapCookingApiError.rateLimited(retryAfter: envelope?.retryAfter)
         default:
             throw ZapCookingApiError.requestFailed(
                 status: status, body: String(data: body, encoding: .utf8)
             )
+        }
+    }
+
+    /// Map a server `code` onto the existing error cases. Unknown codes
+    /// pass through `apiRejected` rather than a second taxonomy.
+    private static func error(
+        forCode code: String,
+        message: String?,
+        retryAfter: TimeInterval?
+    ) -> ZapCookingApiError {
+        switch code {
+        case "NOT_MEMBER":
+            return .membersOnly
+        case "RATE_LIMITED":
+            return .rateLimited(retryAfter: retryAfter)
+        default:
+            return .apiRejected(code: code, message: message)
         }
     }
 
@@ -228,22 +267,34 @@ nonisolated enum ZapCookingApi {
 /// Failures from the zap.cooking backend, mapped at the HTTP boundary. All
 /// associated values are `Sendable` so the enum crosses actor boundaries
 /// cleanly under Swift 6 concurrency.
-enum ZapCookingApiError: Error, Sendable {
+enum ZapCookingApiError: Error, Sendable, Equatable {
     /// 401, or NIP-98 signing key missing (watch-only account).
     case notSignedIn(String?)
-    /// 403 — valid auth, no active membership (on check-status, the server's
-    /// membership flag is off).
+    /// Genuine non-member (`code: NOT_MEMBER`). Not every 403 — a pantry
+    /// outage is `MEMBERSHIP_UNAVAILABLE` (or a bare 403 with no code),
+    /// both of which surface as `apiRejected` so callers can render
+    /// "temporarily unavailable" rather than a definitive denial.
     case membersOnly
-    /// 429 — rate limited.
+    /// 429 / `code: RATE_LIMITED`.
     case rateLimited(retryAfter: TimeInterval?)
-    /// Any other non-2xx HTTP status.
+    /// Any other non-2xx HTTP status with no `code`.
     case requestFailed(status: Int, body: String?)
-    /// 200 with `{ok:false}` — server rejected the request body (AI endpoints).
-    case apiRejected(code: String?, message: String?)
+    /// Server rejected the request with a typed `code` (or a bare 403 with no code).
+    /// Used for non-2xx bodies that carry `code` and for callers that choose to
+    /// surface 200-with-`{ok:false}` responses as an error.
     case encoding(String)
     case decoding(String)
     case transport(String)
     case badRequest(String)
+}
+
+/// Additive error envelope used by zap.cooking (`{ error, code?, retryAfter? }`).
+/// Shared by `{ok:false}` AI bodies and `{success:false}` extract-recipe
+/// bodies. Extra keys (`ok`, `success`, …) are ignored.
+private struct ErrorEnvelope: Decodable {
+    var code: String?
+    var error: String?
+    var retryAfter: TimeInterval?
 }
 
 // MARK: - Response models
