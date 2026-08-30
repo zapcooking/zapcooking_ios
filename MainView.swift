@@ -20,16 +20,11 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    // Interim launch tab. `.recipes` is the intended default under the
-    // food-first layout, but the Recipes tab is not built yet — `.recipes`,
-    // `.onlyfood` and `.kitchen` all fall through to `placeholderTab`
-    // ("Coming soon"). `.search` is the only bottom-bar tab that is both
-    // functional and highlights correctly on launch. Flip this back to
-    // `.recipes` in the same PR that lands **Concern 1.5** (`RecipeFeedView`
-    // + `RecipeCard` — the Recipes tab). Not 1.3: 1.3 is `RecipeDetailView`,
-    // the screen behind a tap, and lands while this tab is still a placeholder.
-    @State private var selectedTab: BottomTab = .search
+    // Food-first default (Concern 1.5). `.onlyfood` and `.kitchen` still
+    // fall through to `placeholderTab` until 3.3 / 3.2.
+    @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
+    @State private var recipesPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
     @State private var searchPath = NavigationPath()
@@ -38,9 +33,11 @@ struct MainView: View {
     /// already-visited ancestor instead of pushing a duplicate. Maintained by
     /// ThreadView's `.task` (append) + `.onDisappear` (remove-tail).
     @State private var feedThreadChain: [String] = []
+    @State private var recipesThreadChain: [String] = []
     @State private var placeholderThreadChain: [String] = []
     @State private var notificationsThreadChain: [String] = []
     @State private var searchThreadChain: [String] = []
+    @State private var recipeFeedVM = RecipeFeedViewModel()
     @State private var drawerOpen = false
     @State private var drawerDragOffset: CGFloat = 0
     @State private var engagementRepo = EngagementRepository.shared
@@ -707,6 +704,43 @@ struct MainView: View {
         }
     }
 
+    private var recipesTab: some View {
+        NavigationStack(path: $recipesPath) {
+            RecipeFeedView(
+                keypair: keypair,
+                path: $recipesPath,
+                onOpenDrawer: openDrawer,
+                avatarURL: viewModel.userProfile?.picture,
+                viewModel: recipeFeedVM
+            )
+            .navigationDestination(for: ProfileRoute.self) { route in
+                ProfileView(
+                    pubkey: route.pubkey,
+                    activeUserPubkey: keypair.pubkey,
+                    onProfileTap: { pk in recipesPath.append(ProfileRoute(pubkey: pk)) },
+                    onNoteTap: { eid in recipesPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
+                    onHashtagTap: { _ in },
+                    path: $recipesPath
+                )
+            }
+            .navigationDestination(for: ThreadRoute.self) { route in
+                ThreadView(
+                    seedEventId: route.eventId,
+                    authorHint: route.authorPubkey,
+                    keypair: keypair,
+                    path: $recipesPath,
+                    chain: $recipesThreadChain,
+                    scrollToId: route.scrollToId
+                )
+            }
+            .navigationDestination(for: ArticleRoute.self) { route in
+                ArticleView(route: route, keypair: keypair, path: $recipesPath)
+            }
+            .recipeNavigation(keypair: keypair, path: $recipesPath)
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
     private var mainShell: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -718,8 +752,17 @@ struct MainView: View {
                     .allowsHitTesting(selectedTab == .home)
                     .accessibilityHidden(selectedTab != .home)
 
+                // Recipes is the launch tab. Kept mounted so the cache-seeded
+                // grid and its ScrollView survive tab changes — the same
+                // reason home stays mounted, and so `.task` cannot re-issue
+                // the feed REQ (§7.4).
+                recipesTab
+                    .opacity(selectedTab == .recipes ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .recipes)
+                    .accessibilityHidden(selectedTab != .recipes)
+
                 switch selectedTab {
-                case .home:
+                case .home, .recipes:
                     EmptyView()
                 case .messages:
                     MessagesView(viewModel: messagesVM, groupListVM: groupListVM)
@@ -1418,11 +1461,12 @@ struct MainView: View {
         case .home:
             feedPath = NavigationPath()
             feedScrollToTopTrigger &+= 1
+        case .recipes: recipesPath = NavigationPath()
         case .wallet: placeholderPath = NavigationPath()
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
         case .messages: break  // MessagesView owns its own NavigationStack
-        case .recipes, .onlyfood, .kitchen: placeholderPath = NavigationPath()
+        case .onlyfood, .kitchen: placeholderPath = NavigationPath()
         }
     }
 

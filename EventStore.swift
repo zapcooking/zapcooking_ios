@@ -93,6 +93,26 @@ actor EventStore {
     /// gift-wrap-materialized private replies/reactions so they never bleed
     /// into the public timeline — `PrivateInteractionStore` is the source of
     /// truth for that set and the caller passes its current snapshot.
+    /// Kind-30023 events, newest first. The recipe feed seeds from this so
+    /// the first paint is local — no network. Callers still run the events
+    /// through `RecipeRepository.deduped` / `RecipeParser.isRecipe`; this
+    /// returns the raw kind, including plain articles that share it.
+    ///
+    /// `ObjectBoxSetup.store` is a force-unwrap and crashes if `setUp()`
+    /// has not run. Tests (and any pre-setup read) get an empty array.
+    func seedRecipes(limit: Int = 2000) -> [NostrEvent] {
+        guard ObjectBoxSetup.store != nil, let box = ensureBox() else { return [] }
+        do {
+            let query = try box.query { EventEntity.kind == 30023 }
+                .ordered(by: EventEntity.createdAt, flags: .descending)
+                .build()
+            let entities = try query.find(offset: 0, limit: limit)
+            return entities.compactMap { $0.toNostrEvent() }
+        } catch {
+            return []
+        }
+    }
+
     func seedCache(limit: Int = 2000, excludingEventIds: Set<String> = []) -> [NostrEvent] {
         guard let box = ensureBox() else { return [] }
         do {

@@ -272,4 +272,66 @@ struct RecipeRepositoryTests {
         repo.load()
         #expect(!repo.isLoading)
     }
+
+    // MARK: - Cache-seeded first paint (Concern 1.5 / §4.1)
+
+    /// ObjectBox paint is a local ingest. It must not mark the feed loaded —
+    /// otherwise `load` would no-op and the union would never run — and it
+    /// must not open a socket.
+    @Test func paintFromCache_surfacesRecipesWithoutMarkingLoaded() async {
+        let cached = recipe(id: "aa", createdAt: 100)
+        let repo = RecipeRepository(relays: [], seedCache: { [cached] })
+
+        await repo.paintFromCache()
+
+        #expect(repo.recipes.map(\.id) == ["aa"])
+        #expect(!repo.hasLoaded)
+        #expect(!repo.isLoading)
+    }
+
+    /// The airplane-mode gate. Seed first, then a silent union (no relays).
+    /// The painted cache must still be on screen; an empty answer is not
+    /// "the world is empty."
+    @Test func load_keepsCacheWhenUnionReturnsNothing() async {
+        let cached = recipe(id: "aa", createdAt: 100)
+        let repo = RecipeRepository(relays: [], seedCache: { [cached] })
+
+        repo.load()
+        await repo.inFlight?.value
+
+        #expect(repo.recipes.map(\.id) == ["aa"])
+        #expect(repo.hasLoaded)
+        #expect(!repo.isLoading)
+    }
+
+    /// Pull-to-refresh is a merge, not a replace. Airplane-mode refresh
+    /// must not blank a painted grid.
+    @Test func refresh_doesNotWipeHeldRecipesWhenUnionIsEmpty() async {
+        let repo = RecipeRepository(relays: [])
+        repo.ingest([recipe(id: "aa", createdAt: 100)])
+
+        repo.refresh()
+        await repo.inFlight?.value
+
+        #expect(repo.recipes.map(\.id) == ["aa"])
+        #expect(repo.hasLoaded)
+    }
+
+    /// `fetchPage` always persists the union result (including empty) so
+    /// the hook is on the only path that talks to relays. The painted
+    /// cache is not written back — persist sees the query, not the seed.
+    @Test func load_persistsTheUnionResultNotTheSeed() async {
+        let cached = recipe(id: "aa", createdAt: 100)
+        var persisted: [[NostrEvent]] = []
+        let repo = RecipeRepository(
+            relays: [],
+            seedCache: { [cached] },
+            persist: { persisted.append($0) }
+        )
+        repo.load()
+        await repo.inFlight?.value
+        #expect(persisted.count == 1)
+        #expect(persisted.first?.isEmpty == true)
+        #expect(repo.recipes.map(\.id) == ["aa"])
+    }
 }
