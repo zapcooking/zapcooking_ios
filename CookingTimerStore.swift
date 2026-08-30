@@ -83,8 +83,10 @@ enum CookingTimerPresets {
 /// On-screen copy when notifications are not authorized. Shown on the
 /// sheet and the floating bar so a lock never looks like a silent stall.
 enum CookingTimerCopy {
+    /// Shown while notifications are not authorized. Timers still count
+    /// down in the foreground; they freeze only when the app backgrounds.
     static let pausedWithoutNotifications =
-        "Timer paused — keep the app open, or the phone will lock and the timer stops."
+        "Keep the app open — locking the phone pauses the timer. Allow notifications to get a ding when it finishes."
 }
 
 @MainActor
@@ -287,12 +289,14 @@ final class CookingTimerStore {
             }
             var done = timer
             done.status = .done
+            done.endsAt = nil
             done.pausedRemaining = nil
             done.pausedBySystem = false
             newly.append(done)
             return done
         }
         if let last = newly.last {
+            for timer in newly { scheduler.cancel(id: timer.id) }
             presentCompletion(last)
             persist()
         }
@@ -304,15 +308,7 @@ final class CookingTimerStore {
             status = await authorizer.request()
         }
         authorization = status
-        if status == .authorized {
-            for timer in timers where timer.status == .running {
-                scheduleIfAuthorized(timer)
-            }
-        } else {
-            for timer in timers where timer.status == .running {
-                scheduler.cancel(id: timer.id)
-            }
-        }
+        syncScheduledNotifications()
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
@@ -329,9 +325,11 @@ final class CookingTimerStore {
     func onForeground() async {
         authorization = await authorizer.status()
         markElapsed()
-        if authorization != .authorized {
-            resumeSystemPaused()
-        }
+        // Always unfreeze system-paused timers on active. Denied: they
+        // count down in-process. Newly authorized (granted in Settings):
+        // they pick up a wall-clock `endsAt` and then get a notification.
+        resumeSystemPaused()
+        syncScheduledNotifications()
         startWatchingIfNeeded()
     }
 
@@ -367,6 +365,18 @@ final class CookingTimerStore {
     private func resumeSystemPaused() {
         let ids = timers.filter { $0.status == .paused && $0.pausedBySystem }.map(\.id)
         for id in ids { resume(id: id) }
+    }
+
+    private func syncScheduledNotifications() {
+        if authorization == .authorized {
+            for timer in timers where timer.status == .running {
+                scheduleIfAuthorized(timer)
+            }
+        } else {
+            for timer in timers where timer.status == .running {
+                scheduler.cancel(id: timer.id)
+            }
+        }
     }
 
     private func scheduleIfAuthorized(_ timer: CookingTimer) {
@@ -405,7 +415,21 @@ final class CookingTimerStore {
         guard let data = defaults.data(forKey: persistKey),
               let timers = try? JSONDecoder().decode([CookingTimer].self, from: data)
         else { return [] }
-        return timers
+        return timers.map { timer in
+            var t = timer
+            switch t.status {
+            case .running:
+                t.pausedRemaining = nil
+                t.pausedBySystem = false
+            case .paused:
+                t.endsAt = nil
+            case .done:
+                t.endsAt = nil
+                t.pausedRemaining = nil
+                t.pausedBySystem = false
+            }
+            return t
+        }
     }
 }
 

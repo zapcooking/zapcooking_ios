@@ -90,6 +90,7 @@ struct CookingTimerStoreTests {
         clock.now = t0.addingTimeInterval(10 * 60)
         store.markElapsed()
         #expect(store.timers.first?.status == .done)
+        #expect(store.timers.first?.endsAt == nil)
         #expect(store.completion?.id == timer.id)
     }
 
@@ -172,6 +173,7 @@ struct CookingTimerStoreTests {
             defaults: h.defaults
         )
         #expect(store2.timers.first?.status == .done)
+        #expect(store2.timers.first?.endsAt == nil)
         #expect(store2.completion?.label == "Steak Rest")
     }
 
@@ -211,6 +213,27 @@ struct CookingTimerStoreTests {
         #expect(veg.endsAt == h.clock.now.addingTimeInterval(7 * 60 - 30))
         #expect(pasta.status == .paused)
         #expect(pasta.pausedBySystem == false)
+    }
+
+    @Test func grantedInSettings_resumesSystemPaused_andSchedules() async throws {
+        let h = harness(auth: .denied)
+        await h.store.prepareNotifications()
+        let timer = try #require(h.store.addTimer(label: "Rice", minutes: 18))
+        h.clock.now = t0.addingTimeInterval(2 * 60)
+        h.store.onBackground()
+        #expect(h.store.timers.first?.status == .paused)
+        #expect(h.store.timers.first?.pausedBySystem == true)
+
+        h.authorizer.authorization = .authorized
+        h.scheduler.scheduled.removeAll()
+        h.clock.now = t0.addingTimeInterval(3 * 60)
+        await h.store.onForeground()
+
+        let running = try #require(h.store.timers.first { $0.id == timer.id })
+        #expect(running.status == .running)
+        #expect(running.endsAt == h.clock.now.addingTimeInterval(16 * 60))
+        #expect(Set(h.scheduler.scheduled.map(\.id)) == [timer.id])
+        #expect(!h.store.showsDeniedPauseCopy)
     }
 
     @Test func authorized_background_doesNotPause() async {
