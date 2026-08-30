@@ -14,6 +14,10 @@ import Observation
 ///   wins, **lower event id wins on a tie** (NIP-01).
 /// - `requestRecipe(author:dTag:)` resolves cache-first, then through the same
 ///   union with the same dedup — one code path.
+/// - `HiddenRecipes` (exact coordinates + d-tag prefixes) is applied inside
+///   ``deduped(_:)`` / ``requestRecipe(author:dTag:)`` / ``cached(author:dTag:)``
+///   so feed, tag feed, detail, and search inherit one hide. Do not
+///   re-filter in views.
 /// - The **feed** paints from ObjectBox before any relay is contacted
 ///   (Concern 1.5 / §4.1). An empty union does not wipe that paint — the
 ///   grid is cache ∪ live and never shrinks below the cached set.
@@ -176,8 +180,10 @@ final class RecipeRepository {
     ///   which is relay arrival order. A feed needs newest-first, and the sort
     ///   carries the same `created_at desc, id asc` tiebreaker so two launches
     ///   that received the same events in different orders render identically.
-    /// - **Nothing else.** Muting is applied separately and deliberately not
-    ///   here; see ``visible(_:)``.
+    /// - **HiddenRecipes.** Exact coordinates and d-tag prefixes (the 2.3
+    ///   live-publish leftovers) drop here so feed, tag feed, detail, and
+    ///   search inherit one hide. Muting is still applied separately; see
+    ///   ``visible(_:)``.
     ///
     /// Note this also *filters*: `dedupeAcrossFormats` drops any event no
     /// active format claims, and `Nip23RecipeFormat.matches` is
@@ -185,7 +191,7 @@ final class RecipeRepository {
     /// well as the kind and `#t`. A plain article carrying `#t zapcooking` is
     /// dropped here rather than in the view.
     static func deduped(_ events: [NostrEvent]) -> [NostrEvent] {
-        dedupeAcrossFormats(events) { RecipeFormats.rankOf($0) }
+        dedupeAcrossFormats(events.filter { !HiddenRecipes.isHidden($0) }) { RecipeFormats.rankOf($0) }
             .sorted { a, b in
                 if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
                 return a.id < b.id
@@ -319,7 +325,7 @@ final class RecipeRepository {
         guard !Task.isCancelled else { return }
 
         ingest(events, reset: reset)
-        persist(events)
+        persist(events.filter { !HiddenRecipes.isHidden($0) })
         hasLoaded = true
     }
 
@@ -381,6 +387,9 @@ final class RecipeRepository {
     /// the union comes back empty, not a source consulted before it, and it
     /// needs a tiebreaker of its own. That is a different concern's design.
     func requestRecipe(author: String, dTag: String) async -> NostrEvent? {
+        if HiddenRecipes.isHidden(kind: RecipeParser.recipeKind, pubkey: author, dTag: dTag) {
+            return nil
+        }
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
         if let cached = byCoordinate[key] ?? tagByCoordinate[key] { return cached }
 
@@ -404,6 +413,9 @@ final class RecipeRepository {
     /// card opened from a category feed is cache-first without moving the
     /// main feed's paging cursor.
     func cached(author: String, dTag: String) -> NostrEvent? {
+        if HiddenRecipes.isHidden(kind: RecipeParser.recipeKind, pubkey: author, dTag: dTag) {
+            return nil
+        }
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
         return byCoordinate[key] ?? tagByCoordinate[key]
     }
@@ -514,7 +526,7 @@ final class RecipeRepository {
 
         let matched = events.filter { RecipeParser.matchesCategory($0, tag) }
         ingestTag(matched, reset: reset)
-        persist(matched)
+        persist(matched.filter { !HiddenRecipes.isHidden($0) })
         hasTagLoaded = true
         if until != nil {
             let added = tagByCoordinate.keys.contains { !heldBefore.contains($0) }

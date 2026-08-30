@@ -231,6 +231,7 @@
 		4CFF9901000000000000000F /* CookWakeLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9900000000000000000F /* CookWakeLock.swift */; };
 		4CFF99010000000000000010 /* RecipeDeletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000010 /* RecipeDeletion.swift */; };
 		4CFF99010000000000000011 /* RecipePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000011 /* RecipePublisher.swift */; };
+		4CFF99010000000000000012 /* HiddenRecipes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000012 /* HiddenRecipes.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -585,6 +586,7 @@
 		4CFF9900000000000000000F /* CookWakeLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookWakeLock.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000010 /* RecipeDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDeletion.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000011 /* RecipePublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePublisher.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000012 /* HiddenRecipes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenRecipes.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -921,6 +923,7 @@
 				4CFF9900000000000000000F /* CookWakeLock.swift */,
 				4CFF99000000000000000010 /* RecipeDeletion.swift */,
 				4CFF99000000000000000011 /* RecipePublisher.swift */,
+				4CFF99000000000000000012 /* HiddenRecipes.swift */,
 				4CFFA00000000000000A0001 /* Nip51Lists.swift */,
 				4CFFA00000000000000A0002 /* RelaySet.swift */,
 				4CFFA00000000000000A0003 /* RelaySetRepository.swift */,
@@ -1438,6 +1441,7 @@
 				4CFF9901000000000000000F /* CookWakeLock.swift in Sources */,
 				4CFF99010000000000000010 /* RecipeDeletion.swift in Sources */,
 				4CFF99010000000000000011 /* RecipePublisher.swift in Sources */,
+				4CFF99010000000000000012 /* HiddenRecipes.swift in Sources */,
 				4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */,
 				4CFFA00100000000000A0002 /* RelaySet.swift in Sources */,
 				4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */,

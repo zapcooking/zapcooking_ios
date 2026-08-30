@@ -121,7 +121,27 @@ shape on a missing/invalid/mismatched NIP-98 signature rather than returning
 verified ephemeral non-member gets `{"found":false,"owner":true}`.
 
 **Live recipe publish** (opt-in; Concern 2.3). Uses an ephemeral keypair —
-never a real nsec. Touches public article relays and `https://zap.cooking/r/{naddr}`:
+never a real nsec, never printed, never persisted. Touches public article
+relays and `https://zap.cooking/r/{naddr}`. **Publish, verify, then delete
+in the same process** — the key is held in memory until
+`RecipePublisher.delete` (blanked replacement + kind-5) has been accepted
+by at least one articles relay and a re-query of that coordinate is no
+longer an `isRecipe`. A gate that only publishes leaves real recipe cards
+on the production feed; the first 2.3 run did that (§7.13).
+
+Why this shape, not the alternatives:
+- A `t`-tag our own feed filter excludes would still render on zap.cooking
+  unless the web also changed, and would stop proving the Recipes-tab path
+  (that path *is* `#t zapcooking` + `isRecipe`).
+- A test-only relay would not render on zap.cooking, so it would no longer
+  prove the gate.
+
+The leftover 2.3 probes (`d` prefix `ios-2.3-live-publish-`, eight
+pubkeys, keys gone) are hidden client-side via `HiddenRecipes` — same
+object Android already had, extended with a prefix matcher. That hide is
+the safety net for events we can no longer delete, not a substitute for
+cleanup. 3.1 and 2.4 live gates follow this same publish-verify-delete
+protocol.
 
 ```
 touch wispTests/.recipe_publish_live_enable
@@ -907,6 +927,11 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   from `event.kind` and tombstones carry both `a` and `k`. **§7.8 is
   recorded, not solved:** same title ⇒ same d-tag ⇒ silent replace; the
   "make your title unique" caption is a 2.4 UI concern.
+  **Live-write protocol:** publish → verify web + articles union →
+  delete with the key still in memory (§7.13). The first 2.3 run dropped
+  the ephemeral key; those events are hidden by `HiddenRecipes` d-tag
+  prefix `ios-2.3-live-publish-` in `RecipeRepository.deduped` (and the
+  same object on Android / web — duplicated, no shared package).
 - **2.4 `RecipeComposeView`** — dedicated full-screen form (**not** an extension
   of the note composer): title, categories, summary, chef's notes,
   prep/cook/servings, add/remove ingredient & direction rows, multi-image
@@ -921,6 +946,9 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   coordinate. If 2.4 deletes and then relies on ingest, the card stays and
   reads as a failed delete. After `RecipePublisher.delete` returns, reload
   the feed. Do not add an evict API on ingest to paper over this.
+  **Live-write gate (§7.13):** publish-verify-delete with the key held
+  until the coordinate is gone. Do not add another hide-list prefix to
+  paper over a discarded ephemeral key.
 - **2.5 Sous Chef** — URL field → free anon `/api/extract-recipe/public` →
   structured preview via the shared recipe body → Save routes into 2.4.
   Image/text import is NIP-98 + member-gated (P2).
@@ -935,6 +963,8 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - 3.1 Saved recipes (NIP-51 bookmark sets over `RecipeBookmarkRepository`
   semantics) — ⚠️ port the **first-save cold-session guard**: a cold session
   must not overwrite an existing saved-recipe collection (Android 1.3.5 fix).
+  A live-write gate for this concern follows §7.13
+  (publish-verify-delete; do not mint another hide-list prefix).
 - 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner / Nourish
   land in P2). Retires the `.kitchen` placeholder; the tab becomes a valid
   launch/deep-link destination in the same PR.
@@ -1142,6 +1172,27 @@ trapping without importing ObjectBox.
 → **iOS action:** never `import ObjectBox` into non-storage files to paper
 over this; never substitute `truncatingIfNeeded` (wraps) or `numericCast`
 (opaque). Prefer `Int64(exactly:)!`.
+
+**7.13 — Live-write gates need a cleanup step designed in from the start,
+on every platform.**
+The first 2.3 live publish used a fresh `SecRandomCopyBytes` key, printed
+only naddr / relay URLs, and dropped the privkey when the process exited.
+Eight real recipes (`iOS 2.3 Live Publish <timestamp>`, eight distinct
+pubkeys) landed on `relay.primal.net` and `nos.lol` as normal Recipes-tab
+cards (kind 30023, `#t zapcooking`, cover, ingredients, directions).
+NIP-09 cannot remove them without that key — they are permanent unless a
+relay operator intervenes. The same class of miss exists on Android and
+web the moment either grows a live-write gate (3.1 saved-list publish,
+2.4 compose).
+→ **iOS action:** a test that writes a public event holds the key until it
+has published the matching delete (blanked replacement + kind-5) and
+confirmed the coordinate is gone. Passing is not enough; cleanup is part
+of the gate. Events whose keys are already gone are hidden client-side by
+`HiddenRecipes` matching the **d-tag prefix**, not a pubkey denylist —
+applied in `RecipeRepository` so feed / tag / detail / search inherit.
+The hide list is **duplicated** (Swift / Kotlin / `src/lib/consts.ts`);
+there is no shared package. 3.1 and 2.4 must ship the same
+publish-verify-delete protocol, not another prefix on this list.
 
 ---
 
