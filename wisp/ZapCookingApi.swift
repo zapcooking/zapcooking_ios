@@ -279,10 +279,9 @@ enum ZapCookingApiError: Error, Sendable, Equatable {
     case rateLimited(retryAfter: TimeInterval?)
     /// Any other non-2xx HTTP status with no `code`.
     case requestFailed(status: Int, body: String?)
-    /// Server rejected the request with a typed `code`. Used for the
-    /// 200-with-`{ok:false}` AI shape, non-2xx bodies that carry `code`,
-    /// and a bare 403 (no code — not a definitive membership denial).
-    case apiRejected(code: String?, message: String?)
+    /// Server rejected the request with a typed `code` (or a bare 403 with no code).
+    /// Used for non-2xx bodies that carry `code` and for callers that choose to
+    /// surface 200-with-`{ok:false}` responses as an error.
     case encoding(String)
     case decoding(String)
     case transport(String)
