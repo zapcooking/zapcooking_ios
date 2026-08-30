@@ -307,9 +307,7 @@ struct QuotedNoteView: View {
     }
 
     private func noteCard(_ event: NostrEvent) -> some View {
-        Button {
-            onNoteTap?(event.id)
-        } label: {
+        articleTapOrNoteButton(event) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     // Avatar alone routes to the author's profile; the rest
@@ -450,7 +448,34 @@ struct QuotedNoteView: View {
                     .stroke(Color.wispSurfaceVariant, lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+    }
+
+    /// Kind-30023 quotes open the recipe or article reader; everything else
+    /// stays on `onNoteTap` → thread. Cache-miss never reaches here — the
+    /// missing card is a retry button, not a navigation.
+    @ViewBuilder
+    private func articleTapOrNoteButton<Label: View>(
+        _ event: NostrEvent,
+        @ViewBuilder label: () -> Label
+    ) -> some View {
+        let content = label()
+        if event.kind == RecipeParser.recipeKind {
+            ArticleTapLink(
+                event: event,
+                author: event.pubkey,
+                dTag: RecipeParser.dTag(event)
+            ) {
+                content
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                onNoteTap?(event.id)
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder

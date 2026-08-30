@@ -806,14 +806,28 @@ struct MainView: View {
                                 selectedTab = .messages
                             },
                             onNoteTap: { eventId, authorHint in
-                                // Prefer the actual reply author (passed up from
-                                // the row) over keypair.pubkey — gives ThreadView
-                                // a relay set that actually has the focal +
-                                // ancestors instead of the user's own inbox.
-                                notificationsPath.append(ThreadRoute(
-                                    eventId: eventId,
-                                    authorPubkey: authorHint ?? keypair.pubkey
-                                ))
+                                // Kind-30023 (recipe vs article) is classified
+                                // from the cached notification event. Cache miss
+                                // or a regular note still opens the thread —
+                                // never a recipe screen with no event.
+                                if let event = NotificationRepository.shared.event(forId: eventId),
+                                   event.kind == RecipeParser.recipeKind {
+                                    ArticleTapRouting.appendLongForm(
+                                        to: &notificationsPath,
+                                        event: event,
+                                        author: event.pubkey,
+                                        dTag: RecipeParser.dTag(event)
+                                    )
+                                } else {
+                                    // Prefer the actual reply author (passed up from
+                                    // the row) over keypair.pubkey — gives ThreadView
+                                    // a relay set that actually has the focal +
+                                    // ancestors instead of the user's own inbox.
+                                    notificationsPath.append(ThreadRoute(
+                                        eventId: eventId,
+                                        authorPubkey: authorHint ?? keypair.pubkey
+                                    ))
+                                }
                             }
                         )
                         .navigationDestination(for: ProfileRoute.self) { route in
@@ -1287,7 +1301,7 @@ struct MainView: View {
                             // own taps before this gesture runs.
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                feedPath.append(ThreadRoute(eventId: event.id, authorPubkey: event.pubkey))
+                                ArticleTapRouting.appendCardTap(to: &feedPath, event: event)
                             }
                             .onAppear {
                                 engagementRepo.markVisible(event: event)

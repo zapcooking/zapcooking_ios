@@ -2,9 +2,12 @@ import SwiftUI
 
 /// Rich preview card for a NIP-23 long-form article (kind 30023) referenced
 /// inside note content via `nostr:naddr1…`. 1:1 port of Android's
-/// `ArticleCard` (`RichContent.kt`): hero image, "ARTICLE" badge + title,
-/// summary, author + published date footer. Tapping the card pushes an
-/// `ArticleRoute`; tapping the author name routes to their profile.
+/// `ArticleCard` (`RichContent.kt`): hero image, RECIPE/ARTICLE badge + title,
+/// summary, author + published date footer. Tapping the card opens the
+/// recipe reader when `RecipeParser.isRecipe`, else the article reader
+/// (Concern 1.6). Tapping the author name routes to their profile.
+/// Cache-miss: the link is only built when the event is in hand, and
+/// `ArticleTapLink` falls back to the article route if it is not a recipe.
 ///
 /// State machine mirrors `QuotedNoteView`: loading → loaded / missing
 /// (tap-to-retry with one silent auto-retry) plus blocked / safety-hidden
@@ -147,14 +150,19 @@ struct ArticleCardView: View {
         let image = firstTag(event, "image")
         let publishedAt = firstTag(event, "published_at").flatMap { Int($0) }
 
-        return NavigationLink(value: ArticleRoute(author: author, dTag: dTag, relayHints: relayHints)) {
+        return ArticleTapLink(
+            event: event,
+            author: author,
+            dTag: dTag,
+            relayHints: relayHints
+        ) {
             VStack(alignment: .leading, spacing: 0) {
                 if let image, let imageUrl = URL(string: image) {
                     heroImage(imageUrl, event: event, urlString: image, title: title)
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .center, spacing: 8) {
-                        Text("ARTICLE")
+                        Text(ArticleTapRouting.badge(for: event))
                             .font(AppFont.labelSmall)
                             .foregroundStyle(Color.wispPrimary)
                             .padding(.horizontal, 6)

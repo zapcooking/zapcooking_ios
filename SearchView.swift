@@ -384,7 +384,7 @@ struct SearchView: View {
 
     private var notesList: some View {
         ForEach(viewModel.notes, id: \.id) { event in
-            NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+            FeedEventNavigationLink(event: event) {
                 PostCardView(
                     event: event,
                     profile: viewModel.noteProfiles[event.pubkey] ?? ProfileRepository.shared.get(event.pubkey),
