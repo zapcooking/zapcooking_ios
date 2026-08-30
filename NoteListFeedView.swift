@@ -96,7 +96,7 @@ struct NoteListFeedView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.events, id: \.id) { event in
-                        NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                        FeedEventNavigationLink(event: event) {
                             PostCardView(
                                 event: event,
                                 profile: viewModel.profiles[event.pubkey],

@@ -803,6 +803,13 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   `RecipeParser.isRecipe`, else the article route, **with a cache-miss guard**
   (evicted event → article fallback, never a recipe screen with no event).
   Apply at every article-tap site.
+  **Landed:** `ArticleTapRouting` is the single gate (`opensAsRecipe` is
+  false on `nil`). Applied at `ArticleFeedPreview`, `ArticleCardView`,
+  `QuotedNoteView`, home-feed card tap, `SearchView`, `ProfileTabs`
+  (notes / replies / conversation), hashtag / trending / people-list /
+  note-list feeds, and the notifications `onNoteTap` choke point.
+  `RecipeCardView` already used `RecipeRoute`. No article/recipe URL
+  deep-link handler exists (`onOpenURL` is share-extension only).
 - **1.7 `RecipeTagFeedView`** + tag catalog browse.
   **Landed:** `RecipeTagCatalog` (Android curated list; per-recipe
   `<root>-<slug>` tags are not browse categories), `RecipeTagFeedView` /

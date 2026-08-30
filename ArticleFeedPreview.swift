@@ -3,8 +3,9 @@ import SwiftUI
 /// Inline article preview for a kind-30023 long-form event that arrives in a
 /// feed, profile, or thread as a top-level note. Renders the rich card —
 /// hero image, "ARTICLE" badge, title, summary — instead of dumping the raw
-/// markdown body through `RichContentView`. Tapping pushes an `ArticleRoute`
-/// to open the full reader. 1:1 with Android's `FeedArticleItem`
+/// markdown body through `RichContentView`. Tapping opens the recipe reader
+/// when `RecipeParser.isRecipe`, else the article reader (Concern 1.6).
+/// 1:1 with Android's `FeedArticleItem`
 /// (`FeedScreen.kt`), minus the author row + action bar, which `PostCardView`
 /// already supplies around it.
 ///
@@ -26,8 +27,11 @@ struct ArticleFeedPreview: View {
         let summary = firstTag("summary")
         let image = firstTag("image")
 
-        return NavigationLink(
-            value: ArticleRoute(author: event.pubkey, dTag: dTag, relayHints: relayHints)
+        return ArticleTapLink(
+            event: event,
+            author: event.pubkey,
+            dTag: dTag,
+            relayHints: relayHints
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 if let image, let imageUrl = URL(string: image) {

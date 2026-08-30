@@ -45,7 +45,7 @@ struct NotesTabView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.rootNotes, id: \.id) { event in
-                            NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                            FeedEventNavigationLink(event: event) {
                                 PostCardView(
                                     event: event,
                                     profile: viewModel.profiles[event.pubkey],
@@ -81,7 +81,7 @@ struct NotesTabView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.sortedNotes, id: \.id) { event in
-                            NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                            FeedEventNavigationLink(event: event) {
                                 PostCardView(
                                     event: event,
                                     profile: viewModel.profiles[event.pubkey],
@@ -128,7 +128,7 @@ struct RepliesTabView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.replies, id: \.id) { event in
-                            NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                            FeedEventNavigationLink(event: event) {
                                 PostCardView(
                                     event: event,
                                     profile: viewModel.profiles[event.pubkey],
@@ -164,7 +164,7 @@ struct RepliesTabView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(viewModel.sortedReplies, id: \.id) { event in
-                            NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                            FeedEventNavigationLink(event: event) {
                                 PostCardView(
                                     event: event,
                                     profile: viewModel.profiles[event.pubkey],
@@ -210,7 +210,7 @@ struct ConversationTabView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.conversationNotes, id: \.id) { event in
-                        NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                        FeedEventNavigationLink(event: event) {
                             PostCardView(
                                 event: event,
                                 profile: viewModel.profiles[event.pubkey],
