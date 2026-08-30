@@ -12,7 +12,7 @@ struct RecipeFeedView: View {
     var onOpenDrawer: () -> Void
     var avatarURL: String?
 
-    var viewModel: RecipeFeedViewModel
+    @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(
