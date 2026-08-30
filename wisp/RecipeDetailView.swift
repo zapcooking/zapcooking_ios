@@ -9,13 +9,15 @@ import SwiftUI
 ///   queries from this view.
 /// - Scale chips ½× / 1× / 2× / 3×; servings scale, prep / cook do not.
 /// - Zap affordance respects `FeatureFlags.zapsOnPosts` (Gate 0-F).
-/// - Cook mode (keep-awake, step paging, timers) is Concern 1.8 — not here.
+/// - Cook mode is Concern 1.8b — launched from this screen, snapshotted
+///   at the current scale. Android's equivalent button is unwired.
 struct RecipeDetailView: View {
     let route: RecipeRoute
     let keypair: Keypair
     @Binding var path: NavigationPath
 
     @State private var viewModel = RecipeDetailViewModel()
+    @State private var cookSession: CookModeSession?
     @Environment(\.dismiss) private var dismiss
 
     private var activeUserIsWatchOnly: Bool {
@@ -38,6 +40,9 @@ struct RecipeDetailView: View {
             }
         }
         .onDisappear { viewModel.cancel() }
+        .fullScreenCover(item: $cookSession) { session in
+            CookModeView(session: session)
+        }
     }
 
     private var topBar: some View {
@@ -48,6 +53,18 @@ struct RecipeDetailView: View {
                 .foregroundStyle(Color.wispOnSurface)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if canStartCooking {
+                Button(action: startCooking) {
+                    Image(systemName: "cooktop.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.wispPrimary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start cooking")
+                .accessibilityIdentifier("start-cooking")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -88,6 +105,9 @@ struct RecipeDetailView: View {
                     }
                     ingredientsSection
                     directionsSection
+                    if canStartCooking {
+                        startCookingButton
+                    }
                     if let extra = recipe.content.additionalMarkdown, !extra.isEmpty {
                         sectionTitle("Additional resources")
                         Text(extra)
@@ -300,6 +320,31 @@ struct RecipeDetailView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 4)
+    }
+
+    private var canStartCooking: Bool {
+        guard let recipe = viewModel.recipe else { return false }
+        return !recipe.content.directions.isEmpty
+    }
+
+    private var startCookingButton: some View {
+        Button(action: startCooking) {
+            Label("Start cooking", systemImage: "cooktop.fill")
+                .font(AppFont.titleMedium)
+                .foregroundStyle(Color.wispBackground)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.wispPrimary, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .accessibilityIdentifier("start-cooking-button")
+    }
+
+    private func startCooking() {
+        guard let recipe = viewModel.recipe, !recipe.content.directions.isEmpty else { return }
+        cookSession = CookModeSession.snapshot(recipe: recipe, scale: viewModel.scale)
     }
 
     static func scaleLabel(_ value: Double) -> String {

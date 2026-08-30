@@ -228,6 +228,7 @@
 		4CFF9901000000000000000C /* OnlyFoodFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9900000000000000000C /* OnlyFoodFilter.swift */; };
 		4CFF9901000000000000000D /* OnlyFoodFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9900000000000000000D /* OnlyFoodFeedViewModel.swift */; };
 		4CFF9901000000000000000E /* CookingTimerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9900000000000000000E /* CookingTimerStore.swift */; };
+		4CFF9901000000000000000F /* CookWakeLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9900000000000000000F /* CookWakeLock.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -579,6 +580,7 @@
 		4CFF9900000000000000000C /* OnlyFoodFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlyFoodFilter.swift; sourceTree = "<group>"; };
 		4CFF9900000000000000000D /* OnlyFoodFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlyFoodFeedViewModel.swift; sourceTree = "<group>"; };
 		4CFF9900000000000000000E /* CookingTimerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookingTimerStore.swift; sourceTree = "<group>"; };
+		4CFF9900000000000000000F /* CookWakeLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookWakeLock.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -912,6 +914,7 @@
 				4CFF9900000000000000000C /* OnlyFoodFilter.swift */,
 				4CFF9900000000000000000D /* OnlyFoodFeedViewModel.swift */,
 				4CFF9900000000000000000E /* CookingTimerStore.swift */,
+				4CFF9900000000000000000F /* CookWakeLock.swift */,
 				4CFFA00000000000000A0001 /* Nip51Lists.swift */,
 				4CFFA00000000000000A0002 /* RelaySet.swift */,
 				4CFFA00000000000000A0003 /* RelaySetRepository.swift */,
@@ -1426,6 +1429,7 @@
 				4CFF9901000000000000000C /* OnlyFoodFilter.swift in Sources */,
 				4CFF9901000000000000000D /* OnlyFoodFeedViewModel.swift in Sources */,
 				4CFF9901000000000000000E /* CookingTimerStore.swift in Sources */,
+				4CFF9901000000000000000F /* CookWakeLock.swift in Sources */,
 				4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */,
 				4CFFA00100000000000A0002 /* RelaySet.swift in Sources */,
 				4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */,
