@@ -120,6 +120,7 @@ struct OnlyFoodFeedView: View {
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await viewModel.refreshAndWait() }
     }
 
     private var emptyState: some View {

@@ -134,6 +134,61 @@ struct OnlyFoodFeedViewModelTests {
         #expect(vm.notes.isEmpty)
     }
 
+    @Test func emptyFollows_unlatchesWhenFollowsArrive() async {
+        var followList: [String] = []
+        var calls = 0
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            follows: { followList },
+            query: { _ in
+                calls += 1
+                return self.result([self.food(id: "f1", createdAt: 100)])
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await vm.startAndWait()
+        vm.setMode(.following)
+        #expect(vm.emptyFollows)
+        #expect(vm.isLoaded(.following))
+        #expect(calls == 1)
+
+        followList = [follow]
+        vm.setMode(.global)
+        vm.setMode(.following)
+        await vm.inFlight?.value
+        #expect(!vm.emptyFollows)
+        #expect(calls == 2)
+        #expect(vm.notes.map(\.id) == ["f1"])
+    }
+
+    @Test func emptyFollows_resyncOnVisibleModeQueries() async {
+        var followList: [String] = []
+        var calls = 0
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            follows: { followList },
+            query: { _ in
+                calls += 1
+                return self.result([self.food(id: "f1", createdAt: 100)])
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await vm.startAndWait()
+        vm.setMode(.following)
+        #expect(calls == 1)
+
+        followList = [follow]
+        vm.resyncFollowingIfNeeded()
+        await vm.inFlight?.value
+        #expect(!vm.emptyFollows)
+        #expect(calls == 2)
+        #expect(vm.notes.map(\.id) == ["f1"])
+    }
+
     @Test func zeroEvents_stillLatches_soToggleDoesNotRequery() async {
         var calls = 0
         let vm = OnlyFoodFeedViewModel(

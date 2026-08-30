@@ -92,6 +92,7 @@ final class OnlyFoodFeedViewModel {
     @ObservationIgnored private var submitGeneration = 0
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
+    @ObservationIgnored private var followsObserver: NSObjectProtocol?
 
     @ObservationIgnored private let filter: OnlyFoodFilter
     @ObservationIgnored private let follows: () -> [String]
@@ -131,6 +132,9 @@ final class OnlyFoodFeedViewModel {
 
     deinit {
         profileUpdatesTask?.cancel()
+        if let followsObserver {
+            NotificationCenter.default.removeObserver(followsObserver)
+        }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
         }
@@ -162,6 +166,7 @@ final class OnlyFoodFeedViewModel {
         guard !started else { return }
         started = true
         ensureProfileUpdatesSubscription()
+        observeFollowsChanges()
         let mode = self.mode
         let st = stateOf(mode)
         if !st.loaded {
@@ -175,8 +180,11 @@ final class OnlyFoodFeedViewModel {
     }
 
     /// Instant cache swap. Queries the target mode only if it's never loaded.
+    /// Following's empty-follows latch is dropped first if the user has since
+    /// followed someone — otherwise that latch would hide the first real REQ.
     func setMode(_ mode: Mode) {
         guard self.mode != mode else { return }
+        if mode == .following { dropEmptyFollowsLatchIfFollowsArrived() }
         self.mode = mode
         let st = stateOf(mode)
         emitCurrentMode()
@@ -194,6 +202,7 @@ final class OnlyFoodFeedViewModel {
 
     /// The ONLY path that re-queries a loaded mode. Merges newest into cache.
     func refresh() {
+        if mode == .following { dropEmptyFollowsLatchIfFollowsArrived() }
         let mode = self.mode
         let st = stateOf(mode)
         st.endReached = false
@@ -447,6 +456,38 @@ final class OnlyFoodFeedViewModel {
         }
     }
 
+    /// Following was short-circuited because the follow list was empty. If
+    /// follows have since arrived, drop that latch so the first real REQ can run.
+    private func dropEmptyFollowsLatchIfFollowsArrived() {
+        let st = stateOf(.following)
+        guard st.emptyFollows, !follows().isEmpty else { return }
+        st.loaded = false
+        st.emptyFollows = false
+    }
+
+    /// A follow from another screen must unstick the empty-follows CTA without
+    /// requiring a mode toggle (the tab stays mounted).
+    func resyncFollowingIfNeeded() {
+        dropEmptyFollowsLatchIfFollowsArrived()
+        let st = stateOf(.following)
+        guard mode == .following, !st.loaded, !follows().isEmpty else { return }
+        emptyFollows = false
+        submit(mode: .following, state: st, load: .initial, since: nil, until: nil)
+    }
+
+    private func observeFollowsChanges() {
+        guard followsObserver == nil else { return }
+        followsObserver = NotificationCenter.default.addObserver(
+            forName: .followsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.resyncFollowingIfNeeded()
+            }
+        }
+    }
+
     static func nextSubId() -> String {
         "onlyfood-\(subSeq.next())"
     }
@@ -502,9 +543,19 @@ enum OnlyFoodRelay {
             onEvent: { event, _ in collector.add(event) },
             onEose: { _ in collector.markEose() }
         )
-        await RelayConnectionPool.shared.register(subId: request.subId, relays: relayReqs, sink: sink)
-        let connected = true
-        let anySent = true
+        // `register` can refuse every relay under the connection cap — do not
+        // pretend the socket is up. A queued REQ (`addSub`) is "sent" for the
+        // latch; a refused register is a connect miss and must not wait 10s
+        // for an EOSE that cannot arrive.
+        let registered = await RelayConnectionPool.shared.register(
+            subId: request.subId, relays: relayReqs, sink: sink
+        )
+        let connected = registered > 0
+        let anySent = registered > 0
+        if !connected {
+            await RelayConnectionPool.shared.deregister(subId: request.subId)
+            return OnlyFoodQueryResult(events: [], connected: false, anySent: false, eoseFired: false)
+        }
 
         let deadline = Date().addingTimeInterval(OnlyFoodFeedViewModel.queryTimeout)
         while Date() < deadline, !Task.isCancelled {
