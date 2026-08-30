@@ -125,6 +125,7 @@ struct CookModeView: View {
                     .foregroundStyle(Color.wispBackground)
                     .frame(width: 44, height: 44)
                     .background(Color.wispPrimary, in: Circle())
+                    .accessibilityHidden(true)
                 Text(text)
                     .font(AppFont.scaled(22))
                     .foregroundStyle(Color.wispOnSurface)

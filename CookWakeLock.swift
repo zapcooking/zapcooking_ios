@@ -16,11 +16,11 @@ import UIKit
 ///
 /// Pairing used by `CookModeViewModel`:
 /// - `acquire` on appear and on `scenePhase == .active`
-/// - `forceZero` on disappear, `.background`, `.inactive`, and terminate
+/// - `release` on disappear, `.background`, and `.inactive` (this
+///   screen's claim only — never `forceZero` on a live shared lock)
+/// - `forceZero` on terminate (process is dying)
 ///
-/// `forceZero` on teardown is deliberate: a missed `-1` must not leave the
-/// screen pinned. Do not set `UIApplication.shared.isIdleTimerDisabled`
-/// from a view body.
+/// Do not set `UIApplication.shared.isIdleTimerDisabled` from a view body.
 @MainActor
 final class CookWakeLock {
 
@@ -56,8 +56,10 @@ final class CookWakeLock {
         apply()
     }
 
-    /// Drop every claim. Call on disappear / background / inactive /
-    /// terminate so a mismatched acquire cannot leak.
+    /// Drop every claim. Call on terminate so a dying process cannot
+    /// leave the idle timer disabled. Do **not** call this when a single
+    /// cook-mode screen tears down — that path is `release`, so another
+    /// window's claim survives.
     func forceZero() {
         count = 0
         apply()

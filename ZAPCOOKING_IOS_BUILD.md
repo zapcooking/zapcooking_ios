@@ -843,8 +843,10 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   step, and a swipe-up without a tap target fails the same way pager
   swipes fail with messy hands. Handle is a 56pt target; collapsed by
   default so a long step stays the hero. `CookWakeLock` is refcounted;
-  `CookModeViewModel` acquires while visible and `.active`, `forceZero` on
-  disappear / background / inactive / terminate. "Add timer" opens the
+  `CookModeViewModel` acquires while visible and `.active`, `release`s
+  its own claim on disappear / background / inactive, `forceZero` only
+  on terminate (so a live shared lock cannot drop another window's
+  claim). "Add timer" opens the
   1.8a `CookingUtilitiesSheet` with no regex over step text. Floating bar
   + completion overlay are hosted inside the cover so they stay reachable
   above the pager chrome, not over Back / Next. `CookingTimerStore` /

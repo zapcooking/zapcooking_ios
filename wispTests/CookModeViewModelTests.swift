@@ -284,6 +284,22 @@ struct CookModeViewModelTests {
         #expect(wake.lastApplied == false)
     }
 
+    @Test func disappear_releasesOwnClaim_notAnotherScreens() {
+        let (wake, _) = lock()
+        let session = CookModeSession.snapshot(recipe: recipe(), scale: 1)
+        let first = CookModeViewModel(session: session, wakeLock: wake)
+        let second = CookModeViewModel(session: session, wakeLock: wake)
+        first.onAppear(phase: .active)
+        second.onAppear(phase: .active)
+        #expect(wake.count == 2)
+        first.onDisappear()
+        #expect(wake.count == 1)
+        #expect(wake.lastApplied == true)
+        second.onDisappear()
+        #expect(wake.count == 0)
+        #expect(wake.lastApplied == false)
+    }
+
     @Test func wakeLockIsNotTiedToATimer() {
         // The lock has no timer API. Disappear releases even if the
         // caller would still have a 45-minute casserole running.

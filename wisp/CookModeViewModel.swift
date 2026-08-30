@@ -118,8 +118,10 @@ final class CookModeViewModel {
         holding = false
     }
 
-    /// +1 while visible and `.active`. `forceZero` on every other path so
-    /// a missed `-1` cannot leave `isIdleTimerDisabled` true after exit.
+    /// +1 while visible and `.active`. `-1` on disappear / background /
+    /// inactive so this screen drops only its own claim. `forceZero` is
+    /// terminate-only — the process is dying, and `forceZero` on a live
+    /// shared lock would clear another window's cook-mode claim.
     private func syncWakeLock() {
         let shouldHold = visible && scenePhase == .active
         if shouldHold {
@@ -127,8 +129,8 @@ final class CookModeViewModel {
                 wakeLock.acquire()
                 holding = true
             }
-        } else if holding || wakeLock.count > 0 {
-            wakeLock.forceZero()
+        } else if holding {
+            wakeLock.release()
             holding = false
         }
     }
