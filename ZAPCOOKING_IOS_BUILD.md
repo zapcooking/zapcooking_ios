@@ -68,23 +68,32 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
 
-**Test baseline (post Concern 0.6):** default hermetic suite is **194 pass /
+**Test baseline (post Concern 1.8b):** default hermetic suite is **430 pass /
 1 fail**. The single failure is pre-existing `#4`
-(`FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). That is the prior
-174/1 plus the 20 NIP-98 goldens; the live NIP-98 round-trip is opt-in and
-**skipped** in the default run (so it does not add a pass or a network
-dependency). When the live round-trip is deliberately enabled and green, the
-run is **195 pass / 1 fail**. Future gate reports compare against **194/1**
-for the default suite, not 174/1.
+(`FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). The live NIP-98
+round-trip is opt-in and **skipped** in the default run (so it does not add
+a pass or a network dependency). When the live round-trip is deliberately
+enabled and green, the run is **431 pass / 1 fail**. Future gate reports
+compare against **430/1** for the default suite. Post-0.6 was 194/1; the
+delta is Phase 1 recipe/food tests (parser through cook mode) on top of
+that NIP-98 floor.
 
-Default `xcodebuild test` (no network dependency — the live NIP-98 round-trip
-is opt-in via `.enabled(if:)` and stays skipped unless deliberately enabled):
+Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
+executes `wispUITests`; that target is **not** in the baseline. Isolated
+stock `XCUIApplication().launch()` (`wispUITests.testExample`) passes on
+clean main (~17s). The full UITests bundle, and a bare `xcodebuild test`
+that reaches it after unit tests, can stall on parallel simulator clones
+trying to launch `cooking.zap.app.UITests.xctrunner` — inherited, not
+introduced by 1.8b (UITests sources last changed in 0.2 / initial commit).
+Do not treat that stall as a gate failure; do not "fix" it in a feature
+PR. Use:
 
 ```
 xcodebuild -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
   -skipPackagePluginValidation \
-  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES test
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -only-testing:wispTests test
 ```
 
 **Live NIP-98 round-trip** (opt-in; hits `https://zap.cooking`). Uses an
