@@ -356,8 +356,11 @@ final class RecipePublisher {
     }
 
     /// Bounded GET. Declared-oversize (`Content-Length` > cap) or a body
-    /// that overruns the cap returns nil. 20 s timeout matches Android's
-    /// `callTimeout` so Save never waits on a huge/slow image.
+    /// that overruns the cap returns nil **without buffering the overflow** —
+    /// `URLSession.data(for:)` would hold the whole body first, so a missing
+    /// or lying `Content-Length` could still force a huge download. 20 s
+    /// timeout matches Android's `callTimeout` so Save never waits on a
+    /// huge/slow image.
     nonisolated static func downloadCapped(
         url: String,
         maxBytes: Int = maxImageBytes,
@@ -365,24 +368,117 @@ final class RecipePublisher {
     ) async -> (Data, String)? {
         guard let requestURL = URL(string: url) else { return nil }
         var request = URLRequest(url: requestURL)
+        request.httpMethod = "GET"
         request.timeoutInterval = timeout
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse {
-                guard (200..<300).contains(http.statusCode) else { return nil }
-                let length = http.expectedContentLength
-                if length > 0 && length > maxBytes { return nil }
-            }
-            guard !data.isEmpty, data.count <= maxBytes else { return nil }
-            let rawMime = (response as? HTTPURLResponse)?.mimeType
-                ?? response.mimeType
-                ?? "image/jpeg"
-            let mime = rawMime.split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces)
-                ?? "image/jpeg"
-            return (data, mime.hasPrefix("image/") ? mime : "image/jpeg")
-        } catch {
-            return nil
+        let collected = await withCheckedContinuation { continuation in
+            let collector = RecipePublisherCappedBody(maxBytes: maxBytes, continuation: continuation)
+            let cfg = URLSessionConfiguration.ephemeral
+            cfg.timeoutIntervalForRequest = timeout
+            cfg.timeoutIntervalForResource = timeout
+            cfg.waitsForConnectivity = false
+            let session = URLSession(configuration: cfg, delegate: collector, delegateQueue: nil)
+            collector.session = session
+            session.dataTask(with: request).resume()
         }
+        guard let (data, response) = collected, !data.isEmpty else { return nil }
+        let rawMime = (response as? HTTPURLResponse)?.mimeType
+            ?? response.mimeType
+            ?? "image/jpeg"
+        let mime = rawMime.split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces)
+            ?? "image/jpeg"
+        return (data, mime.hasPrefix("image/") ? mime : "image/jpeg")
+    }
+
+    /// Consume `chunks` until EOF, returning nil if the total exceeds
+    /// `maxBytes`. Does not keep the overflow — Android `readCapped`.
+    nonisolated static func readCapped<S: Sequence>(chunks: S, maxBytes: Int) -> Data? where S.Element == Data {
+        var data = Data()
+        for chunk in chunks {
+            guard !chunk.isEmpty else { continue }
+            if data.count + chunk.count > maxBytes { return nil }
+            data.append(chunk)
+        }
+        return data
+    }
+}
+
+/// Streaming GET body collector. URLSession delivers `Data` chunks; we abort
+/// as soon as the total would exceed `maxBytes` so a missing/wrong
+/// `Content-Length` cannot force a huge in-memory buffer.
+private final class RecipePublisherCappedBody: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    let maxBytes: Int
+    var session: URLSession?
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var response: URLResponse?
+    private var continuation: CheckedContinuation<(Data, URLResponse)?, Never>?
+
+    init(maxBytes: Int, continuation: CheckedContinuation<(Data, URLResponse)?, Never>) {
+        self.maxBytes = maxBytes
+        self.continuation = continuation
+    }
+
+    private func complete(_ value: (Data, URLResponse)?) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        let session = self.session
+        self.session = nil
+        lock.unlock()
+        guard let cont else { return }
+        cont.resume(returning: value)
+        session?.finishTasksAndInvalidate()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            completionHandler(.cancel)
+            complete(nil)
+            return
+        }
+        let length = response.expectedContentLength
+        if length > 0 && length > Int64(maxBytes) {
+            completionHandler(.cancel)
+            complete(nil)
+            return
+        }
+        lock.lock()
+        self.response = response
+        lock.unlock()
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        if buffer.count + data.count > maxBytes {
+            lock.unlock()
+            dataTask.cancel()
+            complete(nil)
+            return
+        }
+        buffer.append(data)
+        lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if error != nil {
+            complete(nil)
+            return
+        }
+        lock.lock()
+        let data = buffer
+        let response = self.response
+        lock.unlock()
+        guard let response, !data.isEmpty else {
+            complete(nil)
+            return
+        }
+        complete((data, response))
     }
 }
 

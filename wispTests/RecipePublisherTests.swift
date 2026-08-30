@@ -380,4 +380,22 @@ struct RecipePublisherTests {
         }
         #expect(message.contains("Sign in"))
     }
+
+    // MARK: - Stream cap (unknown Content-Length must not buffer overflow)
+
+    @Test func readCapped_returnsBytesAtTheCap() {
+        let chunks = [Data(repeating: 1, count: 6), Data(repeating: 2, count: 4)]
+        let data = RecipePublisher.readCapped(chunks: chunks, maxBytes: 10)
+        #expect(data == chunks.reduce(into: Data()) { $0.append($1) })
+    }
+
+    @Test func readCapped_returnsNilWhenStreamExceedsMax() {
+        let chunks = [Data(repeating: 1, count: 8), Data(repeating: 2, count: 3)]
+        #expect(RecipePublisher.readCapped(chunks: chunks, maxBytes: 10) == nil)
+    }
+
+    @Test func readCapped_emptyChunksDoNotCount() {
+        let chunks = [Data(), Data(repeating: 1, count: 10), Data()]
+        #expect(RecipePublisher.readCapped(chunks: chunks, maxBytes: 10)?.count == 10)
+    }
 }

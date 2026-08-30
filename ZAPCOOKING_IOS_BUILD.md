@@ -72,13 +72,14 @@ have already accepted the plugin do not need the flag.
 
 | Number | What it is |
 |---|---|
-| **456/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 456 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
-| **457/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
-| **459** | `@Test` annotations on disk. Includes the skipped live NIP-98 test and the skipped live recipe-publish test. Not a pass count. |
+| **459/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 459 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **460/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
+| **462** | `@Test` annotations on disk. Includes the skipped live NIP-98 test and the skipped live recipe-publish test. Not a pass count. |
 
 The two live network tests are opt-in and **skipped** in the default run (so
 they do not add a pass or a network dependency). Future hermetic gate reports
-compare against **456/1**. Post-1.8b was 430/1; post-0.6 was 194/1.
+compare against **459/1**. Post-2.3-pre-review was 456/1; post-1.8b was 430/1;
+post-0.6 was 194/1.
 
 Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
 executes `wispUITests`; that target is **not** in the baseline. Isolated
