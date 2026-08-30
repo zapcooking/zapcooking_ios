@@ -58,6 +58,9 @@ struct MainView: View {
     /// every card in every tab routes through it.
     @State private var composePresenter = ComposePresenter()
     @State private var showDraftsScheduled = false
+    @State private var showCookingUtilitiesSheet = false
+    @State private var cookingTimers = CookingTimerStore.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showRelayPicker = false
     @State private var showOnlineSheet = false
     @State private var showSocialGraph = false
@@ -194,6 +197,10 @@ struct MainView: View {
                     closeDrawer()
                     showDraftsScheduled = true
                 },
+                onOpenGadgets: {
+                    closeDrawer()
+                    showCookingUtilitiesSheet = true
+                },
                 onOpenCustomEmojis: {
                     closeDrawer()
                     showCustomEmojis = true
@@ -241,6 +248,18 @@ struct MainView: View {
         .background(Color.wispBackground)
         .overlay(SuccessToastOverlay())
         .overlay(PostStatusPillOverlay())
+        .overlay {
+            TimerCompletionOverlay(
+                timer: cookingTimers.completion,
+                onDismiss: { cookingTimers.dismissCompletion() }
+            )
+        }
+        .onChange(of: scenePhase) { _, phase in
+            cookingTimers.handleScenePhase(phase)
+        }
+        .task {
+            await cookingTimers.prepareNotifications()
+        }
         .environment(walletStore)
         .environment(composePresenter)
         .onReceive(NotificationCenter.default.publisher(for: .openWalletTab)) { _ in
@@ -551,6 +570,12 @@ struct MainView: View {
         }
         .sheet(isPresented: $showDraftsScheduled) {
             DraftsScheduledView(keypair: keypair)
+        }
+        .sheet(isPresented: $showCookingUtilitiesSheet) {
+            CookingUtilitiesSheet(
+                store: cookingTimers,
+                onDismiss: { showCookingUtilitiesSheet = false }
+            )
         }
         .sheet(isPresented: $showPolls) {
             PollsView(keypair: keypair, onOpenPoll: { eventId, authorPubkey in
@@ -952,6 +977,12 @@ struct MainView: View {
             // unrelated state change in the active tab (notifications,
             // timeline) in the same frame, producing a "float-down" of late
             // arriving rows over existing content.
+            FloatingTimerBar(
+                store: cookingTimers,
+                isSheetVisible: showCookingUtilitiesSheet,
+                onExpand: { showCookingUtilitiesSheet = true }
+            )
+
             Group {
                 if audioPlayer.currentTrack != nil {
                     MiniAudioPlayerView()

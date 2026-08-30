@@ -820,9 +820,28 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   Popular chips + More sheet on the Recipes tab; detail category chips
   push the same route. **Gate:** browse at least three categories with
   real results off live relays.
-- **1.8 Cook mode** — keep-screen-on (`isIdleTimerDisabled`), step paging,
-  inline timers, scaling carried through. Timers need a **Live Activity /
-  background story** on iOS that Android didn't need — scope it explicitly.
+- **1.8a Gadgets timers** — Android **parity**, not cook mode. The Android
+  files in §8 (`CookingTimerViewModel` + `FloatingTimerBar` +
+  `TimerCompletionOverlay` + the timer tab of `CookingUtilitiesSheet`) are a
+  **global Gadgets sheet**. `CookingTimerStore` uses `endsAt: Date` (never a
+  ticking `remainingSeconds`). One `UNNotificationRequest` per timer;
+  cancel on pause/delete; reconstruct on foreground. Permission denied →
+  honest in-process pause + the on-screen sentence. **Do not** set
+  `isIdleTimerDisabled` here — Gadgets has no cook screen to scope it to,
+  and Android doesn't set it either. Unit converter tab is a **follow-up**
+  (Gadgets parity, proves nothing about timers).
+- **1.8b Cook mode pager** — **iOS-original, not a port.** Android's
+  `onStartCooking` is `null` in `Navigation.kt`, so the "Start cooking"
+  button never renders. There is no reference implementation and no golden
+  tests. Full-screen step pager from `RecipeDetailView`, scale
+  **snapshotted** at Start cooking, ingredients shown scaled,
+  `CookWakeLock` (refcounted) scoped to **the screen being visible**, never
+  to "a timer is running." "Add timer" on a step opens the 1.8a
+  manual/preset UI. No regex over step text. After 1.8a merges.
+- **Live Activity / Dynamic Island (option B)** — follow-up
+  https://github.com/zapcooking/zapcooking_ios/issues/30, not 1.8. Still
+  needs the 1.8a notification path for sound. See §4.7 for what we may
+  and may not claim until B ships.
 
 **GATE 1:** a real recipe off live relays renders correctly on device,
 including a legacy `nostrcooking` one and one with a parenthesized d-tag.
@@ -918,7 +937,12 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - 4.5 `ITSAppUsesNonExemptEncryption`; export compliance
 - 4.6 App Review demo account (a seeded npub with recipes + an active Cook+
   entitlement so reviewers can see gated features work)
-- 4.7 Screenshots, description, keywords, age rating
+- 4.7 Screenshots, description, keywords, age rating.
+  **Timer copy defensible under 1.8a (option A):** "Set multiple cooking
+  timers and get a notification when they're done. Keep the screen on
+  while you cook." **Do not** claim Lock Screen countdown or Dynamic
+  Island until Live Activities (option B) ship. "Keep the screen on"
+  is 1.8b (`CookWakeLock`), not 1.8a.
 - 4.8 Kill switches verified: zaps-on-posts flag flips cleanly; no membership
   link-out anywhere; credit-purchase code not compiled in
 
@@ -1087,7 +1111,8 @@ rough effort signal only.
 | `ui/screen/RecipeFeedScreen.kt` + `RecipeCard.kt` | 1243 | `RecipeFeedView.swift`, `RecipeCardView.swift` | 1.5 |
 | `viewmodel/RecipeFeedViewModel.kt` | 158 | `RecipeFeedViewModel.swift` | 1.5 |
 | `ui/screen/RecipeTagFeedScreen.kt` + `nostr/RecipeTagCatalog.kt` | 280 | `RecipeTagFeedView.swift` | 1.7 |
-| `viewmodel/CookingTimerViewModel.kt` + `FloatingTimerBar.kt` + `TimerCompletionOverlay.kt` | 476 | `CookingTimerStore.swift`, `FloatingTimerBar.swift` | 1.8 |
+| `viewmodel/CookingTimerViewModel.kt` + `FloatingTimerBar.kt` + `TimerCompletionOverlay.kt` + `CookingUtilitiesSheet.kt` (timer tab) | 476+ | `CookingTimerStore.swift`, `FloatingTimerBar.swift`, `TimerCompletionOverlay.swift`, `CookingUtilitiesSheet.swift` | **1.8a Gadgets timers** — global sheet (drawer Gadgets), **not cook mode**. Android cook mode is unwired (`onStartCooking = null`). Converter tab is a follow-up. |
+| — (Android stub only: `onStartCooking = null`) | — | `CookModeView` + `CookWakeLock` (1.8b) | **1.8b cook-mode pager — iOS-original**, not a port. After 1.8a. |
 | `nostr/RecipeSerializer.kt` | 169 | `RecipeSerializer.swift` | 2.1 |
 | `nostr/RecipeFormat.kt` + `RecipeFormats.kt` + `Nip23RecipeFormat.kt` + `Nip333RecipeFormat.kt` | 374 | `RecipeFormat.swift` … | 2.2 |
 | `repo/RecipePublisher.kt` | 390 | `RecipePublisher.swift` | 2.3 |
