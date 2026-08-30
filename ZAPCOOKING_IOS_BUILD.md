@@ -833,11 +833,23 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
 - **1.8b Cook mode pager** — **iOS-original, not a port.** Android's
   `onStartCooking` is `null` in `Navigation.kt`, so the "Start cooking"
   button never renders. There is no reference implementation and no golden
-  tests. Full-screen step pager from `RecipeDetailView`, scale
-  **snapshotted** at Start cooking, ingredients shown scaled,
-  `CookWakeLock` (refcounted) scoped to **the screen being visible**, never
-  to "a timer is running." "Add timer" on a step opens the 1.8a
-  manual/preset UI. No regex over step text. After 1.8a merges.
+  tests.
+  **Landed:** `CookModeView` full-screen cover from `RecipeDetailView`
+  (top-bar cooktop + "Start cooking" under directions). Scale snapshotted
+  at launch — no live binding. Directions / prep / cook do not scale;
+  ingredients + servings do, via `IngredientScaler`. **Ingredients access
+  is a collapsible bottom panel on every step** (not a first page, not a
+  swipe-only sheet): a first page sends the cook back off the current
+  step, and a swipe-up without a tap target fails the same way pager
+  swipes fail with messy hands. Handle is a 56pt target; collapsed by
+  default so a long step stays the hero. `CookWakeLock` is refcounted;
+  `CookModeViewModel` acquires while visible and `.active`, `forceZero` on
+  disappear / background / inactive / terminate. "Add timer" opens the
+  1.8a `CookingUtilitiesSheet` with no regex over step text. Floating bar
+  + completion overlay are hosted inside the cover so they stay reachable
+  above the pager chrome, not over Back / Next. `CookingTimerStore` /
+  `RecipeParser` / `IngredientScaler` / `RecipeRepository` are consumed,
+  not modified.
 - **Live Activity / Dynamic Island (option B)** — follow-up
   https://github.com/zapcooking/zapcooking_ios/issues/30, not 1.8. Still
   needs the 1.8a notification path for sound. See §4.7 for what we may
@@ -1112,7 +1124,7 @@ rough effort signal only.
 | `viewmodel/RecipeFeedViewModel.kt` | 158 | `RecipeFeedViewModel.swift` | 1.5 |
 | `ui/screen/RecipeTagFeedScreen.kt` + `nostr/RecipeTagCatalog.kt` | 280 | `RecipeTagFeedView.swift` | 1.7 |
 | `viewmodel/CookingTimerViewModel.kt` + `FloatingTimerBar.kt` + `TimerCompletionOverlay.kt` + `CookingUtilitiesSheet.kt` (timer tab) | 476+ | `CookingTimerStore.swift`, `FloatingTimerBar.swift`, `TimerCompletionOverlay.swift`, `CookingUtilitiesSheet.swift` | **1.8a Gadgets timers** — global sheet (drawer Gadgets), **not cook mode**. Android cook mode is unwired (`onStartCooking = null`). Converter tab is a follow-up. |
-| — (Android stub only: `onStartCooking = null`) | — | `CookModeView` + `CookWakeLock` (1.8b) | **1.8b cook-mode pager — iOS-original**, not a port. After 1.8a. |
+| — (Android stub only: `onStartCooking = null`) | — | `CookModeView` + `CookModeViewModel` + `CookWakeLock` (1.8b) | **1.8b cook-mode pager — iOS-original**, not a port. Collapsible ingredients panel. After 1.8a. |
 | `nostr/RecipeSerializer.kt` | 169 | `RecipeSerializer.swift` | 2.1 |
 | `nostr/RecipeFormat.kt` + `RecipeFormats.kt` + `Nip23RecipeFormat.kt` + `Nip333RecipeFormat.kt` | 374 | `RecipeFormat.swift` … | 2.2 |
 | `repo/RecipePublisher.kt` | 390 | `RecipePublisher.swift` | 2.3 |
