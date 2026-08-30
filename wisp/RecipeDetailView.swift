@@ -176,15 +176,21 @@ struct RecipeDetailView: View {
                 Spacer().frame(height: 12)
                 FlowLayout(spacing: 6) {
                     ForEach(recipe.categories, id: \.self) { category in
-                        Text(category)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                Color.wispSurfaceVariant.opacity(0.6),
-                                in: RoundedRectangle(cornerRadius: 12)
-                            )
-                            .foregroundStyle(Color.wispPrimary)
+                        Button {
+                            path.append(RecipeTagFeedRoute(tag: category))
+                        } label: {
+                            Text(category)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Color.wispSurfaceVariant.opacity(0.6),
+                                    in: RoundedRectangle(cornerRadius: 12)
+                                )
+                                .foregroundStyle(Color.wispPrimary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Browse \(category) recipes")
                     }
                 }
             }
@@ -313,6 +319,9 @@ extension View {
     func recipeNavigation(keypair: Keypair, path: Binding<NavigationPath>) -> some View {
         navigationDestination(for: RecipeRoute.self) { route in
             RecipeDetailView(route: route, keypair: keypair, path: path)
+        }
+        .navigationDestination(for: RecipeTagFeedRoute.self) { route in
+            RecipeTagFeedView(tag: route.tag, keypair: keypair, path: path)
         }
     }
 }

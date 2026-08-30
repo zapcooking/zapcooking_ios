@@ -282,6 +282,7 @@ enum ZapCookingApiError: Error, Sendable, Equatable {
     /// Server rejected the request with a typed `code` (or a bare 403 with no code).
     /// Used for non-2xx bodies that carry `code` and for callers that choose to
     /// surface 200-with-`{ok:false}` responses as an error.
+    case apiRejected(code: String?, message: String?)
     case encoding(String)
     case decoding(String)
     case transport(String)

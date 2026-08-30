@@ -298,6 +298,16 @@ nonisolated enum RecipeParser {
 
     // ---- Tag helpers ------------------------------------------------------
 
+    /// True when `event` carries `<root>-<tag>` as a **category** t-tag,
+    /// not merely as the per-recipe `<root>-<dTag>` slug. Slug tags are
+    /// not browse categories (`ZAPCOOKING_IOS_BUILD.md` §2 / Concern 1.7).
+    static func matchesCategory(_ event: NostrEvent, _ tag: String) -> Bool {
+        let needle = tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return false }
+        return deriveCategories(tagValues(event, "t"), dTag: dTag(event))
+            .contains { $0.lowercased() == needle }
+    }
+
     /// `<root>-<category>` tags minus the root and the per-recipe
     /// `<root>-<dTag>` slug, with the root prefix stripped for display.
     private static func deriveCategories(_ hashtags: [String], dTag: String) -> [String] {

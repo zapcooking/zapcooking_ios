@@ -150,6 +150,20 @@ struct Nip23RecipeFormatTests {
         #expect(filter.until == 1234)
     }
 
+    // MARK: - tagFeedFilter (Concern 1.7)
+
+    @Test func tagFeedFilter_prefixesBothRecipeRoots() {
+        let filter = format.tagFeedFilter(tag: "Italian", limit: 50, until: nil)
+        #expect(filter.kinds == [RecipeParser.recipeKind])
+        #expect(filter.tTags == ["zapcooking-italian", "nostrcooking-italian"])
+        #expect(filter.limit == 50)
+        #expect(filter.until == nil)
+    }
+
+    @Test func tagFeedFilter_passesUntilForPaging() {
+        #expect(format.tagFeedFilter(tag: "beef", limit: 50, until: 1234).until == 1234)
+    }
+
     // MARK: - authorFeedFilter for ANY author (other-user profile Recipes tab)
 
     @Test func authorFeedFilter_isPubkeyParameterized_notSelfScoped() {

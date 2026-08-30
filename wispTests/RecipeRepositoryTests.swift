@@ -334,4 +334,168 @@ struct RecipeRepositoryTests {
         #expect(persisted.first?.isEmpty == true)
         #expect(repo.recipes.map(\.id) == ["aa"])
     }
+
+    // MARK: - Tag feed (Concern 1.7)
+
+    private func taggedRecipe(
+        id: String,
+        dTag: String,
+        createdAt: Int,
+        categories: [String],
+        author: String = String(repeating: "a", count: 64)
+    ) -> NostrEvent {
+        var tags: [[String]] = [["d", dTag], ["t", "zapcooking"], ["t", "zapcooking-\(dTag)"]]
+        for category in categories { tags.append(["t", "zapcooking-\(category)"]) }
+        return NostrEvent(
+            id: id,
+            pubkey: author,
+            kind: RecipeParser.recipeKind,
+            createdAt: createdAt,
+            tags: tags,
+            content: recipeBody,
+            sig: String(repeating: "0", count: 128)
+        )
+    }
+
+    @Test func tagFeedFilter_prefixesBothRootsAndNormalizes() {
+        let filter = RecipeRepository().tagFeedFilter(tag: "Italian", limit: 50)
+        #expect(filter.kinds == [RecipeParser.recipeKind])
+        #expect(filter.tTags == ["zapcooking-italian", "nostrcooking-italian"])
+        #expect(filter.limit == 50)
+    }
+
+    @Test func loadTagFeed_isANoOpOnBlankTag() {
+        let repo = RecipeRepository(relays: [])
+        repo.loadTagFeed(tag: "   ")
+        #expect(!repo.isTagLoading)
+        #expect(repo.activeTag == nil)
+    }
+
+    @Test func loadTagFeed_marksLoadingSynchronously() async {
+        let repo = RecipeRepository(relays: [])
+        repo.loadTagFeed(tag: "italian")
+        #expect(repo.isTagLoading)
+        #expect(repo.activeTag == "italian")
+        await repo.tagInFlight?.value
+        #expect(!repo.isTagLoading)
+        #expect(repo.hasTagLoaded)
+    }
+
+    /// A recipe whose only `zapcooking-italian` tag is the per-recipe slug
+    /// is not a browse hit for `#italian`.
+    @Test func ingestTag_dropsThePerRecipeSlugTag() async {
+        let repo = RecipeRepository(relays: [])
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+
+        let slugOnly = taggedRecipe(
+            id: "aa", dTag: "italian", createdAt: 100, categories: []
+        )
+        let real = taggedRecipe(
+            id: "bb", dTag: "peposo", createdAt: 100, categories: ["italian"]
+        )
+        repo.ingestTag([slugOnly, real])
+
+        #expect(repo.tagRecipes.map(\.id) == ["bb"])
+        #expect(repo.recipes.isEmpty)
+    }
+
+    @Test func ingestTag_doesNotRewriteTheMainFeedOrItsPagingCursor() async {
+        let repo = RecipeRepository(relays: [])
+        let main = taggedRecipe(
+            id: "aa", dTag: "ragu", createdAt: 300, categories: ["italian"]
+        )
+        repo.ingest([main])
+        #expect(repo.oldestHeldCreatedAt == 300)
+
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+        repo.ingestTag([
+            taggedRecipe(
+                id: "bb", dTag: "older-italian", createdAt: 50, categories: ["italian"]
+            )
+        ])
+
+        #expect(repo.recipes.map(\.id) == ["aa"])
+        #expect(repo.oldestHeldCreatedAt == 300)
+        #expect(repo.oldestHeldTagCreatedAt == 50)
+        // Cache-first also lifts the already-held italian recipe into the
+        // tag session; the older tag-only hit must not move the *main*
+        // cursor.
+        #expect(Set(repo.tagRecipes.map(\.id)) == ["aa", "bb"])
+        #expect(repo.cached(author: String(repeating: "a", count: 64), dTag: "older-italian")?.id == "bb")
+    }
+
+    @Test func loadTagFeed_paintsMatchingCacheOnly() async {
+        let italian = taggedRecipe(
+            id: "aa", dTag: "peposo", createdAt: 100, categories: ["italian"]
+        )
+        let vegan = taggedRecipe(
+            id: "bb", dTag: "tofu", createdAt: 100, categories: ["vegan"]
+        )
+        let repo = RecipeRepository(relays: [], seedCache: { [italian, vegan] })
+
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+
+        #expect(repo.tagRecipes.map(\.id) == ["aa"])
+        #expect(repo.hasTagLoaded)
+        #expect(repo.recipes.isEmpty)
+    }
+
+    @Test func loadTagFeed_doesNotWipeMainFeedRecipes() async {
+        let repo = RecipeRepository(relays: [])
+        repo.ingest([taggedRecipe(
+            id: "aa", dTag: "ragu", createdAt: 100, categories: ["italian"]
+        )])
+
+        repo.loadTagFeed(tag: "vegan")
+        await repo.tagInFlight?.value
+
+        #expect(repo.recipes.map(\.id) == ["aa"])
+        #expect(repo.tagRecipes.isEmpty)
+    }
+
+    @Test func tagPagingCursor_isOldestHeld_notOldestVisible() async {
+        let blocked = String(repeating: "b", count: 64)
+        let repo = RecipeRepository(relays: [], isMuted: { $0 == blocked })
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+        repo.ingestTag([
+            taggedRecipe(id: "aa", dTag: "newer", createdAt: 300, categories: ["italian"]),
+            taggedRecipe(
+                id: "bb", dTag: "oldest", createdAt: 100, categories: ["italian"],
+                author: blocked
+            ),
+        ])
+
+        #expect(repo.tagRecipes.map(\.id) == ["aa"])
+        #expect(repo.oldestHeldTagCreatedAt == 100)
+    }
+
+    @Test func loadMoreTagFeed_stillPagesWhenEveryHeldRecipeIsMuted() async {
+        let repo = RecipeRepository(relays: [], isMuted: { _ in true })
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+        repo.ingestTag([
+            taggedRecipe(id: "aa", dTag: "one", createdAt: 300, categories: ["italian"])
+        ])
+
+        #expect(repo.tagRecipes.isEmpty)
+        repo.loadMoreTagFeed()
+        #expect(repo.isTagLoading)
+    }
+
+    @Test func requestRecipe_resolvesFromTagSessionWithoutQuerying() async {
+        let repo = RecipeRepository(relays: [])
+        let author = String(repeating: "a", count: 64)
+        repo.loadTagFeed(tag: "italian")
+        await repo.tagInFlight?.value
+        repo.ingestTag([
+            taggedRecipe(id: "aa", dTag: "peposo", createdAt: 100, categories: ["italian"])
+        ])
+
+        let resolved = await repo.requestRecipe(author: author, dTag: "peposo")
+        #expect(resolved?.id == "aa")
+    }
 }
