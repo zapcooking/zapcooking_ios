@@ -1,9 +1,11 @@
 import Foundation
 import Observation
 
-/// Drives `RecipeDetailView`. All recipe bytes come from `RecipeRepository` —
-/// cache-first `requestRecipe`, one dedup. This type does not query relays
-/// and does not reimplement coordinate reduction.
+/// Drives `RecipeDetailView`. Recipe bytes come only from `RecipeRepository`
+/// — cache-first `requestRecipe`, one dedup. This type does not query relays
+/// for recipes and does not reimplement coordinate reduction. Author-profile
+/// hydration is a separate, best-effort `ProfileRepository` read and may
+/// fan out on a cache miss; a miss is quiet absence, never a failed load.
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3 + §7.7):
 /// - Hero / summary / prep / cook / servings / chef's notes / ingredients /

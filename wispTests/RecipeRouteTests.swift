@@ -41,9 +41,21 @@ struct RecipeRouteTests {
         #expect(RecipeRoute.parse("recipe/aa") == nil)
         #expect(RecipeRoute.parse("recipe/") == nil)
         #expect(RecipeRoute.parse("") == nil)
+        // Extra `/` segment: an unencoded slash-bearing d-tag is malformed.
+        #expect(RecipeRoute.parse("recipe/aa/a/b") == nil)
+        #expect(RecipeRoute.parse("recipe/aa/bb/") == nil)
     }
 
     @Test func encodeDTag_leavesUnreservedAlone() {
         #expect(RecipeRoute.encodeDTag("simple-slug") == "simple-slug")
+    }
+
+    /// `CharacterSet.alphanumerics` is Unicode-wide and would leave these
+    /// unescaped. The encoder must not.
+    @Test func encodeDTag_percentEncodesNonASCII() {
+        let encoded = RecipeRoute.encodeDTag("café")
+        #expect(!encoded.contains("é"))
+        #expect(encoded.contains("%"))
+        #expect(RecipeRoute.decodeDTag(encoded) == "café")
     }
 }

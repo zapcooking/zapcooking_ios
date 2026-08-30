@@ -21,13 +21,17 @@ struct RecipeRoute: Hashable {
         "recipe/\(author)/\(Self.encodeDTag(dTag))"
     }
 
-    /// RFC 3986 unreserved only, so `(`, `)` and `/` always encode.
-    /// `CharacterSet.urlPathAllowed` keeps `/`, which would split the d-tag
-    /// across path segments.
+    /// RFC 3986 unreserved, **ASCII only** (`A–Z a–z 0–9 - . _ ~`), so
+    /// `(`, `)`, `/`, and any non-ASCII letter or digit always encode.
+    /// `CharacterSet.alphanumerics` is Unicode-wide and would leave `é` /
+    /// `١` unescaped; `urlPathAllowed` also keeps `/`, which would split
+    /// the d-tag across path segments.
+    private static let unreservedASCII = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
     static func encodeDTag(_ dTag: String) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        return dTag.addingPercentEncoding(withAllowedCharacters: allowed) ?? dTag
+        dTag.addingPercentEncoding(withAllowedCharacters: unreservedASCII) ?? dTag
     }
 
     static func decodeDTag(_ encoded: String) -> String {
@@ -35,10 +39,12 @@ struct RecipeRoute: Hashable {
     }
 
     /// Parse `recipe/{author}/{encodedDTag}`. Returns nil when the path is
-    /// the wrong shape or either half is empty.
+    /// the wrong shape, either half is empty, or an extra `/` segment is
+    /// present. Encoded slashes in the d-tag are `%2F`, so a well-formed
+    /// path always has exactly three `/`-separated parts.
     static func parse(_ path: String) -> RecipeRoute? {
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        let parts = trimmed.split(separator: "/", maxSplits: 2, omittingEmptySubsequences: false)
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
             .map(String.init)
         guard parts.count == 3, parts[0] == "recipe",
               !parts[1].isEmpty, !parts[2].isEmpty
