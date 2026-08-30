@@ -879,11 +879,20 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   serialized submit that CLOSEs only opened subIds (§7.5). Empty Following
   invites Global instead of spinning. The tab stays mounted so `.task` cannot
   re-issue the REQ.
-  **Live gate (search.nostrarchives.com):** Global returned 100 kind-1 events
-  (30 accepted after mute-only / structural / reply); Following over 24 of
-  those authors returned 30 accepted. Hermetic test
-  `toggle_globalFollowingGlobal_doesNotRequeryGlobal` is the proof that the
-  second Global render issues no REQ.
+  **Live gate (search.nostrarchives.com):** Global returned 100 kind-1 events.
+  Decision histogram (structuralSpam and reply counted separately; threshold
+  unchanged at `maxHashtags = 5`): accept 30, **structuralSpam 69**, **reply 1**,
+  futureDated / blockedPubkey / userBlocked / mutedWord / threadMuted / deleted
+  / wotFiltered / noFoodTag / notKind1 all 0. All 69 structuralSpam were
+  hashtagCap (`max(content #tags, t-tags) > 5`); hellthread (p ≥ 25) was 0.
+  Of those 69, ~61 were 100+ t-tag aggregator spam; the 6–20 band includes
+  real food posts (e.g. a `#food #foodstr` photo with 7 tags). Evidence only
+  — cap not raised. Hashtag REQ is **single-relay** (`search.nostrarchives.com`)
+  matching Android's hashtag path; Android's extra `nos.lol` / primal /
+  nostr.net set is the skipped keyword firehose. Empty (EOSE, 0 accepted) vs
+  error (no EOSE) are distinct UI states; a timeout is no longer a stuck
+  spinner. Hermetic test `toggle_globalFollowingGlobal_doesNotRequeryGlobal`
+  is the proof that the second Global render issues no REQ.
 - 3.4 Food-first onboarding: curated creator starter pack (**Seth owes the
   list** — Android's is still the inherited generic set), food-framed copy,
   topic picker, save-a-recipe first-run step.

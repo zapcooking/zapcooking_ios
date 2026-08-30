@@ -130,6 +130,7 @@ struct OnlyFoodFeedViewModelTests {
         #expect(vm.isLoaded(.following))
         #expect(!vm.isLoading)
         #expect(!vm.isAwaitingFirstPaint)
+        #expect(!vm.isLoadFailed)
         #expect(vm.notes.isEmpty)
     }
 
@@ -150,6 +151,8 @@ struct OnlyFoodFeedViewModelTests {
         #expect(calls == 1)
         #expect(vm.isLoaded(.global))
         #expect(vm.isEmpty)
+        #expect(!vm.isLoadFailed)
+        #expect(!vm.isAwaitingFirstPaint)
 
         vm.setMode(.following)
         await vm.inFlight?.value
@@ -172,6 +175,70 @@ struct OnlyFoodFeedViewModelTests {
         await vm.startAndWait()
         #expect(!vm.isLoaded(.global))
         #expect(!vm.isLoading)
+        #expect(vm.isLoadFailed)
+        #expect(!vm.isEmpty)
+        #expect(!vm.isAwaitingFirstPaint)
+    }
+
+    @Test func connectMiss_isLoadFailedNotEmpty() async {
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            follows: { [] },
+            query: { _ in
+                OnlyFoodQueryResult(events: [], connected: false, anySent: false, eoseFired: false)
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await vm.startAndWait()
+        #expect(!vm.isLoaded(.global))
+        #expect(vm.isLoadFailed)
+        #expect(!vm.isEmpty)
+        #expect(!vm.isAwaitingFirstPaint)
+    }
+
+    @Test func refreshAfterTimeout_clearsLoadFailedOnSuccess() async {
+        var fail = true
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            follows: { [] },
+            query: { _ in
+                if fail {
+                    return OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false)
+                }
+                return self.result([self.food(id: "ok", createdAt: 100)])
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await vm.startAndWait()
+        #expect(vm.isLoadFailed)
+        fail = false
+        await vm.refreshAndWait()
+        #expect(!vm.isLoadFailed)
+        #expect(vm.isLoaded(.global))
+        #expect(vm.notes.map(\.id) == ["ok"])
+    }
+
+    @Test func timeout_withSeededNotes_doesNotFlagLoadFailed() async {
+        let cached = food(id: "cache", createdAt: 50)
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            follows: { [] },
+            query: { _ in
+                OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false)
+            },
+            seedCache: { [cached] },
+            persist: { _ in }
+        )
+        await vm.startAndWait()
+        #expect(!vm.isLoaded(.global))
+        #expect(!vm.isLoadFailed)
+        #expect(!vm.isEmpty)
+        #expect(vm.notes.map(\.id) == ["cache"])
     }
 
     @Test func mute_dropsBlockedAndMutedWord_notViaSpamScorer() async {

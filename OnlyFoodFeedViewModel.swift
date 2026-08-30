@@ -52,6 +52,12 @@ final class OnlyFoodFeedViewModel {
     /// `PAGE_PREFETCH_DISTANCE`.
     static let loadMorePrefetch = 6
 
+    /// Hashtag REQ target. Android's OnlyFood hashtag path is also
+    /// `SearchViewModel.DEFAULT_SEARCH_RELAY` alone (`wss://search.nostrarchives.com`)
+    /// for both initial and paging. Android's extra `nos.lol` / `primal` /
+    /// `nostr.net` set is the keyword-only firehose (`discoverContentOnlyFood`),
+    /// a separate protocol file skipped in 3.3. Single-relay here is parity,
+    /// not a gap versus that hashtag path.
     static let searchRelay = SearchViewModel.defaultSearchRelay
     static let authorChunk = 500
     static let maxRetainedEvents = 3000
@@ -65,6 +71,10 @@ final class OnlyFoodFeedViewModel {
     var isRefreshing = false
     var emptyFollows = false
     var wotDropped = 0
+    /// True when the last initial/refresh query of the visible mode finished
+    /// without a genuine EOSE (timeout, dropped send, connect miss) and nothing
+    /// is on screen. Distinct from ``isEmpty`` (EOSE arrived, zero accepted).
+    var loadFailed = false
 
     /// Relay queries issued this session. Tests assert the §7.4 latch against
     /// this rather than sockets. Production increments it too, which is how
@@ -131,10 +141,16 @@ final class OnlyFoodFeedViewModel {
     var hasLoaded: Bool { stateOf(mode).loaded }
 
     /// Still fetching the first window, and nothing is on screen yet.
-    var isAwaitingFirstPaint: Bool { notes.isEmpty && !hasLoaded && !emptyFollows }
+    var isAwaitingFirstPaint: Bool { notes.isEmpty && !hasLoaded && !emptyFollows && !loadFailed }
 
-    /// A completed load that found nothing. Distinct from empty-follows.
+    /// A completed load that found nothing. Distinct from empty-follows
+    /// and from a relay miss (``isLoadFailed``).
     var isEmpty: Bool { notes.isEmpty && hasLoaded && !emptyFollows }
+
+    /// The search relay never answered. Distinct from genuine empty (EOSE,
+    /// zero accepted) so the UI can say "couldn't reach" instead of
+    /// "no food posts yet."
+    var isLoadFailed: Bool { notes.isEmpty && loadFailed && !hasLoaded && !emptyFollows }
 
     func isLoaded(_ mode: Mode) -> Bool { stateOf(mode).loaded }
 
@@ -167,7 +183,10 @@ final class OnlyFoodFeedViewModel {
         emptyFollows = st.emptyFollows
         isPaging = false
         isRefreshing = false
-        if st.loaded { isLoading = false }
+        if st.loaded {
+            isLoading = false
+            loadFailed = false
+        }
         if !st.loaded {
             submit(mode: mode, state: st, load: .initial, since: nil, until: nil)
         }
@@ -221,6 +240,7 @@ final class OnlyFoodFeedViewModel {
             state.emptyFollows = true
             if self.mode == mode {
                 emptyFollows = true
+                loadFailed = false
                 clearIndicators()
                 emitCurrentMode()
             }
@@ -233,6 +253,7 @@ final class OnlyFoodFeedViewModel {
         state.emptyFollows = false
         if self.mode == mode {
             emptyFollows = false
+            if load == .initial || load == .refresh { loadFailed = false }
             switch load {
             case .initial: isLoading = true
             case .page: isPaging = true
@@ -283,7 +304,8 @@ final class OnlyFoodFeedViewModel {
 
             guard !Task.isCancelled, generation == self.submitGeneration else { return }
 
-            if shouldLatchLoaded(connected: connected, anySent: anySent, eoseFired: eoseFired) {
+            let latched = shouldLatchLoaded(connected: connected, anySent: anySent, eoseFired: eoseFired)
+            if latched {
                 state.loaded = true
                 if load == .page, pageEndReached(received) { state.endReached = true }
             }
@@ -298,6 +320,11 @@ final class OnlyFoodFeedViewModel {
             }
             if self.mode == mode {
                 self.emitCurrentMode()
+                if latched {
+                    self.loadFailed = false
+                } else if (load == .initial || load == .refresh), self.notes.isEmpty {
+                    self.loadFailed = true
+                }
                 self.clearIndicators()
             }
             self.persist(accepted)

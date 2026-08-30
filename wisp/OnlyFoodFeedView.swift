@@ -5,6 +5,8 @@ import SwiftUI
 /// `PostCardView`. Pull-to-refresh is the only re-query path (§7.4).
 ///
 /// Empty Following is a clear invite to Global — never a spinner, never an error.
+/// Genuine empty (EOSE, nothing accepted) and a search-relay miss (timeout /
+/// dropped send) are different screens.
 struct OnlyFoodFeedView: View {
     let keypair: Keypair
     @Binding var path: NavigationPath
@@ -75,6 +77,8 @@ struct OnlyFoodFeedView: View {
             emptyFollowsState
         } else if viewModel.isAwaitingFirstPaint {
             loadingState
+        } else if viewModel.isLoadFailed {
+            errorState
         } else if viewModel.isEmpty {
             emptyState
         } else {
@@ -133,6 +137,27 @@ struct OnlyFoodFeedView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .refreshable { await viewModel.refreshAndWait() }
+        .accessibilityLabel("No food posts yet")
+    }
+
+    /// Relay miss (timeout / dropped send / connect fail). Must not reuse
+    /// the genuine-empty copy — a down search relay is not "no food posts."
+    private var errorState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Text("Couldn't reach the food feed")
+                .font(AppFont.bodyLarge)
+                .foregroundStyle(Color.wispOnSurface)
+                .multilineTextAlignment(.center)
+            Text("Pull down to retry.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await viewModel.refreshAndWait() }
+        .accessibilityLabel("Couldn't reach the food feed")
     }
 
     private var feedList: some View {
