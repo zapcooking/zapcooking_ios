@@ -498,4 +498,71 @@ struct RecipeRepositoryTests {
         let resolved = await repo.requestRecipe(author: author, dTag: "peposo")
         #expect(resolved?.id == "aa")
     }
+
+    // MARK: - HiddenRecipes (one reduction, every consumer)
+
+    /// The 2.3 live-publish leftovers share a d-tag prefix and eight
+    /// pubkeys. Filtering here — not in a view — is what keeps a forgotten
+    /// surface from showing them.
+    @Test func deduped_dropsLivePublishPrefixRegardlessOfPubkey() {
+        let one = recipe(
+            id: "aa",
+            author: String(repeating: "1", count: 64),
+            dTag: "ios-2.3-live-publish-1770000001",
+            createdAt: 200
+        )
+        let two = recipe(
+            id: "bb",
+            author: String(repeating: "2", count: 64),
+            dTag: "ios-2.3-live-publish-1770000002",
+            createdAt: 100
+        )
+        let keep = recipe(id: "cc", dTag: "ragu", createdAt: 150)
+        #expect(RecipeRepository.deduped([one, two, keep]).map(\.id) == ["cc"])
+    }
+
+    @Test func ingest_doesNotHoldAHiddenCoordinate() {
+        let repo = RecipeRepository(relays: [])
+        let hidden = recipe(
+            id: "aa",
+            dTag: "ios-2.3-live-publish-1770000000",
+            createdAt: 100
+        )
+        let keep = recipe(id: "bb", dTag: "ragu", createdAt: 100)
+        repo.ingest([hidden, keep])
+
+        #expect(repo.recipes.map(\.id) == ["bb"])
+        #expect(repo.cached(author: hidden.pubkey, dTag: "ios-2.3-live-publish-1770000000") == nil)
+    }
+
+    @Test func requestRecipe_returnsNilForAHiddenDTagWithoutQuerying() async {
+        let repo = RecipeRepository(relays: ["wss://example.invalid"])
+        let resolved = await repo.requestRecipe(
+            author: String(repeating: "a", count: 64),
+            dTag: "ios-2.3-live-publish-1770000000"
+        )
+        #expect(resolved == nil)
+    }
+
+    @Test func ingestTag_dropsHiddenEvenWhenTheCategoryMatches() async {
+        let repo = RecipeRepository(relays: [])
+        repo.loadTagFeed(tag: "test")
+        await repo.tagInFlight?.value
+
+        let hidden = taggedRecipe(
+            id: "aa",
+            dTag: "ios-2.3-live-publish-1770000000",
+            createdAt: 100,
+            categories: ["test"]
+        )
+        let keep = taggedRecipe(
+            id: "bb",
+            dTag: "peposo",
+            createdAt: 100,
+            categories: ["test"]
+        )
+        repo.ingestTag([hidden, keep])
+
+        #expect(repo.tagRecipes.map(\.id) == ["bb"])
+    }
 }
