@@ -14,6 +14,9 @@ import Observation
 ///   wins, **lower event id wins on a tie** (NIP-01).
 /// - `requestRecipe(author:dTag:)` resolves cache-first, then through the same
 ///   union with the same dedup — one code path.
+/// - The **feed** paints from ObjectBox before any relay is contacted
+///   (Concern 1.5 / §4.1). An empty union does not wipe that paint — the
+///   grid is cache ∪ live and never shrinks below the cached set.
 ///
 /// **The dedup is not implemented here.** `dedupeAcrossFormats` (Concern 2.2)
 /// already is this contract: its comparator is `rank desc, created_at desc,
@@ -48,8 +51,6 @@ import Observation
 @Observable
 @MainActor
 final class RecipeRepository {
-
-    static let shared = RecipeRepository()
 
     /// Deduped recipe events, newest first. The feed renders this directly.
     private(set) var recipes: [NostrEvent] = []
@@ -92,18 +93,41 @@ final class RecipeRepository {
     /// fail.
     @ObservationIgnored private let isMuted: @MainActor (String) -> Bool
 
-    /// `format` and `isMuted` default in the body rather than as default
-    /// arguments: default arguments are evaluated in the caller's context, and
-    /// this module defaults to `MainActor` isolation, so naming an isolated
-    /// static there is an error under Swift 6.
+    /// ObjectBox seed. Production (`shared`) reads kind-30023; tests inject
+    /// a fixture so they stay hermetic and do not touch ObjectBox.
+    @ObservationIgnored private let seedCache: () async -> [NostrEvent]
+
+    /// Persist network results so the next cold launch can paint. Tests
+    /// inject a no-op; production enqueues through `EventPersistQueue`.
+    @ObservationIgnored private let persist: ([NostrEvent]) -> Void
+
+    static let shared = RecipeRepository(
+        seedCache: { await EventStore.shared.seedRecipes() },
+        persist: { events in
+            guard !events.isEmpty else { return }
+            Task { await EventPersistQueue.shared.enqueue(events) }
+        }
+    )
+
+    /// `format` / `isMuted` / `seedCache` / `persist` default in the body
+    /// rather than as default arguments: default arguments are evaluated in
+    /// the caller's context, and this module defaults to `MainActor`
+    /// isolation, so naming an isolated static there is an error under Swift 6.
+    ///
+    /// The no-op seed / persist defaults keep `RecipeRepository(relays:)`
+    /// hermetic for tests. Production goes through ``shared``.
     init(
         relays: [String] = RelayDefaults.articles,
         format: (any RecipeFormat)? = nil,
-        isMuted: (@MainActor (String) -> Bool)? = nil
+        isMuted: (@MainActor (String) -> Bool)? = nil,
+        seedCache: (() async -> [NostrEvent])? = nil,
+        persist: (([NostrEvent]) -> Void)? = nil
     ) {
         self.relays = relays
         self.format = format ?? RecipeFormats.primary
         self.isMuted = isMuted ?? { MuteRepository.shared.isBlocked($0) }
+        self.seedCache = seedCache ?? { [] }
+        self.persist = persist ?? { _ in }
     }
 
     // MARK: - Coordinate
@@ -159,22 +183,40 @@ final class RecipeRepository {
 
     // MARK: - Feed
 
-    /// First load. No-op once loaded or while a job is already running — use
-    /// ``refresh()`` to re-query, which is the only re-query path (§7.4).
+    /// First load. Paints ObjectBox **before** the union is contacted, then
+    /// merges the live window into the same coordinate map. No-op once loaded
+    /// or while a job is already running — use ``refresh()`` to re-query,
+    /// which is the only re-query path (§7.4).
     ///
     /// The `isLoading` half of the guard is load-bearing, not defensive: SwiftUI
     /// re-runs `.task` / `.onAppear` on state changes, and without it each
     /// re-run would cancel the in-flight job and issue an **identical filter on
     /// the same connection** — precisely the sequence that returned 99 events
     /// and then 0 twelve seconds later on Android.
+    ///
+    /// `reset` is false: a silent union (airplane mode, one empty relay) must
+    /// not wipe the cache-seeded paint. The grid is cache ∪ live.
     func load(limit: Int = 50) {
         guard !hasLoaded, !isLoading else { return }
-        submit { await self.fetchPage(until: nil, limit: limit, reset: true) }
+        submit {
+            await self.paintFromCache()
+            await self.fetchPage(until: nil, limit: limit, reset: false)
+        }
     }
 
-    /// Pull-to-refresh: the one deliberate re-query.
+    /// Merge persisted recipes into ``recipes`` without marking the feed
+    /// loaded and without opening a socket. Called as the first step of
+    /// ``load(limit:)`` so the first paint is local.
+    func paintFromCache() async {
+        let cached = await seedCache()
+        guard !Task.isCancelled, !cached.isEmpty else { return }
+        ingest(cached, reset: false)
+    }
+
+    /// Pull-to-refresh: the one deliberate re-query. Merges — does not
+    /// clear — so an empty union cannot blank a painted cache.
     func refresh(limit: Int = 50) {
-        submit { await self.fetchPage(until: nil, limit: limit, reset: true) }
+        submit { await self.fetchPage(until: nil, limit: limit, reset: false) }
     }
 
     /// Page backwards in time from ``oldestHeldCreatedAt``. Scroll fires this
@@ -258,6 +300,7 @@ final class RecipeRepository {
         guard !Task.isCancelled else { return }
 
         ingest(events, reset: reset)
+        persist(events)
         hasLoaded = true
     }
 

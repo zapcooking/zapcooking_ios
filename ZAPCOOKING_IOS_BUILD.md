@@ -796,6 +796,9 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   pull-to-refresh, cache-seeded first paint. **Also flips the default launch
   tab back to `.recipes`** (`MainView.swift`) in the same PR — it is parked on
   `.search` while this tab is a placeholder.
+  **Landed:** `RecipeFeedView` / `RecipeCardView` / `RecipeFeedViewModel`;
+  `RecipeRepository.load` paints ObjectBox before the union and never wipes
+  that paint on an empty answer; default tab is `.recipes`.
 - **1.6 Tap rewiring** — any kind-30023 opens the *recipe* route when
   `RecipeParser.isRecipe`, else the article route, **with a cache-miss guard**
   (evicted event → article fallback, never a recipe screen with no event).
