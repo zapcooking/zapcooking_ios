@@ -21,6 +21,18 @@ struct ArticleTapRoutingTests {
         #expect(!ArticleTapRouting.opensAsRecipe(nil))
     }
 
+    @Test func badge_recipeEvent_isRECIPE() {
+        #expect(ArticleTapRouting.badge(for: Self.peposo()) == "RECIPE")
+    }
+
+    @Test func badge_plainArticle_isARTICLE() {
+        #expect(ArticleTapRouting.badge(for: Self.articleCarryingRecipeTag()) == "ARTICLE")
+    }
+
+    @Test func badge_nilEvent_isARTICLE_cacheMissGuard() {
+        #expect(ArticleTapRouting.badge(for: nil) == "ARTICLE")
+    }
+
     @Test func recipeRoute_usesRawDTag() {
         let event = Self.peposo()
         let route = RecipeRoute(author: event.pubkey, dTag: RecipeParser.dTag(event))

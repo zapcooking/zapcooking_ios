@@ -30,6 +30,12 @@ enum ArticleTapRouting {
         return RecipeParser.isRecipe(event)
     }
 
+    /// Card badge — Android `badge_recipe` / `badge_article`. Same gate as
+    /// the destination, including cache-miss: unknown event → `ARTICLE`.
+    static func badge(for event: NostrEvent?) -> String {
+        opensAsRecipe(event) ? "RECIPE" : "ARTICLE"
+    }
+
     /// Push the long-form reader. Nil / evicted event → article fallback.
     static func appendLongForm(
         to path: inout NavigationPath,

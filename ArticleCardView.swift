@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Rich preview card for a NIP-23 long-form article (kind 30023) referenced
 /// inside note content via `nostr:naddr1…`. 1:1 port of Android's
-/// `ArticleCard` (`RichContent.kt`): hero image, "ARTICLE" badge + title,
+/// `ArticleCard` (`RichContent.kt`): hero image, RECIPE/ARTICLE badge + title,
 /// summary, author + published date footer. Tapping the card opens the
 /// recipe reader when `RecipeParser.isRecipe`, else the article reader
 /// (Concern 1.6). Tapping the author name routes to their profile.
@@ -162,7 +162,7 @@ struct ArticleCardView: View {
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .center, spacing: 8) {
-                        Text("ARTICLE")
+                        Text(ArticleTapRouting.badge(for: event))
                             .font(AppFont.labelSmall)
                             .foregroundStyle(Color.wispPrimary)
                             .padding(.horizontal, 6)

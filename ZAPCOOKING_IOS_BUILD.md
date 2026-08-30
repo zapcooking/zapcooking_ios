@@ -810,6 +810,8 @@ requirement was about JVM unit tests vs on-device JNI secp256k1).
   note-list feeds, and the notifications `onNoteTap` choke point.
   `RecipeCardView` already used `RecipeRoute`. No article/recipe URL
   deep-link handler exists (`onOpenURL` is share-extension only).
+  Badge (`RECIPE` / `ARTICLE`) uses the same gate so label and
+  destination agree; unknown event → `ARTICLE`.
 - **1.7 `RecipeTagFeedView`** + tag catalog browse.
   **Landed:** `RecipeTagCatalog` (Android curated list; per-recipe
   `<root>-<slug>` tags are not browse categories), `RecipeTagFeedView` /
