@@ -20,11 +20,12 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    // Food-first default (Concern 1.5). `.onlyfood` and `.kitchen` still
-    // fall through to `placeholderTab` until 3.3 / 3.2.
+    // Food-first default (Concern 1.5). `.kitchen` still falls through to
+    // `placeholderTab` until 3.2. `.onlyfood` is the live feed (Concern 3.3).
     @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
     @State private var recipesPath = NavigationPath()
+    @State private var onlyfoodPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
     @State private var searchPath = NavigationPath()
@@ -34,10 +35,12 @@ struct MainView: View {
     /// ThreadView's `.task` (append) + `.onDisappear` (remove-tail).
     @State private var feedThreadChain: [String] = []
     @State private var recipesThreadChain: [String] = []
+    @State private var onlyfoodThreadChain: [String] = []
     @State private var placeholderThreadChain: [String] = []
     @State private var notificationsThreadChain: [String] = []
     @State private var searchThreadChain: [String] = []
     @State private var recipeFeedVM = RecipeFeedViewModel()
+    @State private var onlyfoodFeedVM: OnlyFoodFeedViewModel
     @State private var drawerOpen = false
     @State private var drawerDragOffset: CGFloat = 0
     @State private var engagementRepo = EngagementRepository.shared
@@ -111,6 +114,7 @@ struct MainView: View {
         _groupListVM = State(initialValue: GroupListViewModel(keypair: keypair))
         _searchVM = State(initialValue: SearchViewModel(keypair: keypair))
         _walletStore = State(initialValue: WalletStore(keypair: keypair))
+        _onlyfoodFeedVM = State(initialValue: OnlyFoodFeedViewModel(pubkey: keypair.pubkey))
     }
 
     var body: some View {
@@ -741,6 +745,54 @@ struct MainView: View {
         }
     }
 
+    private var onlyfoodTab: some View {
+        NavigationStack(path: $onlyfoodPath) {
+            OnlyFoodFeedView(
+                keypair: keypair,
+                path: $onlyfoodPath,
+                onOpenDrawer: openDrawer,
+                avatarURL: viewModel.userProfile?.picture,
+                viewModel: onlyfoodFeedVM
+            )
+            .navigationDestination(for: ProfileRoute.self) { route in
+                ProfileView(
+                    pubkey: route.pubkey,
+                    activeUserPubkey: keypair.pubkey,
+                    onProfileTap: { pk in onlyfoodPath.append(ProfileRoute(pubkey: pk)) },
+                    onNoteTap: { eid in onlyfoodPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
+                    onHashtagTap: { tag in onlyfoodPath.append(HashtagFeedRoute(tag: tag)) },
+                    path: $onlyfoodPath
+                )
+            }
+            .navigationDestination(for: ThreadRoute.self) { route in
+                ThreadView(
+                    seedEventId: route.eventId,
+                    authorHint: route.authorPubkey,
+                    keypair: keypair,
+                    path: $onlyfoodPath,
+                    chain: $onlyfoodThreadChain,
+                    scrollToId: route.scrollToId
+                )
+            }
+            .navigationDestination(for: ArticleRoute.self) { route in
+                ArticleView(route: route, keypair: keypair, path: $onlyfoodPath)
+            }
+            .navigationDestination(for: HashtagFeedRoute.self) { route in
+                if let tag = route.tag {
+                    HashtagFeedView(
+                        keypair: keypair,
+                        source: .single(tag),
+                        onProfileTap: { pk in onlyfoodPath.append(ProfileRoute(pubkey: pk)) },
+                        onNoteTap: { eid in onlyfoodPath.append(ThreadRoute(eventId: eid, authorPubkey: "")) },
+                        onHashtagTap: { newTag in onlyfoodPath.append(HashtagFeedRoute(tag: newTag)) }
+                    )
+                }
+            }
+            .recipeNavigation(keypair: keypair, path: $onlyfoodPath)
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
     private var mainShell: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -761,8 +813,16 @@ struct MainView: View {
                     .allowsHitTesting(selectedTab == .recipes)
                     .accessibilityHidden(selectedTab != .recipes)
 
+                // OnlyFood stays mounted so a Global ↔ Following toggle cannot
+                // re-issue `.task` and so the per-mode cache survives tab
+                // changes (§7.4).
+                onlyfoodTab
+                    .opacity(selectedTab == .onlyfood ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .onlyfood)
+                    .accessibilityHidden(selectedTab != .onlyfood)
+
                 switch selectedTab {
-                case .home, .recipes:
+                case .home, .recipes, .onlyfood:
                     EmptyView()
                 case .messages:
                     MessagesView(viewModel: messagesVM, groupListVM: groupListVM)
@@ -1476,11 +1536,12 @@ struct MainView: View {
             feedPath = NavigationPath()
             feedScrollToTopTrigger &+= 1
         case .recipes: recipesPath = NavigationPath()
+        case .onlyfood: onlyfoodPath = NavigationPath()
         case .wallet: placeholderPath = NavigationPath()
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
         case .messages: break  // MessagesView owns its own NavigationStack
-        case .onlyfood, .kitchen: placeholderPath = NavigationPath()
+        case .kitchen: placeholderPath = NavigationPath()
         }
     }
 
