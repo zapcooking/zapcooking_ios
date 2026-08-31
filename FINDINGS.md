@@ -86,6 +86,20 @@ or in `project.pbxproj`). New file: `wispTests/HttpClientFactoryTests.swift`.
 `PBXFileSystemSynchronizedRootGroup` (`project.pbxproj:697-699`), so files
 on disk are picked up automatically. The concern will not touch pbxproj.
 
+## Local-toolchain note: warning baseline on this machine (re-baselined)
+
+The "seven known 'Skipping duplicate build file' warnings" expectation
+describes the cloud Mac (Xcode 26.6); it does not hold on this machine
+(Xcode 26.3, Build 17C529). A full build of main at 28a8d34 with the
+mandatory local command produces **zero** duplicate-build-file warnings and
+**538 warning lines** of pre-existing Swift 6 concurrency diagnostics
+(main-actor isolation / Sendable) across ~30 files untouched by this branch.
+
+**Rule for this machine going forward:** zero warnings in files the branch
+touches, and the total elsewhere unchanged from main. This branch complies:
+`HttpClientFactoryTests.swift` compiles with zero diagnostics, and no other
+file differs from main.
+
 ## Planned tests (on go-ahead)
 
 1. `computeClient` timeouts are 75/75 (the §2-documented values).
