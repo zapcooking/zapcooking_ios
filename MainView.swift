@@ -51,6 +51,7 @@ struct MainView: View {
     @State private var showLists = false
     @State private var showPolls = false
     @State private var showCompose = false
+    @State private var showRecipeCompose = false
     /// App-level router for reply / quote / emoji-reaction composers triggered
     /// from any feed card. Hosted from this view's stable root (see body) so the
     /// composer sheet is never anchored to a recyclable `LazyVStack` row, which
@@ -742,13 +743,21 @@ struct MainView: View {
 
     private var recipesTab: some View {
         NavigationStack(path: $recipesPath) {
-            RecipeFeedView(
-                keypair: keypair,
-                path: $recipesPath,
-                onOpenDrawer: openDrawer,
-                avatarURL: viewModel.userProfile?.picture,
-                viewModel: recipeFeedVM
-            )
+            ZStack(alignment: .bottomTrailing) {
+                RecipeFeedView(
+                    keypair: keypair,
+                    path: $recipesPath,
+                    onOpenDrawer: openDrawer,
+                    avatarURL: viewModel.userProfile?.picture,
+                    viewModel: recipeFeedVM
+                )
+                if !drawerOpen && !isWatchOnly {
+                    RecipeComposeFAB { showRecipeCompose = true }
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 32 + (audioPlayer.currentTrack != nil ? MiniAudioPlayerView.collapsedHeight : 0))
+                        .animation(.smooth(duration: 0.22), value: audioPlayer.currentTrack != nil)
+                }
+            }
             .navigationDestination(for: ProfileRoute.self) { route in
                 ProfileView(
                     pubkey: route.pubkey,
@@ -774,6 +783,17 @@ struct MainView: View {
             }
             .recipeNavigation(keypair: keypair, path: $recipesPath)
             .toolbar(.hidden, for: .navigationBar)
+            .fullScreenCover(isPresented: $showRecipeCompose) {
+                RecipeComposeView(
+                    keypair: keypair,
+                    session: .create,
+                    onPublished: { author, dTag in
+                        showRecipeCompose = false
+                        recipesPath.append(RecipeRoute(author: author, dTag: dTag))
+                    },
+                    onDismiss: { showRecipeCompose = false }
+                )
+            }
         }
     }
 

@@ -4,6 +4,11 @@ import SwiftUI
 /// servings chips, chef's notes, scaled ingredients, numbered directions,
 /// reused engagement bar.
 ///
+/// Author edit opens ``RecipeComposeView``. Delete is **not** on this
+/// screen yet. When it lands, call `RecipeFeedViewModel.refresh()` after
+/// `RecipePublisher.delete` returns — `RecipeRepository.ingest` drops
+/// non-recipes, so a blanked replacement cannot evict the live card.
+///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Data from `RecipeRepository` via `RecipeDetailViewModel`. No relay
 ///   queries from this view.
@@ -18,6 +23,7 @@ struct RecipeDetailView: View {
 
     @State private var viewModel = RecipeDetailViewModel()
     @State private var cookSession: CookModeSession?
+    @State private var composeSession: RecipeComposeSession?
     @State private var muteRepo = MuteRepository.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -49,6 +55,21 @@ struct RecipeDetailView: View {
         .fullScreenCover(item: $cookSession) { session in
             CookModeView(session: session)
         }
+        .fullScreenCover(item: $composeSession) { session in
+            RecipeComposeView(
+                keypair: keypair,
+                session: session,
+                onPublished: { author, dTag in
+                    composeSession = nil
+                    if author != route.author || dTag != route.dTag {
+                        path.append(RecipeRoute(author: author, dTag: dTag))
+                    } else {
+                        Task { await viewModel.load(author: route.author, dTag: route.dTag) }
+                    }
+                },
+                onDismiss: { composeSession = nil }
+            )
+        }
     }
 
     private var topBar: some View {
@@ -70,6 +91,22 @@ struct RecipeDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Start cooking")
                 .accessibilityIdentifier("start-cooking")
+            }
+            if let event = viewModel.event,
+               event.pubkey == keypair.pubkey,
+               !activeUserIsWatchOnly {
+                Button {
+                    composeSession = .edit(event)
+                } label: {
+                    Text("Edit")
+                        .font(AppFont.bodyMedium)
+                        .foregroundStyle(Color.wispPrimary)
+                        .frame(height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit recipe")
+                .accessibilityIdentifier("edit-recipe")
             }
             if let event = viewModel.event, event.pubkey != keypair.pubkey {
                 Menu {

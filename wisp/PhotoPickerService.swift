@@ -25,6 +25,7 @@ enum PhotoPickerService {
     /// the caller doesn't have to hold a reference.
     static func present(
         maxCount: Int,
+        filter: PHPickerFilter = .any(of: [.images, .videos]),
         onPicked: @escaping ([NSItemProvider]) -> Void,
         onCancel: @escaping () -> Void = {}
     ) {
@@ -32,7 +33,7 @@ enum PhotoPickerService {
 
         var config = PHPickerConfiguration(photoLibrary: .shared())
         config.selectionLimit = maxCount
-        config.filter = .any(of: [.images, .videos])
+        config.filter = filter
         config.preferredAssetRepresentationMode = .current
 
         let picker = PHPickerViewController(configuration: config)

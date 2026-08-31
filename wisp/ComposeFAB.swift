@@ -17,3 +17,21 @@ struct ComposeFAB: View {
         .accessibilityLabel("New post")
     }
 }
+
+/// Recipes-tab counterpart — dedicated recipe form, not the note composer.
+struct RecipeComposeFAB: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color.wispPrimary, in: Circle())
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+        }
+        .accessibilityLabel("New recipe")
+        .accessibilityIdentifier("new-recipe")
+    }
+}

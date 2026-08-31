@@ -68,17 +68,17 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
 
-**Test baseline (post Concern 4.1, on 3.1).** Three numbers, do not mix them:
+**Test baseline (post Concern 2.4, on 4.1).** Three numbers, do not mix them:
 
 | Number | What it is |
 |---|---|
-| **508/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 508 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
-| **509/1** | Same suite with one live round-trip **enabled and green**. Opt-in; not the default. |
-| **513** | `@Test` annotations on disk. Includes the four skipped live tests (NIP-98, recipe-publish, saved-list, NIP-56). Not a pass count. |
+| **529/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 529 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **530/1** | Same suite with one live round-trip **enabled and green**. Opt-in; not the default. |
+| **535** | `@Test` annotations on disk. Includes the five skipped live tests (NIP-98, recipe-publish, recipe-compose, saved-list, NIP-56). Not a pass count. |
 
-The four live network tests are opt-in and **skipped** in the default run (so
+The five live network tests are opt-in and **skipped** in the default run (so
 they do not add a pass or a network dependency). Future hermetic gate reports
-compare against **508/1**. Post-3.1 was 488/1; post-3.1-pre-review was 484/1;
+compare against **529/1**. Post-4.1 was 508/1; post-3.1 was 488/1; post-3.1-pre-review was 484/1;
 post-HiddenRecipes / post-2.3 was 468/1; post-1.8b was 430/1; post-0.6
 was 194/1.
 
@@ -153,6 +153,24 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
   -only-testing:wispTests/RecipePublisherLiveTests \
   test
 rm -f wispTests/.recipe_publish_live_enable
+```
+
+**Live recipe compose** (opt-in; Concern 2.4). Same publish-verify-delete
+protocol as 2.3, through `RecipeComposeViewModel.publish` (the form path,
+already-hosted image URLs — no Blossom re-host). Target
+`RelayDefaults.defaults`, not the indexer union. Key held until the
+coordinate is gone. Do not mint a `HiddenRecipes` prefix.
+
+```
+touch wispTests/.recipe_compose_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/RecipeComposeLiveTests \
+  test
+rm -f wispTests/.recipe_compose_live_enable
 ```
 
 **Live saved-list write** (opt-in; Concern 3.1). Uses an ephemeral keypair —
@@ -973,23 +991,34 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   the ephemeral key; those events are hidden by `HiddenRecipes` d-tag
   prefix `ios-2.3-live-publish-` in `RecipeRepository.deduped` (and the
   same object on Android / web — duplicated, no shared package).
-- **2.4 `RecipeComposeView`** — dedicated full-screen form (**not** an extension
-  of the note composer): title, categories, summary, chef's notes,
+- **2.4 `RecipeComposeView`** — **Landed.** Dedicated full-screen form
+  (`RecipeComposeView` + `RecipeComposeViewModel`), **not** an extension
+  of the note composer. Fields: title, categories, summary, chef's notes,
   prep/cook/servings, add/remove ingredient & direction rows, multi-image
   picker, additional resources. Images upload to Blossom **as picked**;
-  publish is **blocked while any upload is pending or failed**. Validation
-  shows the **reason** on the button — never a silent disable.
-  **§7.8 caption:** same title ⇒ same slug ⇒ same d-tag ⇒ silent replace;
-  the form must show the web's "make your title unique" hint (2.3 records
-  this, does not build the warning).
-  **Delete must refresh the feed explicitly.** `RecipeRepository.ingest`
-  drops non-recipes, so a blanked replacement cannot evict the live
-  coordinate. If 2.4 deletes and then relies on ingest, the card stays and
-  reads as a failed delete. After `RecipePublisher.delete` returns, reload
-  the feed. Do not add an evict API on ingest to paper over this.
-  **Live-write gate (§7.13):** publish-verify-delete with the key held
-  until the coordinate is gone. Do not add another hide-list prefix to
-  paper over a discarded ephemeral key.
+  publish is **blocked while any upload is pending or failed**. The
+  publish button **label is the reason** ("Add a title.") — never a
+  silent disable. **§7.8 caption:** "Remember to make your title unique!"
+  (same title ⇒ same slug ⇒ same d-tag ⇒ silent replace). No collision
+  detection — known open gap.
+  **Drafts: stay separate.** NIP-37 / `DraftsViewModel` is a note
+  composer (inner kind 1, Drafts tab reopens `ComposeView`). A recipe is
+  a structured form; stuffing it in would lose fields or teach Drafts a
+  second reopen path. Android v1 is the same (rotation only, no process
+  persistence). Accidental dismiss is a discard confirmation, not a
+  relay draft. Persistence is a follow-up.
+  **Delete is not on this screen.** When author-delete lands (recipe
+  detail / 3.2 My Kitchen), call `RecipeFeedViewModel.refresh()` after
+  `RecipePublisher.delete` returns. `RecipeRepository.ingest` drops
+  non-recipes, so a blanked replacement cannot evict the live
+  coordinate. Noted on `RecipeDetailView` and the compose VM.
+  **Live-write gate (§7.13):** `RecipeComposeLiveTests` —
+  publish-verify-delete through the compose VM, `RelayDefaults.defaults`,
+  key held until the coordinate is gone. No new hide-list prefix.
+  **Image required** (Android + `RecipePublisher` compose-path guard).
+  A no-image publish cannot land without a publisher change, which is
+  out of scope. Blossom fallback-to-source-URL is the 2.3 Sous Chef
+  re-host path; compose marks a failed pick as Failed and blocks.
 - **2.5 Sous Chef** — URL field → free anon `/api/extract-recipe/public` →
   structured preview via the shared recipe body → Save routes into 2.4.
   Image/text import is NIP-98 + member-gated (P2).
