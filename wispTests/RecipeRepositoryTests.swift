@@ -217,6 +217,18 @@ struct RecipeRepositoryTests {
     /// what we display. Blocking the author of the oldest held recipe must not
     /// move the cursor forward, or every later page re-fetches ground already
     /// covered — and it gets worse as the muted fraction rises.
+    @Test func visible_dropsReportedRecipesImmediately() {
+        let hiddenId = "hid"
+        let repo = RecipeRepository(relays: [], isReported: { $0.id == hiddenId })
+        repo.ingest([
+            recipe(id: hiddenId, dTag: "bad", createdAt: 200),
+            recipe(id: "ok", dTag: "good", createdAt: 100),
+        ])
+        #expect(repo.recipes.map(\.id) == ["ok"])
+        repo.dropHidden()
+        #expect(repo.recipes.map(\.id) == ["ok"])
+    }
+
     @Test func pagingCursor_isOldestHeld_notOldestVisible() {
         let blocked = String(repeating: "b", count: 64)
         let repo = RecipeRepository(relays: [], isMuted: { $0 == blocked })

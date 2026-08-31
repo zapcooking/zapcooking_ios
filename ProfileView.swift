@@ -124,6 +124,11 @@ struct ProfileView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .contentHidden)) { _ in
+            if ReportedContent.shared.isHidden(pubkey: pubkey) {
+                dismiss()
+            }
+        }
         .task { await viewModel.start() }
         .task(id: selectedTab) {
             await viewModel.loadTab(selectedTab)
@@ -179,6 +184,12 @@ struct ProfileView: View {
                     }
                 }
                 if !isMe {
+                    Button(role: .destructive) {
+                        ReportPresenter.shared.present(.profile(pubkey: pubkey))
+                    } label: {
+                        Label("Report", systemImage: "flag")
+                    }
+                    .accessibilityIdentifier("report-profile")
                     let blocked = muteRepo.isBlocked(pubkey)
                     Button(role: blocked ? nil : .destructive) {
                         if blocked {
@@ -190,6 +201,7 @@ struct ProfileView: View {
                         Label(blocked ? "Unblock User" : "Block User",
                               systemImage: blocked ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.xmark")
                     }
+                    .accessibilityIdentifier("block-profile")
                 }
             } label: {
                 Image(systemName: "ellipsis")

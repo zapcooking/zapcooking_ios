@@ -240,10 +240,26 @@ final class FeedViewModel {
         }
     }
 
-    /// Listen for `userBlocked` and drop matching in-memory events. Without
-    /// this, blocking someone in-session leaves their already-rendered feed
-    /// cards visible until the user pulls-to-refresh or relaunches.
+    /// Listen for `userBlocked` and `.contentHidden` and drop matching
+    /// in-memory events. Without this, blocking someone or reporting a
+    /// post in-session leaves already-rendered feed cards visible until
+    /// the user pulls-to-refresh or relaunches.
     private func observeBlocks() {
+        NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.events.removeAll {
+                    eventIds.contains($0.id)
+                    || pubkeys.contains($0.pubkey)
+                    || ($0.repostInnerPubkey.map { pubkeys.contains($0) } ?? false)
+                }
+            }
+        }
+
         NotificationCenter.default.addObserver(
             forName: .userBlocked, object: nil, queue: .main
         ) { [weak self] note in

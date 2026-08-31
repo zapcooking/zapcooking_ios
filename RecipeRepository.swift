@@ -116,6 +116,10 @@ final class RecipeRepository {
     /// fail.
     @ObservationIgnored private let isMuted: @MainActor (String) -> Bool
 
+    /// Reporter-local hide (NIP-56). Injected so tests can assert a reported
+    /// coordinate leaves the feed without touching `ReportedContent.shared`.
+    @ObservationIgnored private let isReported: @MainActor (NostrEvent) -> Bool
+
     /// ObjectBox seed. Production (`shared`) reads kind-30023; tests inject
     /// a fixture so they stay hermetic and do not touch ObjectBox.
     @ObservationIgnored private let seedCache: () async -> [NostrEvent]
@@ -143,12 +147,14 @@ final class RecipeRepository {
         relays: [String] = RelayDefaults.articles,
         format: (any RecipeFormat)? = nil,
         isMuted: (@MainActor (String) -> Bool)? = nil,
+        isReported: (@MainActor (NostrEvent) -> Bool)? = nil,
         seedCache: (() async -> [NostrEvent])? = nil,
         persist: (([NostrEvent]) -> Void)? = nil
     ) {
         self.relays = relays
         self.format = format ?? RecipeFormats.primary
         self.isMuted = isMuted ?? { MuteRepository.shared.isBlocked($0) }
+        self.isReported = isReported ?? { ReportedContent.shared.isHidden($0) }
         self.seedCache = seedCache ?? { [] }
         self.persist = persist ?? { _ in }
     }
@@ -203,7 +209,14 @@ final class RecipeRepository {
     /// visibility policy stays a policy — and so a direct recipe link is not
     /// silently resolved to nil by a mute.
     func visible(_ events: [NostrEvent]) -> [NostrEvent] {
-        events.filter { !isMuted($0.pubkey) }
+        events.filter { !isMuted($0.pubkey) && !isReported($0) }
+    }
+
+    /// Re-apply ``visible(_:)`` to whatever is held. Called after a successful
+    /// report so the Recipes tab and tag feeds drop the card immediately.
+    func dropHidden() {
+        recipes = visible(Self.deduped(Array(byCoordinate.values)))
+        tagRecipes = visible(Self.deduped(Array(tagByCoordinate.values)))
     }
 
     // MARK: - Feed
@@ -391,7 +404,10 @@ final class RecipeRepository {
             return nil
         }
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
-        if let cached = byCoordinate[key] ?? tagByCoordinate[key] { return cached }
+        if ReportedContent.shared.isHidden(coordinate: key) { return nil }
+        if let cached = byCoordinate[key] ?? tagByCoordinate[key] {
+            return isReported(cached) ? nil : cached
+        }
 
         let filter = format.coordinateFilter(author: author, dTag: dTag)
         let events = await RelayPool.query(
@@ -404,6 +420,7 @@ final class RecipeRepository {
         guard let winner = Self.deduped(events).first(where: { Self.coordinate($0) == key }) else {
             return nil
         }
+        if isReported(winner) { return nil }
         byCoordinate[key] = winner
         return winner
     }
@@ -417,7 +434,9 @@ final class RecipeRepository {
             return nil
         }
         let key = Self.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
-        return byCoordinate[key] ?? tagByCoordinate[key]
+        if ReportedContent.shared.isHidden(coordinate: key) { return nil }
+        guard let cached = byCoordinate[key] ?? tagByCoordinate[key] else { return nil }
+        return isReported(cached) ? nil : cached
     }
 
     // MARK: - Tag feed (Concern 1.7)

@@ -41,6 +41,46 @@ struct SafetyTests {
         #expect(SafetyFilter.shared.shouldDrop(event: evt, context: .feed))
     }
 
+    @Test func reportedEventIdDropsEverywhere() {
+        let snap = SafetyFilterSnapshot(
+            mutedWords: [],
+            blockedPubkeys: [],
+            mutedThreads: [],
+            wotEnabled: false,
+            qualifiedNetwork: [],
+            userPubkey: "0000",
+            reportedEventIds: ["rep-1"]
+        )
+        SafetyFilter.shared.install(snap)
+        defer { SafetyFilter.shared.install(.empty) }
+
+        let evt = makeEvent(kind: 1, pubkey: "alice", content: "hello", id: "rep-1")
+        for ctx: SafetyContext in [.feed, .notifications, .thread(rootId: "x"), .messages] {
+            #expect(SafetyFilter.shared.shouldDrop(event: evt, context: ctx))
+        }
+        let other = makeEvent(kind: 1, pubkey: "alice", content: "hello", id: "keep-1")
+        #expect(!SafetyFilter.shared.shouldDrop(event: other, context: .feed))
+    }
+
+    @Test func reportedPubkeyDropsEverywhere() {
+        let snap = SafetyFilterSnapshot(
+            mutedWords: [],
+            blockedPubkeys: [],
+            mutedThreads: [],
+            wotEnabled: false,
+            qualifiedNetwork: [],
+            userPubkey: "0000",
+            reportedPubkeys: ["alice"]
+        )
+        SafetyFilter.shared.install(snap)
+        defer { SafetyFilter.shared.install(.empty) }
+
+        let evt = makeEvent(kind: 1, pubkey: "alice", content: "hello")
+        for ctx: SafetyContext in [.feed, .notifications, .thread(rootId: "x"), .messages] {
+            #expect(SafetyFilter.shared.shouldDrop(event: evt, context: ctx))
+        }
+    }
+
     @Test func blockedPubkeyDropsEverywhere() {
         let snap = SafetyFilterSnapshot(
             mutedWords: [],

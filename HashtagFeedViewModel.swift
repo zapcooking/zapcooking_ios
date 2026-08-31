@@ -23,6 +23,8 @@ final class HashtagFeedViewModel {
     var isLoading: Bool = false
     var lastError: String?
 
+    @ObservationIgnored private var hideObserved = false
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var seenIds: Set<String> = []
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
@@ -40,6 +42,7 @@ final class HashtagFeedViewModel {
 
     deinit {
         profileUpdatesTask?.cancel()
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
         }
@@ -63,8 +66,24 @@ final class HashtagFeedViewModel {
 
     func start() async {
         ensureProfileUpdatesSubscription()
+        observeContentHidden()
         guard !isLoading, events.isEmpty else { return }
         await load()
+    }
+
+    private func observeContentHidden() {
+        guard !hideObserved else { return }
+        hideObserved = true
+        hideObserver = NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.events = self.events.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+            }
+        }
     }
 
     private func ensureProfileUpdatesSubscription() {
@@ -114,6 +133,7 @@ final class HashtagFeedViewModel {
         var merged = events
         var seen = seenIds
         for event in results where event.kind == 1 {
+            if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
             if seen.insert(event.id).inserted {
                 merged.append(event)
             }

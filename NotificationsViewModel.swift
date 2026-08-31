@@ -92,12 +92,19 @@ final class NotificationsViewModel {
         _ = safetyGeneration
         let hidden = hiddenSpamPubkeys
         let allowed = enabledTypes
-        let blocked = SafetyFilter.shared.snapshot.blockedPubkeys
+        let snap = SafetyFilter.shared.snapshot
+        let blocked = snap.blockedPubkeys
+        let reportedIds = snap.reportedEventIds
+        let reportedPks = snap.reportedPubkeys
         var result: [FlatNotificationItem] = []
         var zapIndexByKey: [String: Int] = [:]
         for item in repo.flatItems {
             if hidden.contains(item.actorPubkey) { continue }
             if blocked.contains(item.actorPubkey) { continue }
+            if reportedPks.contains(item.actorPubkey) { continue }
+            if reportedIds.contains(item.id) { continue }
+            if !item.referencedEventId.isEmpty, reportedIds.contains(item.referencedEventId) { continue }
+            if let actorEventId = item.actorEventId, reportedIds.contains(actorEventId) { continue }
             // WoT render gate: rows ingested before the filter was enabled (or
             // before a recompute shrank the network) are purged asynchronously
             // on `.safetyFilterChanged`; this synchronous check guarantees they

@@ -56,7 +56,9 @@ final class MuteRepository {
             mutedThreads: mutedThreads,
             wotEnabled: false,
             qualifiedNetwork: [],
-            userPubkey: pk
+            userPubkey: pk,
+            reportedEventIds: ReportedContent.shared.eventIds,
+            reportedPubkeys: ReportedContent.shared.pubkeys
         ))
 
         // One-time sweep: purge on-disk content for every author already on the
@@ -272,7 +274,9 @@ final class MuteRepository {
                 mutedThreads: mutedThreads,
                 wotEnabled: SafetyFilter.shared.snapshot.wotEnabled,
                 qualifiedNetwork: SafetyFilter.shared.snapshot.qualifiedNetwork,
-                userPubkey: SafetyFilter.shared.snapshot.userPubkey
+                userPubkey: SafetyFilter.shared.snapshot.userPubkey,
+                reportedEventIds: ReportedContent.shared.eventIds,
+                reportedPubkeys: ReportedContent.shared.pubkeys
             ))
         }
 
