@@ -32,4 +32,5 @@ temp/
 ## Opt-in sentinels for live network tests (see ZAPCOOKING_IOS_BUILD.md)
 wispTests/.nip98_live_enable
 wispTests/.recipe_publish_live_enable
+wispTests/.nip56_live_enable
 

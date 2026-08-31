@@ -57,6 +57,9 @@ struct MainView: View {
     /// is what caused the rare open/close loop. Injected into the environment so
     /// every card in every tab routes through it.
     @State private var composePresenter = ComposePresenter()
+    /// Hosted at the tab root so Report is never anchored to a recyclable
+    /// feed / recipe / profile row (same reason `composePresenter` lives here).
+    @State private var reportPresenter = ReportPresenter.shared
     @State private var showDraftsScheduled = false
     @State private var showCookingUtilitiesSheet = false
     @State private var cookingTimers = CookingTimerStore.shared
@@ -317,6 +320,7 @@ struct MainView: View {
             // recompute). All four ingest paths consult the snapshot lockless on every event,
             // so this must run before any subscription opens.
             let privkey32 = Hex.decode(keypair.privkey)
+            ReportedContent.shared.bind(activePubkey: keypair.pubkey)
             MuteRepository.shared.bind(
                 activePubkey: keypair.pubkey,
                 privkey32: privkey32,
@@ -516,6 +520,9 @@ struct MainView: View {
         }
         .sheet(item: $reopenDraft) { draft in
             ComposeView(keypair: keypair, draft: draft)
+        }
+        .sheet(item: $reportPresenter.target) { target in
+            ReportSheet(target: target, keypair: keypair)
         }
         .sheet(item: $pendingShare) { share in
             if let text = share.text {

@@ -135,6 +135,24 @@ final class ProfileViewModel {
         }
     }
 
+    private func observeContentHidden() {
+        NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.rootNotes = self.rootNotes.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                self.replies = self.replies.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                self.sortedNotes = self.sortedNotes.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                self.sortedReplies = self.sortedReplies.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                self.galleryPosts = self.galleryPosts.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                self.conversationNotes = self.conversationNotes.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+            }
+        }
+    }
+
     deinit {
         if let followsObserver { NotificationCenter.default.removeObserver(followsObserver) }
         if let safetyObserver { NotificationCenter.default.removeObserver(safetyObserver) }
@@ -145,6 +163,7 @@ final class ProfileViewModel {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        observeContentHidden()
 
         // Drop this pubkey from the watcher's exhausted set so explicit profile
         // navigation re-tries even after a prior batched fetch came up empty.

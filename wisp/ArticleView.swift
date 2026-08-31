@@ -55,6 +55,27 @@ struct ArticleView: View {
                 .foregroundStyle(Color.wispOnSurface)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if let article = viewModel.article, article.pubkey != keypair.pubkey {
+                Menu {
+                    Button(role: .destructive) {
+                        ReportPresenter.shared.present(.event(article))
+                    } label: {
+                        Label("Report", systemImage: "flag")
+                    }
+                    Button(role: .destructive) {
+                        MuteRepository.shared.blockUser(article.pubkey)
+                    } label: {
+                        Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.wispOnSurface)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Article actions")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

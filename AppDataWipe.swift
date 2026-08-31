@@ -31,6 +31,7 @@ enum AppDataWipe {
         LiveStreamRepository.shared.clear()
         LivePlayerStore.shared.releaseAll()
         MuteRepository.shared.unbind()
+        ReportedContent.shared.unbind()
         SafetyPreferences.shared.unbind()
         ZapAnimationStore.shared.cancelAll()
         MissingProfileWatcher.shared.stop()

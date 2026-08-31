@@ -68,17 +68,17 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
 
-**Test baseline (post Concern 2.3).** Three numbers, do not mix them:
+**Test baseline (post Concern 4.1).** Three numbers, do not mix them:
 
 | Number | What it is |
 |---|---|
-| **459/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 459 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
-| **460/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
-| **462** | `@Test` annotations on disk. Includes the skipped live NIP-98 test and the skipped live recipe-publish test. Not a pass count. |
+| **487/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 487 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **488/1** | Same suite with the live NIP-56 (or NIP-98) round-trip **enabled and green**. Opt-in; not the default. |
+| **491** | `@Test` annotations on disk. Includes the skipped live NIP-98, live recipe-publish, and live NIP-56 tests. Not a pass count. |
 
-The two live network tests are opt-in and **skipped** in the default run (so
+The three live network tests are opt-in and **skipped** in the default run (so
 they do not add a pass or a network dependency). Future hermetic gate reports
-compare against **459/1**. Post-2.3-pre-review was 456/1; post-1.8b was 430/1;
+compare against **487/1**. Post-2.3 was 459/1; post-1.8b was 430/1;
 post-0.6 was 194/1.
 
 Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
@@ -152,6 +152,24 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
   -only-testing:wispTests/RecipePublisherLiveTests \
   test
 rm -f wispTests/.recipe_publish_live_enable
+```
+
+**Live NIP-56 report** (opt-in; Concern 4.1). Uses an ephemeral keypair —
+never a real nsec. Publishes a kind-1984 to `RelayDefaults.defaults` only
+(not the indexer union — that hung ~1030s in 3.1), verifies it, then
+kind-5 deletes it and re-queries until the event is gone. Key is held
+until cleanup confirms.
+
+```
+touch wispTests/.nip56_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/Nip56LiveTests \
+  test
+rm -f wispTests/.nip56_live_enable
 ```
 
 ---
@@ -1010,7 +1028,19 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 
 ### Phase 4 — Compliance + submission (P0, runs parallel from Phase 1)
 
-- 4.1 NIP-56 reporting on posts, recipes, and profiles (**not** just groups)
+- 4.1 NIP-56 reporting on posts, recipes, and profiles (**not** just groups).
+  `Nip56.swift` + `ReportSender` + `ReportedContent` + `ReportSheet`.
+  Choke point for kind-1 is `PostCardView.overflowMenu` (home / OnlyFood /
+  hashtag / search / trending / lists / profile tabs / thread / notification
+  expansions / article comments). Post overflow says **Block User** (same
+  word as profiles / Guideline 1.2); it still calls `blockUser`. Recipes:
+  `RecipeDetailView` overflow + `RecipeCardView` context menu. Profiles:
+  ellipsis. After `SENT`, the
+  reported event / coordinate / profile-pubkey is hidden immediately.
+  Live gate: `wispTests/Nip56LiveTests` against `RelayDefaults.defaults`
+  only (publish-verify-delete, §7.13). **Not wired this PR:** group rooms,
+  DMs, live streams. Android `ReportsScreen` (mod inbox) is not ported —
+  that is a read surface for admins, not the Guideline 1.2 reporter path.
 - 4.2 In-app account deletion path
 - 4.3 Privacy policy + child-safety links in-app; **web policy corrected first**
 - 4.4 App Privacy nutrition label: OpenAI, Blossom, Giphy,
@@ -1225,7 +1255,7 @@ rough effort signal only.
 | `viewmodel/OnlyFoodFeedViewModel.kt` + `ui/screen/OnlyFoodFeedScreen.kt` | 1136 | `OnlyFoodFeedViewModel.swift` + View | 3.3 |
 | `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `NourishParser.swift`, `NourishRepository.swift` | 3.5 |
 | `ui/component/NourishCard.kt` + `NourishSectionPanels.kt` | 442 | `NourishCard.swift` | 3.5 |
-| `nostr/Nip56.kt` + `ui/screen/ReportsScreen.kt` | 398 | reporting surface | 4.1 |
+| `nostr/Nip56.kt` + `ui/screen/ReportsScreen.kt` | 398 | `Nip56.swift` + `ReportSender` + `ReportedContent` + `ReportSheet` (reporter path; admin inbox not ported) | 4.1 |
 | `ui/screen/CheffyScreen.kt` + `viewmodel/CheffyViewModel.kt` + `cheffy/Cheffy.kt` + `CheffyIcon.kt` | 804 | `CheffyView.swift` … | 5 |
 | `mealplan/*` + `repo/GroceryRepository.kt` + `PlannerRepository.kt` + `nostr/GroceryEvents.kt` | 1550 | grocery + planner | 5 |
 | `nostr/Nip22.kt` | 169 | `Nip22.swift` | 5 |

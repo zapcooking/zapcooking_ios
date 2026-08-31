@@ -22,11 +22,18 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
     let userPubkey: String                // empty before bind
     let hellthreadFilterEnabled: Bool
     let hellthreadThreshold: Int
+    /// Event ids the reporter successfully reported. Local hide, not a mute.
+    let reportedEventIds: Set<String>
+    /// Pubkeys hidden by a profile-level report. Distinct from `blockedPubkeys`
+    /// (those sync as kind-10000); this set is reporter-local.
+    let reportedPubkeys: Set<String>
 
     init(mutedWords: Set<String>, blockedPubkeys: Set<String>, mutedThreads: Set<String>,
          wotEnabled: Bool, qualifiedNetwork: Set<String>, userPubkey: String,
          hellthreadFilterEnabled: Bool = false,
-         hellthreadThreshold: Int = NostrEvent.hellthreadThreshold) {
+         hellthreadThreshold: Int = NostrEvent.hellthreadThreshold,
+         reportedEventIds: Set<String> = [],
+         reportedPubkeys: Set<String> = []) {
         self.mutedWords = mutedWords
         self.blockedPubkeys = blockedPubkeys
         self.mutedThreads = mutedThreads
@@ -35,6 +42,8 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
         self.userPubkey = userPubkey
         self.hellthreadFilterEnabled = hellthreadFilterEnabled
         self.hellthreadThreshold = hellthreadThreshold
+        self.reportedEventIds = reportedEventIds
+        self.reportedPubkeys = reportedPubkeys
     }
 
     static let empty = SafetyFilterSnapshot(
@@ -72,6 +81,13 @@ final class SafetyFilter: @unchecked Sendable {
     /// Hot path. Single pointer read of `_current`; no actor hop, no lock.
     func shouldDrop(event: NostrEvent, context: SafetyContext) -> Bool {
         let s = _current
+
+        if !s.reportedEventIds.isEmpty, s.reportedEventIds.contains(event.id) {
+            return true
+        }
+        if !s.reportedPubkeys.isEmpty, s.reportedPubkeys.contains(event.pubkey) {
+            return true
+        }
 
         if !s.blockedPubkeys.isEmpty, s.blockedPubkeys.contains(event.pubkey) {
             return true
@@ -206,6 +222,10 @@ final class SafetyFilter: @unchecked Sendable {
                 let m = MuteRepository.shared
                 return (m.mutedWords, m.blockedPubkeys, m.mutedThreads)
             }
+        let reported: (eventIds: Set<String>, pubkeys: Set<String>) = await MainActor.run {
+            let r = ReportedContent.shared
+            return (r.eventIds, r.pubkeys)
+        }
         let prefs: (wot: Bool, pubkey: String, hellthread: Bool, hellthreadThreshold: Int) = await MainActor.run {
             let p = SafetyPreferences.shared
             return (p.wotFilterEnabled, p.activePubkey ?? "", p.hellthreadFilterEnabled, p.hellthreadThreshold)
@@ -220,7 +240,9 @@ final class SafetyFilter: @unchecked Sendable {
             qualifiedNetwork: qualified,
             userPubkey: prefs.pubkey,
             hellthreadFilterEnabled: prefs.hellthread,
-            hellthreadThreshold: prefs.hellthreadThreshold
+            hellthreadThreshold: prefs.hellthreadThreshold,
+            reportedEventIds: reported.eventIds,
+            reportedPubkeys: reported.pubkeys
         ))
     }
 

@@ -37,6 +37,7 @@ final class SearchViewModel {
     // MARK: - Internals
 
     @ObservationIgnored private let profileRepo = ProfileRepository.shared
+    @ObservationIgnored private var hideObserved = false
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var authorDebounceTask: Task<Void, Never>?
@@ -59,6 +60,7 @@ final class SearchViewModel {
 
     func start() {
         loadPreferences()
+        observeContentHidden()
         if profileUpdatesTask == nil {
             profileUpdatesTask = Task { @MainActor [weak self] in
                 for await pk in MissingProfileWatcher.shared.updates {
@@ -67,6 +69,24 @@ final class SearchViewModel {
                        let p = self.profileRepo.get(pk) {
                         self.noteProfiles[pk] = p
                     }
+                }
+            }
+        }
+    }
+
+    private func observeContentHidden() {
+        guard !hideObserved else { return }
+        hideObserved = true
+        NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.notes = self.notes.removingHidden(eventIds: eventIds, pubkeys: pubkeys)
+                if !pubkeys.isEmpty {
+                    self.people.removeAll { pubkeys.contains($0.pubkey) }
                 }
             }
         }

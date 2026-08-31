@@ -167,6 +167,7 @@ final class OnlyFoodFeedViewModel {
         started = true
         ensureProfileUpdatesSubscription()
         observeFollowsChanges()
+        observeContentHidden()
         let mode = self.mode
         let st = stateOf(mode)
         if !st.loaded {
@@ -473,6 +474,33 @@ final class OnlyFoodFeedViewModel {
         guard mode == .following, !st.loaded, !follows().isEmpty else { return }
         emptyFollows = false
         submit(mode: .following, state: st, load: .initial, since: nil, until: nil)
+    }
+
+    private func observeContentHidden() {
+        NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                self?.dropHidden(eventIds: eventIds, pubkeys: pubkeys)
+            }
+        }
+    }
+
+    private func dropHidden(eventIds: Set<String>, pubkeys: Set<String>) {
+        guard !eventIds.isEmpty || !pubkeys.isEmpty else { return }
+        for mode in Mode.allCases {
+            let st = stateOf(mode)
+            st.seen = st.seen.filter {
+                !eventIds.contains($0.key) && !pubkeys.contains($0.value.pubkey)
+            }
+            st.ordered.removeAll {
+                eventIds.contains($0.id) || pubkeys.contains($0.pubkey)
+            }
+            st.placedIds.subtract(eventIds)
+        }
+        emitCurrentMode()
     }
 
     private func observeFollowsChanges() {

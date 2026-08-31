@@ -37,6 +37,22 @@ struct RecipeCardView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .contextMenu {
+            if event.pubkey != NostrKey.load()?.pubkey {
+                Button(role: .destructive) {
+                    ReportPresenter.shared.present(.event(event))
+                } label: {
+                    Label("Report", systemImage: "flag")
+                }
+                .accessibilityIdentifier("report-recipe-card")
+                Button(role: .destructive) {
+                    MuteRepository.shared.blockUser(event.pubkey)
+                } label: {
+                    Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+                }
+                .accessibilityIdentifier("block-recipe-card")
+            }
+        }
     }
 
     private var poster: some View {

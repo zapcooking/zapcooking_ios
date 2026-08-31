@@ -18,6 +18,7 @@ struct RecipeDetailView: View {
 
     @State private var viewModel = RecipeDetailViewModel()
     @State private var cookSession: CookModeSession?
+    @State private var muteRepo = MuteRepository.shared
     @Environment(\.dismiss) private var dismiss
 
     private var activeUserIsWatchOnly: Bool {
@@ -40,6 +41,11 @@ struct RecipeDetailView: View {
             }
         }
         .onDisappear { viewModel.cancel() }
+        .onReceive(NotificationCenter.default.publisher(for: .contentHidden)) { _ in
+            if let event = viewModel.event, ReportedContent.shared.isHidden(event) {
+                dismiss()
+            }
+        }
         .fullScreenCover(item: $cookSession) { session in
             CookModeView(session: session)
         }
@@ -64,6 +70,38 @@ struct RecipeDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Start cooking")
                 .accessibilityIdentifier("start-cooking")
+            }
+            if let event = viewModel.event, event.pubkey != keypair.pubkey {
+                Menu {
+                    Button(role: .destructive) {
+                        ReportPresenter.shared.present(.event(event))
+                    } label: {
+                        Label("Report", systemImage: "flag")
+                    }
+                    .accessibilityIdentifier("report-recipe")
+                    let blocked = muteRepo.isBlocked(event.pubkey)
+                    Button(role: blocked ? nil : .destructive) {
+                        if blocked {
+                            muteRepo.unblockUser(event.pubkey)
+                        } else {
+                            muteRepo.blockUser(event.pubkey)
+                        }
+                    } label: {
+                        Label(
+                            blocked ? "Unblock User" : "Block User",
+                            systemImage: blocked ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.xmark"
+                        )
+                    }
+                    .accessibilityIdentifier("block-recipe")
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.wispOnSurface)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Recipe actions")
+                .accessibilityIdentifier("recipe-overflow")
             }
         }
         .padding(.horizontal, 12)

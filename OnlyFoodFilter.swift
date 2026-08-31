@@ -79,7 +79,10 @@ nonisolated struct OnlyFoodFilter: Sendable {
     /// the feed. NIP-09 deletion is not tracked in this path yet.
     static func live() -> OnlyFoodFilter {
         OnlyFoodFilter(
-            isUserBlocked: { SafetyFilter.shared.snapshot.blockedPubkeys.contains($0) },
+            isUserBlocked: {
+                let s = SafetyFilter.shared.snapshot
+                return s.blockedPubkeys.contains($0) || s.reportedPubkeys.contains($0)
+            },
             containsMutedWord: { content in
                 let words = SafetyFilter.shared.snapshot.mutedWords
                 guard !words.isEmpty else { return false }
@@ -88,7 +91,7 @@ nonisolated struct OnlyFoodFilter: Sendable {
                 return false
             },
             isThreadMuted: { SafetyFilter.shared.snapshot.mutedThreads.contains($0) },
-            isDeleted: { _ in false },
+            isDeleted: { SafetyFilter.shared.snapshot.reportedEventIds.contains($0) },
             isWotFiltered: { _ in false }
         )
     }

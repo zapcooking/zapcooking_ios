@@ -245,6 +245,21 @@ final class FeedViewModel {
     /// cards visible until the user pulls-to-refresh or relaunches.
     private func observeBlocks() {
         NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            let pubkeys = Set(note.userInfo?[ContentHideKey.pubkeys] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.events.removeAll {
+                    eventIds.contains($0.id)
+                    || pubkeys.contains($0.pubkey)
+                    || ($0.repostInnerPubkey.map { pubkeys.contains($0) } ?? false)
+                }
+            }
+        }
+
+        NotificationCenter.default.addObserver(
             forName: .userBlocked, object: nil, queue: .main
         ) { [weak self] note in
             // The observer block is `@Sendable`. Hop to MainActor to mutate

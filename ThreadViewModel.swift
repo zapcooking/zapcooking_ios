@@ -150,6 +150,7 @@ final class ThreadViewModel {
     @ObservationIgnored private let relayListRepo = RelayListRepository.shared
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
     @ObservationIgnored private var blockObserver: NSObjectProtocol?
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var safetyObserver: NSObjectProtocol?
 
     private static let indexerRelays = RelayDefaults.indexers
@@ -180,6 +181,14 @@ final class ThreadViewModel {
         }
         // Drop any cached/loaded reply from a freshly-blocked author so the
         // thread updates without waiting for a manual refresh.
+        hideObserver = NotificationCenter.default.addObserver(
+            forName: .contentHidden, object: nil, queue: .main
+        ) { [weak self] note in
+            let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
+            Task { @MainActor [weak self] in
+                self?.purgeReported(eventIds)
+            }
+        }
         blockObserver = NotificationCenter.default.addObserver(
             forName: .userBlocked,
             object: nil,
@@ -207,7 +216,19 @@ final class ThreadViewModel {
     deinit {
         if let publishObserver { NotificationCenter.default.removeObserver(publishObserver) }
         if let blockObserver { NotificationCenter.default.removeObserver(blockObserver) }
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
         if let safetyObserver { NotificationCenter.default.removeObserver(safetyObserver) }
+    }
+
+    @MainActor
+    private func purgeReported(_ eventIds: Set<String>) {
+        guard !eventIds.isEmpty else { return }
+        var changed = false
+        for id in eventIds where events[id] != nil {
+            blockedEventIds.insert(id)
+            changed = true
+        }
+        if changed { rebuildSlices() }
     }
 
     @MainActor
