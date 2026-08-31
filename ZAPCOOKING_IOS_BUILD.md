@@ -68,18 +68,19 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
 have already accepted the plugin do not need the flag.
 
-**Test baseline (post Concern 2.3).** Three numbers, do not mix them:
+**Test baseline (post Concern 3.1).** Three numbers, do not mix them:
 
 | Number | What it is |
 |---|---|
-| **459/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 459 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
-| **460/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
-| **462** | `@Test` annotations on disk. Includes the skipped live NIP-98 test and the skipped live recipe-publish test. Not a pass count. |
+| **488/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 488 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **489/1** | Same suite with the live NIP-98 round-trip **enabled and green**. Opt-in; not the default. |
+| **492** | `@Test` annotations on disk. Includes the three skipped live tests (NIP-98, recipe-publish, saved-list). Not a pass count. |
 
-The two live network tests are opt-in and **skipped** in the default run (so
+The three live network tests are opt-in and **skipped** in the default run (so
 they do not add a pass or a network dependency). Future hermetic gate reports
-compare against **459/1**. Post-2.3-pre-review was 456/1; post-1.8b was 430/1;
-post-0.6 was 194/1.
+compare against **488/1**. Post-3.1-pre-review was 484/1; post-HiddenRecipes / post-2.3 was 468/1 (doc still
+said 459/1); post-2.3-pre-review was 456/1; post-1.8b was 430/1; post-0.6
+was 194/1.
 
 Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
 executes `wispUITests`; that target is **not** in the baseline. Isolated
@@ -152,6 +153,28 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
   -only-testing:wispTests/RecipePublisherLiveTests \
   test
 rm -f wispTests/.recipe_publish_live_enable
+```
+
+**Live saved-list write** (opt-in; Concern 3.1). Uses an ephemeral keypair —
+never a real nsec, never printed, never persisted. Writes a kind-30001
+Saved list (`d=nostrcooking-bookmarks`) to **`RelayDefaults.defaults`**,
+not the indexer ∪ default union (§7.13). **Publish, verify, then delete
+in the same process** — the key is held in memory until a kind-5 (plus an
+emptied replacement) has been accepted and a re-query of
+`30001:<pubkey>:nostrcooking-bookmarks` returns nothing. A hang or
+timeout is a leak, not a failed test to retry. Do **not** add a
+`HiddenRecipes` prefix as cleanup (§7.13).
+
+```
+touch wispTests/.recipe_bookmark_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/RecipeBookmarkLiveTests \
+  test
+rm -f wispTests/.recipe_bookmark_live_enable
 ```
 
 ---
@@ -963,8 +986,16 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - 3.1 Saved recipes (NIP-51 bookmark sets over `RecipeBookmarkRepository`
   semantics) — ⚠️ port the **first-save cold-session guard**: a cold session
   must not overwrite an existing saved-recipe collection (Android 1.3.5 fix).
-  A live-write gate for this concern follows §7.13
-  (publish-verify-delete; do not mint another hide-list prefix).
+  **Landed:** `RecipeBookmarkRepository` — kind **30001** (verified against
+  Android `LIST_KIND`; not the inherited kind-30003 note-bookmark path),
+  default `d=nostrcooking-bookmarks` with no `t`, named collections stamped
+  `t=zapcooking`. Cold-session first save against a **populated** remote
+  list appends; unconfirmed relay check rejects the write — nothing signed.
+  Saved coordinates resolve through `RecipeRepository`, so `HiddenRecipes`
+  drops them before render. Live-write gate follows §7.13
+  (publish-verify-delete on `RelayDefaults.defaults`; a hang is a leak;
+  do not mint another hide-list prefix).
+  Rename / delete / cover stay with 3.2.
 - 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner / Nourish
   land in P2). Retires the `.kitchen` placeholder; the tab becomes a valid
   launch/deep-link destination in the same PR.
@@ -1173,26 +1204,45 @@ trapping without importing ObjectBox.
 over this; never substitute `truncatingIfNeeded` (wraps) or `numericCast`
 (opaque). Prefer `Int64(exactly:)!`.
 
-**7.13 — Live-write gates need a cleanup step designed in from the start,
-on every platform.**
-The first 2.3 live publish used a fresh `SecRandomCopyBytes` key, printed
-only naddr / relay URLs, and dropped the privkey when the process exited.
-Eight real recipes (`iOS 2.3 Live Publish <timestamp>`, eight distinct
-pubkeys) landed on `relay.primal.net` and `nos.lol` as normal Recipes-tab
-cards (kind 30023, `#t zapcooking`, cover, ingredients, directions).
-NIP-09 cannot remove them without that key — they are permanent unless a
-relay operator intervenes. The same class of miss exists on Android and
-web the moment either grows a live-write gate (3.1 saved-list publish,
-2.4 compose).
-→ **iOS action:** a test that writes a public event holds the key until it
-has published the matching delete (blanked replacement + kind-5) and
-confirmed the coordinate is gone. Passing is not enough; cleanup is part
-of the gate. Events whose keys are already gone are hidden client-side by
-`HiddenRecipes` matching the **d-tag prefix**, not a pubkey denylist —
-applied in `RecipeRepository` so feed / tag / detail / search inherit.
-The hide list is **duplicated** (Swift / Kotlin / `src/lib/consts.ts`);
-there is no shared package. 3.1 and 2.4 must ship the same
-publish-verify-delete protocol, not another prefix on this list.
+**7.13 — Every live-write gate holds the key until deletion is confirmed.
+A hang is a leak.**
+This is not a recipe-publish lesson. Any test that writes a public event
+(kind 30023 recipes, kind 30001 lists, later 2.4 compose, anything else)
+must keep the ephemeral key in memory until the matching delete has been
+accepted and a re-query of that coordinate is gone. Passing is not
+enough; cleanup is part of the gate. A hang, timeout, or runner death
+**before** that confirmation is a leak — treat it as cleanup owed, not
+as a failed test to retry with a fresh key.
+
+It has now happened three times:
+1. **2.3 first run** — dropped the privkey after publish. Eight real
+   recipes (`iOS 2.3 Live Publish <timestamp>`, eight distinct pubkeys)
+   landed on `relay.primal.net` and `nos.lol` as Recipes-tab cards
+   (kind 30023, `#t zapcooking`). NIP-09 cannot remove them without that
+   key. Hidden client-side by `HiddenRecipes` d-tag prefix
+   `ios-2.3-live-publish-` in `RecipeRepository` (duplicated Swift /
+   Kotlin / `src/lib/consts.ts`). That hide is the safety net for events
+   whose keys are already gone, not a substitute for delete. Do not add
+   another prefix.
+2. **2.3 follow-up** — another prefix was proposed as cleanup. That is
+   the anti-pattern this section exists to stop.
+3. **3.1 first run** — hung ~1030s against the indexer ∪ default union
+   and leaked kind-30001 Saved-list events (`d=nostrcooking-bookmarks`)
+   on discarded ephemeral keys. Invisible (they are not recipes; they
+   render nowhere) but the same failure: key gone, coordinate still on
+   production relays. Adding a hide-list entry would not hide a
+   kind-30001 and would repeat (2).
+
+**Operational finding (3.1):** the hung indexer-union attempt never
+finished; the same gate against `RelayDefaults.defaults` completed in
+27.8s (primal / nos.lol / nostr.net). Live-write gates target
+**defaults**, not the union. Indexers are the kind-0/3/10002 discovery
+pool and do not reliably EOSE a kind-30001 REQ.
+
+→ **iOS action:** every live-write test (any kind) holds the key until
+delete is confirmed; a hang/timeout runs cleanup with that same key
+instead of retrying; target `RelayDefaults.defaults`; never mint another
+`HiddenRecipes` prefix. 2.4 ships this protocol too.
 
 ---
 
