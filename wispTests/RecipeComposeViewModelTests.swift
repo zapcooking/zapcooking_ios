@@ -298,6 +298,39 @@ struct RecipeComposeViewModelTests {
         #expect(vm.blockReason(canSign: true) == "Add at least one photo.")
     }
 
+    @Test func addImageBytes_removedWhileQueued_doesNotUpload() async throws {
+        let gate = AsyncStream.makeStream(of: Bool.self)
+        var uploaded: [Data] = []
+        let env = RecipeComposeViewModel.Environment(
+            uploadImage: { data, _, _ in
+                uploaded.append(data)
+                for await _ in gate.stream { break }
+                return "https://blossom.example/\(uploaded.count).jpg"
+            },
+            compressImage: { data, mime in (data, mime) }
+        )
+        let vm = RecipeComposeViewModel(env: env)
+        let kp = try makeKeypair()
+        let keep = Data("keep".utf8)
+        let drop = Data("drop".utf8)
+        vm.addImageBytes([(keep, "image/jpeg"), (drop, "image/jpeg")], keypair: kp)
+        #expect(vm.images.count == 2)
+        let droppedId = vm.images[1].id
+        try await waitUntil { uploaded.count == 1 }
+        vm.removeImage(id: droppedId)
+        #expect(vm.images.count == 1)
+        gate.continuation.yield(true)
+        gate.continuation.finish()
+        try await waitUntil {
+            if case .done = vm.images.first?.status { return true }
+            return false
+        }
+        // Let the queue reach the dropped item (skip or, if broken, upload).
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(uploaded == [keep])
+        #expect(vm.images.count == 1)
+    }
+
     // MARK: - Publish
 
     @Test func publish_blockedWhenRequiredFieldEmpty() async throws {

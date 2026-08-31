@@ -72,13 +72,13 @@ have already accepted the plugin do not need the flag.
 
 | Number | What it is |
 |---|---|
-| **529/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 529 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
-| **530/1** | Same suite with one live round-trip **enabled and green**. Opt-in; not the default. |
-| **535** | `@Test` annotations on disk. Includes the five skipped live tests (NIP-98, recipe-publish, recipe-compose, saved-list, NIP-56). Not a pass count. |
+| **530/1** | Hermetic `wispTests` (`-only-testing:wispTests`). 530 pass, 1 fail (`#4` `FeedRenderableTests.mentionTaggedNoteFollowsReplyGate`). This is the gate number. |
+| **531/1** | Same suite with one live round-trip **enabled and green**. Opt-in; not the default. |
+| **536** | `@Test` annotations on disk. Includes the five skipped live tests (NIP-98, recipe-publish, recipe-compose, saved-list, NIP-56). Not a pass count. |
 
 The five live network tests are opt-in and **skipped** in the default run (so
 they do not add a pass or a network dependency). Future hermetic gate reports
-compare against **529/1**. Post-4.1 was 508/1; post-3.1 was 488/1; post-3.1-pre-review was 484/1;
+compare against **530/1**. Post-2.4-open was 529/1; post-4.1 was 508/1; post-3.1 was 488/1; post-3.1-pre-review was 484/1;
 post-HiddenRecipes / post-2.3 was 468/1; post-1.8b was 430/1; post-0.6
 was 194/1.
 

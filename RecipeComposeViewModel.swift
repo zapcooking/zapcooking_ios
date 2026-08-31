@@ -259,6 +259,9 @@ final class RecipeComposeViewModel {
             await existing?.value
             for (id, data, mime) in pending {
                 guard !Task.isCancelled else { return }
+                // User may have removed this placeholder while an earlier
+                // upload was still in flight — skip load/compress/upload.
+                guard await self?.isQueued(id) == true else { continue }
                 await self?.uploadOne(id: id, data: data, mime: mime, keypair: keypair)
             }
         }
@@ -275,7 +278,9 @@ final class RecipeComposeViewModel {
             await existing?.value
             for (id, provider) in pending {
                 guard !Task.isCancelled else { return }
+                guard await self?.isQueued(id) == true else { continue }
                 let loaded = await MediaPicker.loadAll(providers: [provider])
+                guard await self?.isQueued(id) == true else { continue }
                 if let media = loaded.first {
                     await self?.uploadOne(id: id, data: media.data, mime: media.mime, keypair: keypair)
                 } else {
@@ -296,10 +301,16 @@ final class RecipeComposeViewModel {
         images.removeAll { $0.id == id }
     }
 
+    private func isQueued(_ id: Int) -> Bool {
+        images.contains { $0.id == id }
+    }
+
     private func uploadOne(id: Int, data: Data, mime: String, keypair: Keypair) async {
+        guard isQueued(id) else { return }
         let status: ImageItem.Status
         do {
             let (bytes, outMime) = env.compressImage(data, mime)
+            guard isQueued(id) else { return }
             let url = try await env.uploadImage(bytes, outMime, keypair)
             status = .done(url: url)
         } catch is CancellationError {
