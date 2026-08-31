@@ -24,6 +24,7 @@ final class HashtagFeedViewModel {
     var lastError: String?
 
     @ObservationIgnored private var hideObserved = false
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var seenIds: Set<String> = []
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
@@ -41,6 +42,7 @@ final class HashtagFeedViewModel {
 
     deinit {
         profileUpdatesTask?.cancel()
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
         }
@@ -72,7 +74,7 @@ final class HashtagFeedViewModel {
     private func observeContentHidden() {
         guard !hideObserved else { return }
         hideObserved = true
-        NotificationCenter.default.addObserver(
+        hideObserver = NotificationCenter.default.addObserver(
             forName: .contentHidden, object: nil, queue: .main
         ) { [weak self] note in
             let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])

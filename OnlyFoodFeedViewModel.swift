@@ -93,6 +93,7 @@ final class OnlyFoodFeedViewModel {
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
     @ObservationIgnored private var followsObserver: NSObjectProtocol?
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
 
     @ObservationIgnored private let filter: OnlyFoodFilter
     @ObservationIgnored private let follows: () -> [String]
@@ -134,6 +135,9 @@ final class OnlyFoodFeedViewModel {
         profileUpdatesTask?.cancel()
         if let followsObserver {
             NotificationCenter.default.removeObserver(followsObserver)
+        }
+        if let hideObserver {
+            NotificationCenter.default.removeObserver(hideObserver)
         }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
@@ -477,7 +481,8 @@ final class OnlyFoodFeedViewModel {
     }
 
     private func observeContentHidden() {
-        NotificationCenter.default.addObserver(
+        guard hideObserver == nil else { return }
+        hideObserver = NotificationCenter.default.addObserver(
             forName: .contentHidden, object: nil, queue: .main
         ) { [weak self] note in
             let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])

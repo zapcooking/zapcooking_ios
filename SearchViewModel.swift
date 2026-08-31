@@ -38,6 +38,7 @@ final class SearchViewModel {
 
     @ObservationIgnored private let profileRepo = ProfileRepository.shared
     @ObservationIgnored private var hideObserved = false
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var authorDebounceTask: Task<Void, Never>?
@@ -77,7 +78,7 @@ final class SearchViewModel {
     private func observeContentHidden() {
         guard !hideObserved else { return }
         hideObserved = true
-        NotificationCenter.default.addObserver(
+        hideObserver = NotificationCenter.default.addObserver(
             forName: .contentHidden, object: nil, queue: .main
         ) { [weak self] note in
             let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
@@ -99,6 +100,13 @@ final class SearchViewModel {
         authorSearchTask?.cancel()
         profileUpdatesTask?.cancel()
         profileUpdatesTask = nil
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
+        hideObserver = nil
+        hideObserved = false
+    }
+
+    deinit {
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
     }
 
     // MARK: - Persistence

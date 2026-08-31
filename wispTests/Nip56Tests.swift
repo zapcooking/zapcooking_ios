@@ -96,6 +96,23 @@ struct Nip56Tests {
         #expect(parsed.reason.isEmpty)
     }
 
+    @Test func parseReport_fallsBackToFirstP_whenNoTypedReportType() throws {
+        // Android fallback: untyped / hint-only p tags still parse. Do not
+        // require a standard NIP-56 type here — that would diverge.
+        let event = NostrEvent(
+            id: "rid",
+            pubkey: "reporter",
+            kind: Nip56.kindReport,
+            createdAt: 1,
+            tags: [["p", "alice", "wss://hint.example"]],
+            content: "[Spam]",
+            sig: ""
+        )
+        let parsed = try #require(Nip56.parseReport(event))
+        #expect(parsed.reportedPubkey == "alice")
+        #expect(parsed.categoryLabel == "Spam")
+    }
+
     @Test func parseReport_rejectsNon1984() {
         let event = NostrEvent(
             id: "x", pubkey: "r", kind: 1, createdAt: 0,

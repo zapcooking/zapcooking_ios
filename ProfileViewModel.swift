@@ -97,6 +97,7 @@ final class ProfileViewModel {
     @ObservationIgnored private let eventStore = EventStore.shared
     @ObservationIgnored private var safetyObserver: NSObjectProtocol?
     @ObservationIgnored private var followsObserver: NSObjectProtocol?
+    @ObservationIgnored private var hideObserver: NSObjectProtocol?
 
     private static let indexerRelays = RelayDefaults.indexers
 
@@ -136,7 +137,8 @@ final class ProfileViewModel {
     }
 
     private func observeContentHidden() {
-        NotificationCenter.default.addObserver(
+        guard hideObserver == nil else { return }
+        hideObserver = NotificationCenter.default.addObserver(
             forName: .contentHidden, object: nil, queue: .main
         ) { [weak self] note in
             let eventIds = Set(note.userInfo?[ContentHideKey.eventIds] as? [String] ?? [])
@@ -156,6 +158,7 @@ final class ProfileViewModel {
     deinit {
         if let followsObserver { NotificationCenter.default.removeObserver(followsObserver) }
         if let safetyObserver { NotificationCenter.default.removeObserver(safetyObserver) }
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
     }
 
     // MARK: - Lifecycle

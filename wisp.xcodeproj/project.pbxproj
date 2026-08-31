@@ -232,10 +232,11 @@
 		4CFF99010000000000000010 /* RecipeDeletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000010 /* RecipeDeletion.swift */; };
 		4CFF99010000000000000011 /* RecipePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000011 /* RecipePublisher.swift */; };
 		4CFF99010000000000000012 /* HiddenRecipes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000012 /* HiddenRecipes.swift */; };
-		4CFF99010000000000000013 /* Nip56.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000013 /* Nip56.swift */; };
-		4CFF99010000000000000014 /* ReportSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000014 /* ReportSender.swift */; };
-		4CFF99010000000000000015 /* ReportedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000015 /* ReportedContent.swift */; };
-		4CFF99010000000000000016 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000016 /* ReportSheet.swift */; };
+		4CFF99010000000000000013 /* RecipeBookmarkRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000013 /* RecipeBookmarkRepository.swift */; };
+		4CFF99010000000000000014 /* Nip56.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000014 /* Nip56.swift */; };
+		4CFF99010000000000000015 /* ReportSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000015 /* ReportSender.swift */; };
+		4CFF99010000000000000016 /* ReportedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000016 /* ReportedContent.swift */; };
+		4CFF99010000000000000017 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000017 /* ReportSheet.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -591,10 +592,11 @@
 		4CFF99000000000000000010 /* RecipeDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDeletion.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000011 /* RecipePublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePublisher.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000012 /* HiddenRecipes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenRecipes.swift; sourceTree = "<group>"; };
-		4CFF99000000000000000013 /* Nip56.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip56.swift; sourceTree = "<group>"; };
-		4CFF99000000000000000014 /* ReportSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSender.swift; sourceTree = "<group>"; };
-		4CFF99000000000000000015 /* ReportedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportedContent.swift; sourceTree = "<group>"; };
-		4CFF99000000000000000016 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000013 /* RecipeBookmarkRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeBookmarkRepository.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000014 /* Nip56.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip56.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000015 /* ReportSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSender.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000016 /* ReportedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportedContent.swift; sourceTree = "<group>"; };
+		4CFF99000000000000000017 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -932,10 +934,11 @@
 				4CFF99000000000000000010 /* RecipeDeletion.swift */,
 				4CFF99000000000000000011 /* RecipePublisher.swift */,
 				4CFF99000000000000000012 /* HiddenRecipes.swift */,
-				4CFF99000000000000000013 /* Nip56.swift */,
-				4CFF99000000000000000014 /* ReportSender.swift */,
-				4CFF99000000000000000015 /* ReportedContent.swift */,
-				4CFF99000000000000000016 /* ReportSheet.swift */,
+				4CFF99000000000000000013 /* RecipeBookmarkRepository.swift */,
+				4CFF99000000000000000014 /* Nip56.swift */,
+				4CFF99000000000000000015 /* ReportSender.swift */,
+				4CFF99000000000000000016 /* ReportedContent.swift */,
+				4CFF99000000000000000017 /* ReportSheet.swift */,
 				4CFFA00000000000000A0001 /* Nip51Lists.swift */,
 				4CFFA00000000000000A0002 /* RelaySet.swift */,
 				4CFFA00000000000000A0003 /* RelaySetRepository.swift */,
@@ -1454,10 +1457,11 @@
 				4CFF99010000000000000010 /* RecipeDeletion.swift in Sources */,
 				4CFF99010000000000000011 /* RecipePublisher.swift in Sources */,
 				4CFF99010000000000000012 /* HiddenRecipes.swift in Sources */,
-				4CFF99010000000000000013 /* Nip56.swift in Sources */,
-				4CFF99010000000000000014 /* ReportSender.swift in Sources */,
-				4CFF99010000000000000015 /* ReportedContent.swift in Sources */,
-				4CFF99010000000000000016 /* ReportSheet.swift in Sources */,
+				4CFF99010000000000000013 /* RecipeBookmarkRepository.swift in Sources */,
+				4CFF99010000000000000014 /* Nip56.swift in Sources */,
+				4CFF99010000000000000015 /* ReportSender.swift in Sources */,
+				4CFF99010000000000000016 /* ReportedContent.swift in Sources */,
+				4CFF99010000000000000017 /* ReportSheet.swift in Sources */,
 				4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */,
 				4CFFA00100000000000A0002 /* RelaySet.swift in Sources */,
 				4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */,

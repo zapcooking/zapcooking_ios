@@ -102,9 +102,11 @@ nonisolated enum Nip56 {
 
     /// Parse a kind-1984 event, or nil if it isn't a usable report.
     ///
-    /// The reported user is the `p` tag whose 3rd element is a known NIP-56
-    /// report type; a routing/admin `p` tag whose 3rd element is a relay hint
-    /// is not mistaken for it.
+    /// Prefer the `p` tag whose 3rd element is a known NIP-56 report type
+    /// (so a routing/admin `p` whose 3rd element is a relay hint is not
+    /// chosen when a typed report `p` exists). If no typed `p` is present,
+    /// fall back to the first `p` with ≥3 elements — same as Android
+    /// `Nip56.parseReport`. Our builder always emits a typed `p`.
     static func parseReport(_ event: NostrEvent) -> ReportInfo? {
         guard event.kind == kindReport else { return nil }
         let typedP = event.tags.first(where: {

@@ -76,7 +76,8 @@ nonisolated struct OnlyFoodFilter: Sendable {
 
     /// Production v1: mute / block / structural / reply. WoT is a no-op
     /// (`isWotFiltered` always false) so an unready social graph cannot blank
-    /// the feed. NIP-09 deletion is not tracked in this path yet.
+    /// the feed. `isDeleted` is the reporter-local hide set (successful
+    /// NIP-56), not NIP-09 tombstones — those are still untracked here.
     static func live() -> OnlyFoodFilter {
         OnlyFoodFilter(
             isUserBlocked: {
