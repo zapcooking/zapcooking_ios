@@ -36,6 +36,15 @@ final class ComposePresenter {
         request = .quote(event)
     }
 
+    /// A fresh top-level note seeded with `initialText` — the OnlyFood tab's
+    /// FAB (Concern C-H, `OnlyFoodCompose.prefill`). Routed here rather than
+    /// through a tab-local `.sheet` so the composer is hosted from the same
+    /// stable root as the reply / quote sheets. The home tab's FAB keeps its
+    /// own `showCompose` bool for now; folding it in is a separate cleanup.
+    func openNewNote(initialText: String) {
+        request = .newNote(initialText: initialText)
+    }
+
     func openEmojiReaction(onPick: @escaping (PickedEmoji) -> Void) {
         request = .emoji(id: UUID(), onPick: onPick)
     }
@@ -62,6 +71,8 @@ enum ComposeRequest: Identifiable {
     case quote(NostrEvent)
     case emoji(id: UUID, onPick: (PickedEmoji) -> Void)
     case zap(ZapSheetRequest)
+    /// New top-level note with the editor pre-seeded (OnlyFood FAB).
+    case newNote(initialText: String)
 
     var id: String {
         switch self {
@@ -69,6 +80,7 @@ enum ComposeRequest: Identifiable {
         case .quote(let event):     return "quote-\(event.id)"
         case .emoji(let id, _):     return "emoji-\(id.uuidString)"
         case .zap(let zap):         return "zap-\(zap.eventId ?? zap.recipientPubkey)"
+        case .newNote:              return "new-note"
         }
     }
 }

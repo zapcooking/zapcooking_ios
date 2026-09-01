@@ -495,6 +495,8 @@ struct MainView: View {
                 ComposeView(keypair: keypair, mode: .reply(parent: parent, root: root))
             case .quote(let event):
                 ComposeView(keypair: keypair, mode: .quote(event))
+            case .newNote(let text):
+                ComposeView(keypair: keypair, initialText: text)
             case .emoji(_, let onPick):
                 EmojiLibrarySheet(mode: .pickForReaction { picked in
                     onPick(picked)
@@ -815,13 +817,27 @@ struct MainView: View {
 
     private var onlyfoodTab: some View {
         NavigationStack(path: $onlyfoodPath) {
-            OnlyFoodFeedView(
-                keypair: keypair,
-                path: $onlyfoodPath,
-                onOpenDrawer: openDrawer,
-                avatarURL: viewModel.userProfile?.picture,
-                viewModel: onlyfoodFeedVM
-            )
+            ZStack(alignment: .bottomTrailing) {
+                OnlyFoodFeedView(
+                    keypair: keypair,
+                    path: $onlyfoodPath,
+                    onOpenDrawer: openDrawer,
+                    avatarURL: viewModel.userProfile?.picture,
+                    viewModel: onlyfoodFeedVM
+                )
+                // Concern C-H: kind-1 composer on OnlyFood. Same placement and
+                // drawer / watch-only gating as `RecipeComposeFAB` on Recipes.
+                // Opens through the app-level `ComposePresenter` (stable root
+                // sheet, never a tab-local one) with the visible, removable
+                // `#foodstr` seed — see `OnlyFoodCompose`.
+                if !drawerOpen && !isWatchOnly {
+                    ComposeFAB { composePresenter.openNewNote(initialText: OnlyFoodCompose.prefill) }
+                        .accessibilityIdentifier("new-food-post")
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 32 + (audioPlayer.currentTrack != nil ? MiniAudioPlayerView.collapsedHeight : 0))
+                        .animation(.smooth(duration: 0.22), value: audioPlayer.currentTrack != nil)
+                }
+            }
             .navigationDestination(for: ProfileRoute.self) { route in
                 ProfileView(
                     pubkey: route.pubkey,
