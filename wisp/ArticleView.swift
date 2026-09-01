@@ -418,6 +418,9 @@ struct ArticleActionBar: View {
     let replyCount: Int
     let authorProfile: ProfileData?
     var zapsOnPosts: Bool = FeatureFlags.zapsOnPosts
+    /// Skip `RecipeParser.isRecipe` when the caller already knows (recipe
+    /// detail always passes `.recipeBookmark`).
+    var knownBookmarkTarget: BookmarkActionTarget? = nil
 
     @Environment(ComposePresenter.self) private var composePresenter: ComposePresenter?
     @Environment(WalletStore.self) private var walletStore: WalletStore?
@@ -427,9 +430,9 @@ struct ArticleActionBar: View {
     @State private var showRepostDialog = false
     @State private var showZapSheet = false
     @State private var showBookmarkSheet = false
-    @State private var showRecipePicker = false
-    @State private var suppressBookmarkTap = false
-    @State private var bookmarks = RecipeBookmarkRepository.shared
+    /// Cached so `RecipeParser.isRecipe` does not re-run on every engagement
+    /// re-render. Seeded on appear / when `article.id` changes.
+    @State private var bookmarkTarget: BookmarkActionTarget?
 
     private var box: EngagementBox { engagementRepo.box(for: article.id) }
     private var myPubkey: String { keypair.pubkey }
@@ -439,12 +442,11 @@ struct ArticleActionBar: View {
     }
     private var iReposted: Bool { box.counts.reposters.contains(myPubkey) }
     private var iZapped: Bool { box.counts.zappers.contains { $0.pubkey == myPubkey } }
-    private var bookmarkTarget: BookmarkActionTarget { BookmarkActionTarget.of(event: article) }
+    private var resolvedBookmarkTarget: BookmarkActionTarget {
+        bookmarkTarget ?? knownBookmarkTarget ?? BookmarkActionTarget.of(event: article)
+    }
     private var isNoteBookmarked: Bool {
         !noteListRepo.listsContaining(noteId: article.id).isEmpty
-    }
-    private var isRecipeBookmarked: Bool {
-        bookmarks.isRecipeBookmarked(article)
     }
 
     var body: some View {
@@ -524,12 +526,8 @@ struct ArticleActionBar: View {
             bookmarkControl
         }
         .foregroundStyle(.secondary)
-        .task {
-            guard bookmarkTarget == .recipeBookmark else { return }
-            bookmarks.paintFromCache(pubkey: keypair.pubkey)
-            if !bookmarks.hasLoaded, !bookmarks.isLoading {
-                await bookmarks.load(pubkey: keypair.pubkey)
-            }
+        .onChange(of: article.id, initial: true) { _, _ in
+            bookmarkTarget = knownBookmarkTarget ?? BookmarkActionTarget.of(event: article)
         }
         .sheet(isPresented: $showZapSheet) {
             if let store = walletStore {
@@ -551,18 +549,13 @@ struct ArticleActionBar: View {
                 AddToNoteListSheet(keypair: keypair, event: article)
             }
         }
-        .sheet(isPresented: $showRecipePicker) {
-            RecipeListChooserSheet(event: article, keypair: keypair) {
-                showRecipePicker = false
-            }
-        }
     }
 
     @ViewBuilder
     private var bookmarkControl: some View {
-        switch bookmarkTarget {
+        switch resolvedBookmarkTarget {
         case .recipeBookmark:
-            recipeBookmarkControl
+            RecipeBookmarkButton(event: article, keypair: keypair)
         case .noteList:
             Button {
                 showBookmarkSheet = true
@@ -575,64 +568,6 @@ struct ArticleActionBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Add to List")
-        }
-    }
-
-    private var recipeBookmarkControl: some View {
-        let filled = isRecipeBookmarked
-        let pending = bookmarks.isWriting
-        return Button {
-            if suppressBookmarkTap {
-                suppressBookmarkTap = false
-                return
-            }
-            Task { await toggleRecipeBookmark() }
-        } label: {
-            ZStack {
-                actionItem(
-                    icon: filled ? "bookmark.fill" : "bookmark",
-                    count: nil,
-                    tint: filled ? Color.wispPrimary : nil
-                )
-                .opacity(pending ? 0 : 1)
-                if pending {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .frame(width: 28, height: 28)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(pending)
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                suppressBookmarkTap = true
-                openRecipePicker()
-            }
-        )
-        .accessibilityLabel("Add to List")
-        .accessibilityIdentifier("recipe-save-toggle")
-        .accessibilityAddTraits(filled ? [.isSelected] : [])
-    }
-
-    private func toggleRecipeBookmark() async {
-        switch RecipeSaveGate.of(keypair: keypair) {
-        case .needsKey:
-            RecipeSaveActions.presentNeedsKey()
-        case .canWrite:
-            _ = await bookmarks.toggle(event: article, keypair: keypair)
-            if let message = bookmarks.lastWriteError {
-                RecipeSaveActions.presentWriteError(message)
-            }
-        }
-    }
-
-    private func openRecipePicker() {
-        switch RecipeSaveGate.of(keypair: keypair) {
-        case .needsKey:
-            RecipeSaveActions.presentNeedsKey()
-        case .canWrite:
-            showRecipePicker = true
         }
     }
 

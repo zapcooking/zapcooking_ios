@@ -15,8 +15,10 @@ import SwiftUI
 /// Save (Concern 3.1b): any signed-in user. Tap the action-bar bookmark to
 /// toggle the default Saved list; long-press (Android) or overflow
 /// "Save to collection…" (iOS extra, discoverability) opens the checklist
-/// picker. Watch-only: the bookmark is visible; tap routes through the
-/// needs-key toast (deliberate divergence from Android's silent no-op).
+/// picker. Watch-only: reply / react / zap stay hidden (same as
+/// `ArticleView`); a bookmark-only control stays visible and routes
+/// through the needs-key toast (deliberate divergence from Android's
+/// silent no-op).
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Data from `RecipeRepository` via `RecipeDetailViewModel`. No relay
@@ -310,17 +312,33 @@ struct RecipeDetailView: View {
                     Divider()
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                    ArticleActionBar(
-                        article: event,
-                        keypair: keypair,
-                        replyCount: 0,
-                        authorProfile: viewModel.authorProfile,
-                        zapsOnPosts: FeatureFlags.zapsOnPosts
-                    )
-                    .padding(.horizontal, 8)
+                    engagementBar(event)
                     Spacer().frame(height: 32)
                 }
             }
+        }
+    }
+
+    /// Signed-in: full engagement bar. Watch-only: bookmark only — the
+    /// rest of the bar (reply / react / zap) stays gated like `ArticleView`.
+    @ViewBuilder
+    private func engagementBar(_ event: NostrEvent) -> some View {
+        if activeUserIsWatchOnly {
+            HStack {
+                Spacer()
+                RecipeBookmarkButton(event: event, keypair: keypair)
+            }
+            .padding(.horizontal, 8)
+        } else {
+            ArticleActionBar(
+                article: event,
+                keypair: keypair,
+                replyCount: 0,
+                authorProfile: viewModel.authorProfile,
+                zapsOnPosts: FeatureFlags.zapsOnPosts,
+                knownBookmarkTarget: .recipeBookmark
+            )
+            .padding(.horizontal, 8)
         }
     }
 

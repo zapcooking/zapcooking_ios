@@ -1068,8 +1068,9 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   ⚠️ **Corrected assumption:** `ArticleActionBar` used to always open
   `AddToNoteListSheet` (kind **30003**). Recipes now route through
   `RecipeBookmarkRepository` (kind **30001**) via `BookmarkActionTarget`;
-  plain articles keep 30003. Watch-only: bookmark is visible; tap is
-  `RecipeSaveGate.needsKey` (the 4.1 toast path) — Android is a silent
+  plain articles keep 30003. Watch-only: reply / react / zap stay hidden
+  (same as `ArticleView`); a bookmark-only control stays visible and tap
+  is `RecipeSaveGate.needsKey` (the 4.1 toast path) — Android is a silent
   no-op. HiddenRecipes coordinates are refused on add (unsave still
   allowed). Pending state is the button only; unconfirmed copy is
   Android's `WRITE_UNCONFIRMED_MESSAGE` verbatim.
@@ -1361,7 +1362,7 @@ rough effort signal only.
 | `ui/screen/SousChefScreen.kt` + `viewmodel/SousChefViewModel.kt` + `souschef/*` | 1172 | `SousChefView.swift` + VM | 2.5 |
 | `repo/RecipeBookmarkRepository.kt` | 985 | `RecipeBookmarkRepository.swift` | 3.1 |
 | `ui/component/RecipeListChooserSheet.kt` | 190 | `wisp/RecipeListChooserSheet.swift` | **3.1b** |
-| `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `ArticleActionBar` recipe branch (`wisp/ArticleView.swift`) | **3.1b** |
+| `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `RecipeBookmarkButton` + `ArticleActionBar` recipe branch | **3.1b** |
 | `nostr/FoodHashtags.kt` + `FoodTopics.kt` + `repo/OnlyFoodFilter.kt` | 277 | `FoodHashtags.swift` … | 3.3 |
 | `viewmodel/OnlyFoodFeedViewModel.kt` + `ui/screen/OnlyFoodFeedScreen.kt` | 1136 | `OnlyFoodFeedViewModel.swift` + View | 3.3 |
 | `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `NourishParser.swift`, `NourishRepository.swift` | 3.5 |
