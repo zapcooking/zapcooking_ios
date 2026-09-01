@@ -28,7 +28,7 @@ enum ZapGate {
 
     /// Profile-level zaps survive the flip — that is the whole point of the
     /// switch. Takes the flag so the truth table can prove independence.
-    static func profileZapVisible(flagEnabled: Bool = FeatureFlags.zapsOnPosts) -> Bool {
+    static func profileZapVisible(flagEnabled _: Bool = FeatureFlags.zapsOnPosts) -> Bool {
         true
     }
 }

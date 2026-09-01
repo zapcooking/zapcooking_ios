@@ -16,7 +16,7 @@ import Testing
     @Test func everyLinkIsHttpsOnTheSiteOrigin() {
         for link in PolicyLinks.all {
             #expect(link.url.scheme == "https", "\(link.label)")
-            #expect(link.url.host() == "zap.cooking", "\(link.label)")
+            #expect(link.url.host == "zap.cooking", "\(link.label)")
             #expect(!link.label.isEmpty)
         }
     }
