@@ -123,7 +123,12 @@ final class RecipeBookmarkRepository {
     /// A strictly newer republish of the address revives it — Android
     /// `applyEvent`'s unmark path.
     private var deletedListStamps: [String: Int] = [:]
-    private var writeBusy = false
+
+    /// True while a list mutation is in flight (confirm + sign + publish).
+    /// The save button shows pending from this; it must not flip filled state
+    /// until ``bookmarkedCoordinates`` / ``lists`` update after a successful
+    /// write. Observation publishes the change.
+    private(set) var isWriting = false
 
     init(env: Environment) {
         self.env = env
@@ -440,6 +445,7 @@ final class RecipeBookmarkRepository {
         lists = []
         bookmarkedCoordinates = []
         lastWriteError = nil
+        isWriting = false
     }
 
     // MARK: - Write
@@ -480,9 +486,9 @@ final class RecipeBookmarkRepository {
         guard !trimmed.isEmpty, let keypair else { return nil }
         let dTag = Self.slugify(trimmed)
         guard !dTag.isEmpty, dTag != Self.defaultListDTag else { return nil }
-        guard !writeBusy else { return nil }
-        writeBusy = true
-        defer { writeBusy = false }
+        guard !isWriting else { return nil }
+        isWriting = true
+        defer { isWriting = false }
         let author = keypair.pubkey
         let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
         if base == nil && !absenceConfirmed {
@@ -491,6 +497,7 @@ final class RecipeBookmarkRepository {
         }
         var nextCoords = base.map { Self.parseCoordinates($0) } ?? []
         if let seedEvent, let coord = Self.coordinateForEvent(seedEvent),
+           !HiddenRecipes.isHidden(coordinate: coord),
            !nextCoords.contains(coord) {
             nextCoords.append(coord)
         }
@@ -521,9 +528,9 @@ final class RecipeBookmarkRepository {
     func renameList(dTag: String, newTitle: String, keypair: Keypair?) async -> Bool {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, dTag != Self.defaultListDTag, let keypair else { return false }
-        guard !writeBusy else { return false }
-        writeBusy = true
-        defer { writeBusy = false }
+        guard !isWriting else { return false }
+        isWriting = true
+        defer { isWriting = false }
         guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
             return false
         }
@@ -542,9 +549,9 @@ final class RecipeBookmarkRepository {
     /// default Saved list — the web only locks the default's title.
     func setListDescription(dTag: String, summary: String?, keypair: Keypair?) async -> Bool {
         guard let keypair else { return false }
-        guard !writeBusy else { return false }
-        writeBusy = true
-        defer { writeBusy = false }
+        guard !isWriting else { return false }
+        isWriting = true
+        defer { isWriting = false }
         guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
             return false
         }
@@ -566,9 +573,9 @@ final class RecipeBookmarkRepository {
     /// aborts with nothing signed. Allowed on the default Saved list.
     func setListCover(dTag: String, coverCoord: String?, keypair: Keypair?) async -> Bool {
         guard let keypair else { return false }
-        guard !writeBusy else { return false }
-        writeBusy = true
-        defer { writeBusy = false }
+        guard !isWriting else { return false }
+        isWriting = true
+        defer { isWriting = false }
         guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
             return false
         }
@@ -596,9 +603,9 @@ final class RecipeBookmarkRepository {
     /// relays cannot resurrect it; a strictly newer republish revives it.
     func deleteList(dTag: String, keypair: Keypair?) async -> Bool {
         guard dTag != Self.defaultListDTag, let keypair else { return false }
-        guard !writeBusy else { return false }
-        writeBusy = true
-        defer { writeBusy = false }
+        guard !isWriting else { return false }
+        isWriting = true
+        defer { isWriting = false }
         let author = keypair.pubkey
         guard let base = await resolveExistingList(author: author, dTag: dTag) else {
             return false
@@ -648,6 +655,20 @@ final class RecipeBookmarkRepository {
         }
     }
 
+    /// True when a write would *add* a HiddenRecipes coordinate. Unsave of a
+    /// coordinate another client already stored is still allowed — hide-list
+    /// drop is render-side; this only refuses creating a new membership.
+    /// Android does not refuse at write time; iOS does (Concern 3.1b).
+    nonisolated static func shouldRefuseHiddenAdd(
+        coordinate: String,
+        currentlySaved: Bool,
+        desired: Bool?
+    ) -> Bool {
+        guard HiddenRecipes.isHidden(coordinate: coordinate) else { return false }
+        let adding = desired ?? !currentlySaved
+        return adding
+    }
+
     /// Cold-cache first-write guard lives here. See the type comment.
     func mutateList(
         dTag: String,
@@ -657,9 +678,16 @@ final class RecipeBookmarkRepository {
         keypair: Keypair?
     ) async -> Bool {
         guard keypair != nil else { return isCoordInList(dTag, coord) }
-        guard !writeBusy else { return isCoordInList(dTag, coord) }
-        writeBusy = true
-        defer { writeBusy = false }
+        if Self.shouldRefuseHiddenAdd(
+            coordinate: coord,
+            currentlySaved: isCoordInList(dTag, coord),
+            desired: desired
+        ) {
+            return isCoordInList(dTag, coord)
+        }
+        guard !isWriting else { return isCoordInList(dTag, coord) }
+        isWriting = true
+        defer { isWriting = false }
         let author = keypair!.pubkey
         let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
         switch Self.planMutation(

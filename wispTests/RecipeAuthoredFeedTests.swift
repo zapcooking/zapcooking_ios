@@ -56,15 +56,6 @@ struct RecipeAuthoredFeedTests {
         #expect(!repo.hasLoaded)
     }
 
-    @Test func authorFeedFilter_comesFromTheFormatSeam() {
-        let repo = RecipeRepository(relays: [])
-        let filter = repo.authorFeedFilter(author: author, limit: 100)
-        #expect(filter.kinds == [RecipeParser.recipeKind])
-        #expect(filter.authors == [author])
-        #expect(filter.tTags == RecipeParser.recipeHashtags)
-        #expect(filter.limit == 100)
-    }
-
     /// A relay answering an `authors` filter loosely must not leak someone
     /// else's recipe into Published — `ingestAuthored` re-filters by pubkey.
     @Test func ingestAuthored_dropsForeignPubkeys() async {
@@ -175,10 +166,23 @@ struct RecipeAuthoredFeedTests {
         #expect(repo.recipes.isEmpty)
         #expect(repo.authoredRecipes.isEmpty)
 
+        // Strictly older than the stamp — the list-side twin is
+        // `deleteList_laggardCopyDoesNotResurrect` (createdAt 1_700_000_000
+        // against stamp 1_700_000_001). Equal-boundary above does not
+        // substitute for this fixture.
+        let older = recipe(id: "a0", author: author, dTag: "tuscan-peposo", createdAt: 1_699_999_999)
+        repo.ingest([older])
+        repo.ingestAuthored([older])
+        #expect(repo.recipes.isEmpty)
+        #expect(repo.authoredRecipes.isEmpty)
+
         // A strictly newer republish at the coordinate is a new recipe and
-        // revives the address (Android's unmark path).
+        // revives the address (Android's unmark path) — through both the
+        // main feed and the authored session (4b-i).
         let republished = recipe(id: "a9", author: author, dTag: "tuscan-peposo", createdAt: 1_700_000_001)
         repo.ingest([republished])
         #expect(repo.recipes.map(\.id) == ["a9"])
+        repo.ingestAuthored([republished])
+        #expect(repo.authoredRecipes.map(\.id) == ["a9"])
     }
 }

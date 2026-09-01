@@ -12,6 +12,12 @@ import SwiftUI
 /// `refreshAuthoredFeed()` — `RecipeRepository.ingest` drops non-recipes,
 /// so the blanked replacement cannot evict the live card on its own.
 ///
+/// Save (Concern 3.1b): any signed-in user. Tap the action-bar bookmark to
+/// toggle the default Saved list; long-press (Android) or overflow
+/// "Save to collection…" (iOS extra, discoverability) opens the checklist
+/// picker. Watch-only: the bookmark is visible; tap routes through the
+/// needs-key toast (deliberate divergence from Android's silent no-op).
+///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Data from `RecipeRepository` via `RecipeDetailViewModel`. No relay
 ///   queries from this view.
@@ -33,6 +39,7 @@ struct RecipeDetailView: View {
     /// successful delete so the card leaves the feed without relaunch.
     @State private var feedVM = RecipeFeedViewModel()
     @State private var showDeleteConfirm = false
+    @State private var showCollectionPicker = false
     @State private var isDeleting = false
     @State private var deleteFailureMessage: String?
     @Environment(\.dismiss) private var dismiss
@@ -50,6 +57,10 @@ struct RecipeDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: route) {
             await viewModel.load(author: route.author, dTag: route.dTag)
+            RecipeBookmarkRepository.shared.paintFromCache(pubkey: keypair.pubkey)
+            if !RecipeBookmarkRepository.shared.hasLoaded, !RecipeBookmarkRepository.shared.isLoading {
+                await RecipeBookmarkRepository.shared.load(pubkey: keypair.pubkey)
+            }
         }
         .onChange(of: viewModel.event?.id) { _, _ in
             if let event = viewModel.event {
@@ -100,6 +111,13 @@ struct RecipeDetailView: View {
         } message: {
             Text(deleteFailureMessage ?? "")
         }
+        .sheet(isPresented: $showCollectionPicker) {
+            if let event = viewModel.event {
+                RecipeListChooserSheet(event: event, keypair: keypair) {
+                    showCollectionPicker = false
+                }
+            }
+        }
     }
 
     /// Contract 1 (Concern 3.2): after `RecipePublisher.delete` returns,
@@ -126,6 +144,27 @@ struct RecipeDetailView: View {
             }
         } catch {
             deleteFailureMessage = "Couldn't delete this recipe — \(error.localizedDescription)."
+        }
+    }
+
+    /// Deliberate iOS extra vs Android (ActionBar long-press only): the
+    /// overflow item opens the same picker sheet so Save is discoverable
+    /// without knowing to long-press.
+    private var saveToCollectionButton: some View {
+        Button {
+            openCollectionPicker()
+        } label: {
+            Label("Save to collection…", systemImage: "bookmark")
+        }
+        .accessibilityIdentifier("save-to-collection")
+    }
+
+    private func openCollectionPicker() {
+        switch RecipeSaveGate.of(keypair: keypair) {
+        case .needsKey:
+            RecipeSaveActions.presentNeedsKey()
+        case .canWrite:
+            showCollectionPicker = true
         }
     }
 
@@ -166,6 +205,7 @@ struct RecipeDetailView: View {
                 .accessibilityIdentifier("edit-recipe")
 
                 Menu {
+                    saveToCollectionButton
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
@@ -185,6 +225,7 @@ struct RecipeDetailView: View {
             }
             if let event = viewModel.event, event.pubkey != keypair.pubkey {
                 Menu {
+                    saveToCollectionButton
                     Button(role: .destructive) {
                         ReportPresenter.shared.present(.event(event))
                     } label: {
@@ -266,19 +307,17 @@ struct RecipeDetailView: View {
                             .padding(.horizontal, 16)
                             .padding(.bottom, 16)
                     }
-                    if !activeUserIsWatchOnly {
-                        Divider()
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                        ArticleActionBar(
-                            article: event,
-                            keypair: keypair,
-                            replyCount: 0,
-                            authorProfile: viewModel.authorProfile,
-                            zapsOnPosts: FeatureFlags.zapsOnPosts
-                        )
-                        .padding(.horizontal, 8)
-                    }
+                    Divider()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    ArticleActionBar(
+                        article: event,
+                        keypair: keypair,
+                        replyCount: 0,
+                        authorProfile: viewModel.authorProfile,
+                        zapsOnPosts: FeatureFlags.zapsOnPosts
+                    )
+                    .padding(.horizontal, 8)
                     Spacer().frame(height: 32)
                 }
             }

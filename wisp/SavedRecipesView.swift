@@ -18,9 +18,9 @@ struct RecipeCollectionRoute: Hashable {
 /// Management lives **only** on these grid cards — the collection detail
 /// route has no manage affordances (Android parity, confirmed absence).
 ///
-/// 3.1b seam: `CookbookCollectionCard` and `collectionGrid` take injected
-/// tap handlers, so the save-to-collection picker can reuse the grid
-/// without this screen's navigation or menus.
+/// The 3.1b save picker is `RecipeListChooserSheet` (Android checklist),
+/// not this grid. Injected tap/menu handlers stay so the card remains a
+/// Saved-tab tile only.
 struct SavedRecipesView: View {
     let keypair: Keypair
     @Binding var path: NavigationPath
@@ -245,8 +245,8 @@ struct CollectionManageMenu {
 
 /// One collection tile: square cover (resolved from the cover recipe's own
 /// image, deterministic placeholder otherwise), title, recipe count, and
-/// the manage overflow. Injected handlers keep it reusable as a picker row
-/// (3.1b seam).
+/// the manage overflow. Injected tap/menu handlers keep management on the
+/// card without baking Saved-tab navigation into the tile.
 struct CookbookCollectionCard: View {
     let list: RecipeBookmarkRepository.CookbookList
     let coverURL: String?
