@@ -25,7 +25,7 @@ import SwiftUI
 /// - Nourish scores are an independent pantry read (Concern 3.5); a miss
 ///   is quiet absence. Compute is deferred.
 /// - Scale chips ½× / 1× / 2× / 3×; servings scale, prep / cook do not.
-/// - Zap affordance respects `FeatureFlags.zapsOnPosts` (Gate 0-F).
+/// - Zap affordance follows `ZapGate.postZapVisible()` (Gate 0-F / §4.8).
 /// - Cook mode is Concern 1.8b — launched from this screen, snapshotted
 ///   at the current scale. Android's equivalent button is unwired.
 struct RecipeDetailView: View {
@@ -360,7 +360,7 @@ struct RecipeDetailView: View {
                 keypair: keypair,
                 replyCount: 0,
                 authorProfile: viewModel.authorProfile,
-                zapsOnPosts: FeatureFlags.zapsOnPosts,
+                zapsOnPosts: ZapGate.postZapVisible(),
                 knownBookmarkTarget: .recipeBookmark
             )
             .padding(.horizontal, 8)

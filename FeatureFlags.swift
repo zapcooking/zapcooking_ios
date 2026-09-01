@@ -18,9 +18,12 @@ enum FeatureFlags {
     /// zaps were allowed. Primal ships post-level zaps on iOS today, so the
     /// landscape has eased — but that is precedent-by-observation, not a
     /// written rule change, and review is uneven. Ship `true`; when `false`,
-    /// post-level zap affordances collapse to profile-level only (zap the
-    /// author, not the post). If review pushes back, flip to `false` and
-    /// resubmit.
+    /// every post-level zap affordance is removed (kind-1 card bolt and
+    /// quick zap, zap-poll vote rows, article / recipe bar bolt, live-stream
+    /// host and chat zaps) and only the profile-level zap on `ProfileView`
+    /// remains. Views consult `ZapGate`, never this constant directly; the
+    /// truth table is `ZapGateTests`. If review pushes back, flip to `false`
+    /// and resubmit.
     static let zapsOnPosts: Bool = true
 
     /// Link-out to `zap.cooking/membership`. **Hard `false` on iOS.** Outside

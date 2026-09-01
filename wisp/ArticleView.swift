@@ -405,8 +405,10 @@ struct ArticleView: View {
 /// card's deeply-coupled private bar.
 ///
 /// Internal so `RecipeDetailView` (Concern 1.3) reuses this bar rather than
-/// forking it. `zapsOnPosts` is Gate 0-F: when false, the zap is profile-level
-/// (`eventId` nil) instead of attached to the post.
+/// forking it. `zapsOnPosts` is Gate 0-F / §4.8: when false the bolt is not
+/// rendered at all — a tip button on the content is post-level whatever the
+/// zap request tags, so the affordance goes, not just the `e` tag. The
+/// author's profile keeps its zap button.
 ///
 /// Bookmark routing (Concern 3.1b): `RecipeParser.isRecipe` →
 /// `RecipeBookmarkRepository` (kind 30001); otherwise the inherited
@@ -417,7 +419,7 @@ struct ArticleActionBar: View {
     let keypair: Keypair
     let replyCount: Int
     let authorProfile: ProfileData?
-    var zapsOnPosts: Bool = FeatureFlags.zapsOnPosts
+    var zapsOnPosts: Bool = ZapGate.postZapVisible()
     /// Skip `RecipeParser.isRecipe` when the caller already knows (recipe
     /// detail always passes `.recipeBookmark`).
     var knownBookmarkTarget: BookmarkActionTarget? = nil
@@ -507,19 +509,21 @@ struct ArticleActionBar: View {
             }
             Spacer()
 
-            // Zap
-            Button {
-                showZapSheet = true
-            } label: {
-                let sats = box.counts.zapSats
-                actionItem(
-                    icon: "bolt",
-                    label: sats > 0 ? CurrencyFormatter.short(sats: sats) : "0",
-                    tint: iZapped ? Color.wispZapColor : nil
-                )
+            // Zap — post-level, so gated by the §4.8 kill switch.
+            if zapsOnPosts {
+                Button {
+                    showZapSheet = true
+                } label: {
+                    let sats = box.counts.zapSats
+                    actionItem(
+                        icon: "bolt",
+                        label: sats > 0 ? CurrencyFormatter.short(sats: sats) : "0",
+                        tint: iZapped ? Color.wispZapColor : nil
+                    )
+                }
+                .buttonStyle(.plain)
+                Spacer()
             }
-            .buttonStyle(.plain)
-            Spacer()
 
             // Bookmark — recipes: kind 30001 (`RecipeBookmarkRepository`);
             // everything else: inherited kind 30003 note-list sheet.
@@ -536,7 +540,7 @@ struct ArticleActionBar: View {
                     recipientPubkey: article.pubkey,
                     recipientLud16: authorProfile?.lud16,
                     recipientName: authorProfile?.displayString,
-                    eventId: zapsOnPosts ? article.id : nil,
+                    eventId: article.id,
                     extraTags: [],
                     forcePrivate: false,
                     onSuccess: { _ in },
