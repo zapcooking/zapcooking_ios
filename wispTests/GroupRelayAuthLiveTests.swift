@@ -225,6 +225,17 @@ struct GroupRelayAuthLiveTests {
         let framesBefore = log1.count
         await pool.dropConnectionForTesting(relayUrl: Self.pantry)
 
+        // The kill lands asynchronously: the reader must see the socket error
+        // and reach scheduleReconnect (which resets auth to .idle) before the
+        // re-auth wait below means anything — otherwise the stale
+        // .authenticated from the dead connection satisfies it instantly and
+        // the frame-log tail is empty (first VM run failed exactly so, 0.47s).
+        // The non-authenticated window lasts at least the 1s first-attempt
+        // reconnect backoff, so the 200ms poll cannot miss it.
+        #expect(await Self.eventually(timeout: 10) {
+            await pool.authState(relayUrl: Self.pantry) != .authenticated
+        }, "socket kill must reach the reconnect path (auth reset)")
+
         #expect(await Self.eventually(timeout: 45) {
             await pool.authState(relayUrl: Self.pantry) == .authenticated
         }, "reconnect must re-authenticate")
