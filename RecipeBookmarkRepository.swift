@@ -30,7 +30,13 @@ import Observation
 ///
 /// Scope (3.1 / Android PR 3a): read the user's recipe lists, single-tap
 /// toggle of the default list, multi-membership add/remove, create-by-name.
-/// Rename / delete / cover editing are 3.2's Cookbook screen.
+/// 3.2 (My Kitchen) added named-collection management: rename (only the
+/// `title` tag — the `d` tag is the stable identity and is never changed),
+/// description (`summary` tag), cover (`cover` tag, a member recipe's
+/// a-coordinate, guarded to members), and delete (a real NIP-09 kind-5
+/// tombstone, not a list rewrite). All go through the same cold-session
+/// guard: metadata edits never create, and an unconfirmed relay check signs
+/// nothing. The default Saved list is never renameable or deletable.
 ///
 /// Port of Android `repo/RecipeBookmarkRepository.kt`.
 @Observable
@@ -90,6 +96,9 @@ final class RecipeBookmarkRepository {
         var publish: (NostrEvent) async -> Void
         var readRelays: () async -> [String]
         var nowMs: () -> Int64
+        /// Evict one list from the on-device cache (3.2 delete). Defaulted so
+        /// pre-3.2 `Environment` constructions stay source-compatible.
+        var removeCached: (String, String) -> Void = { _, _ in }
     }
 
     static let shared = RecipeBookmarkRepository(env: .production)
@@ -97,11 +106,23 @@ final class RecipeBookmarkRepository {
     private(set) var lists: [CookbookList] = []
     private(set) var bookmarkedCoordinates: Set<String> = []
     private(set) var isLoading = false
+
+    /// True once ``load(pubkey:)`` has completed, whatever the list count —
+    /// so a tab re-entry (`.task` re-run) does not re-issue an identical
+    /// filter (§7.4). ``load(pubkey:)`` itself stays re-runnable; it is the
+    /// pull-to-refresh path.
+    private(set) var hasLoaded = false
     private(set) var lastWriteError: String?
 
     private let env: Environment
     private var listsByDTag: [String: NostrEvent] = [:]
     private var lastUnconfirmedCheckMs: [String: Int64] = [:]
+
+    /// d-tags deleted this session, mapped to the kind-5's `created_at`, so a
+    /// laggard relay (or the cache) cannot resurrect a deleted collection.
+    /// A strictly newer republish of the address revives it — Android
+    /// `applyEvent`'s unmark path.
+    private var deletedListStamps: [String: Int] = [:]
     private var writeBusy = false
 
     init(env: Environment) {
@@ -168,12 +189,24 @@ final class RecipeBookmarkRepository {
     /// (rewritten to `nextCoords`) and a misattributing `client` tag.
     /// Named collections get ``collectionTag`` when they lack a recipe `t`;
     /// the default list is never given a `t` tag.
+    ///
+    /// The 3.2 metadata substitutions ride the same carry-forward (one
+    /// builder — a second one would clobber; Android's `buildListTags` is
+    /// likewise the single writer):
+    /// - `newTitle` non-nil replaces the `title` tag in place;
+    /// - `newSummary` / `newCover` use a double optional: `.none` carries the
+    ///   existing tag through untouched, `.some(nil)` (or blank) clears it,
+    ///   `.some(value)` replaces it. `cover` is a member recipe's
+    ///   a-coordinate, not an image URL — membership is the caller's guard.
     nonisolated static func buildListTags(
         existing: NostrEvent?,
         dTag: String,
         isDefault: Bool,
         seedTitleIfNew: String?,
-        nextCoords: [String]
+        nextCoords: [String],
+        newTitle: String? = nil,
+        newSummary: String?? = .none,
+        newCover: String?? = .none
     ) -> [[String]] {
         var tags: [[String]] = []
         var hasD = false
@@ -192,9 +225,15 @@ final class RecipeBookmarkRepository {
                     }
                 case "title":
                     if !hasTitle {
-                        tags.append(tag)
+                        tags.append(newTitle.map { ["title", $0] } ?? tag)
                         hasTitle = true
                     }
+                case "summary":
+                    if case .some = newSummary { continue }
+                    tags.append(tag)
+                case "cover":
+                    if case .some = newCover { continue }
+                    tags.append(tag)
                 case "t":
                     if !isDefault {
                         tags.append(tag)
@@ -209,8 +248,16 @@ final class RecipeBookmarkRepository {
         }
         if !hasD { tags.insert(["d", dTag], at: 0) }
         if !hasTitle {
-            let title = seedTitleIfNew ?? (isDefault ? defaultListTitle : dTag)
+            let title = newTitle ?? seedTitleIfNew ?? (isDefault ? defaultListTitle : dTag)
             tags.append(["title", title])
+        }
+        if case .some(let value?) = newSummary,
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            tags.append(["summary", value])
+        }
+        if case .some(let value?) = newCover,
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            tags.append(["cover", value])
         }
         if !isDefault && !hasRecipeT {
             tags.append(["t", collectionTag])
@@ -267,7 +314,12 @@ final class RecipeBookmarkRepository {
     /// Format-agnostic addressable coordinate, matching Android: first `d`
     /// tag via `RecipeParser.dTag`, not ``dTagOf`` (that helper prefers the
     /// default-list d-tag and is for list events only).
-    nonisolated static func coordinateForEvent(_ event: NostrEvent) -> String? {
+    ///
+    /// MainActor-isolated (unlike the other pure helpers): it consults the
+    /// `RecipeFormats` registry, whose statics are isolated under this
+    /// module's default isolation, and every caller is already on the main
+    /// actor.
+    static func coordinateForEvent(_ event: NostrEvent) -> String? {
         guard let format = RecipeFormats.forEvent(event) else { return nil }
         let dTag = RecipeParser.dTag(event).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !dTag.isEmpty else { return nil }
@@ -347,11 +399,19 @@ final class RecipeBookmarkRepository {
         for event in result.events {
             applyEvent(event)
         }
+        hasLoaded = true
     }
 
     func applyEvent(_ event: NostrEvent) {
         guard event.kind == Self.listKind, Self.isRecipeList(event) else { return }
         guard let dTag = Self.dTagOf(event) else { return }
+        if let stamp = deletedListStamps[dTag] {
+            // The address was deleted this session: copies at or before the
+            // kind-5's stamp are the deleted version; a strictly newer
+            // republish revives the address (Android's unmark path).
+            guard event.createdAt > stamp else { return }
+            deletedListStamps.removeValue(forKey: dTag)
+        }
         if let current = listsByDTag[dTag], !Self.isNewerReplaceable(event, than: current) { return }
         listsByDTag[dTag] = event
         env.persist(event)
@@ -374,7 +434,9 @@ final class RecipeBookmarkRepository {
     func reset() {
         listsByDTag.removeAll()
         lastUnconfirmedCheckMs.removeAll()
+        deletedListStamps.removeAll()
         isLoading = false
+        hasLoaded = false
         lists = []
         bookmarkedCoordinates = []
         lastWriteError = nil
@@ -447,6 +509,142 @@ final class RecipeBookmarkRepository {
         } catch {
             lastWriteError = error.localizedDescription
             return nil
+        }
+    }
+
+    // MARK: - Collection management (Concern 3.2)
+
+    /// Rename a named collection — changes **only** the `title` tag. The
+    /// `d` tag is the stable identity and is never changed (a new `d` = a
+    /// different list = orphaned data). The default Saved list is never
+    /// renameable. Port of Android `renameList`.
+    func renameList(dTag: String, newTitle: String, keypair: Keypair?) async -> Bool {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, dTag != Self.defaultListDTag, let keypair else { return false }
+        guard !writeBusy else { return false }
+        writeBusy = true
+        defer { writeBusy = false }
+        guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
+            return false
+        }
+        let tags = Self.buildListTags(
+            existing: base,
+            dTag: dTag,
+            isDefault: false,
+            seedTitleIfNew: nil,
+            nextCoords: Self.parseCoordinates(base),
+            newTitle: trimmed
+        )
+        return await signAndPublishList(tags: tags, content: base.content)
+    }
+
+    /// Set or clear (`nil` / blank) the `summary` tag. Allowed on the
+    /// default Saved list — the web only locks the default's title.
+    func setListDescription(dTag: String, summary: String?, keypair: Keypair?) async -> Bool {
+        guard let keypair else { return false }
+        guard !writeBusy else { return false }
+        writeBusy = true
+        defer { writeBusy = false }
+        guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
+            return false
+        }
+        let tags = Self.buildListTags(
+            existing: base,
+            dTag: dTag,
+            isDefault: dTag == Self.defaultListDTag,
+            seedTitleIfNew: nil,
+            nextCoords: Self.parseCoordinates(base),
+            newSummary: .some(summary)
+        )
+        return await signAndPublishList(tags: tags, content: base.content)
+    }
+
+    /// Set or clear (`nil` / blank) the `cover` tag — a member recipe's
+    /// **a-coordinate**, not an image URL; the display side resolves the URL
+    /// from the referenced recipe's own `image` tag. Web guard: a cover can
+    /// only be a recipe already in the collection — a non-member coordinate
+    /// aborts with nothing signed. Allowed on the default Saved list.
+    func setListCover(dTag: String, coverCoord: String?, keypair: Keypair?) async -> Bool {
+        guard let keypair else { return false }
+        guard !writeBusy else { return false }
+        writeBusy = true
+        defer { writeBusy = false }
+        guard let base = await resolveExistingList(author: keypair.pubkey, dTag: dTag) else {
+            return false
+        }
+        let coords = Self.parseCoordinates(base)
+        let trimmed = coverCoord?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty, !coords.contains(trimmed) { return false }
+        let tags = Self.buildListTags(
+            existing: base,
+            dTag: dTag,
+            isDefault: dTag == Self.defaultListDTag,
+            seedTitleIfNew: nil,
+            nextCoords: coords,
+            newCover: .some(trimmed?.isEmpty == true ? nil : trimmed)
+        )
+        return await signAndPublishList(tags: tags, content: base.content)
+    }
+
+    /// Delete a named collection — a real NIP-09 **kind-5 tombstone**, not a
+    /// list rewrite: `e` (list event id) + `a` (list address), per Android
+    /// `deleteList`, plus a `k` tag for consistency with `RecipeDeletion`
+    /// (a deliberate, documented divergence — Android omits `k` here).
+    /// The default Saved list is never deletable. The list is removed
+    /// locally (memory + on-device cache) so the Saved grid updates
+    /// immediately, and the address is stamped so cache paints and laggard
+    /// relays cannot resurrect it; a strictly newer republish revives it.
+    func deleteList(dTag: String, keypair: Keypair?) async -> Bool {
+        guard dTag != Self.defaultListDTag, let keypair else { return false }
+        guard !writeBusy else { return false }
+        writeBusy = true
+        defer { writeBusy = false }
+        let author = keypair.pubkey
+        guard let base = await resolveExistingList(author: author, dTag: dTag) else {
+            return false
+        }
+        let tags: [[String]] = [
+            ["e", base.id],
+            ["a", "\(Self.listKind):\(author):\(dTag)"],
+            ["k", String(Self.listKind)],
+        ]
+        do {
+            let signed = try await env.sign(Nip09.kindDeletion, tags, "")
+            deletedListStamps[dTag] = signed.createdAt
+            listsByDTag.removeValue(forKey: dTag)
+            env.removeCached(author, dTag)
+            publishListsState()
+            await env.publish(signed)
+            lastWriteError = nil
+            return true
+        } catch {
+            lastWriteError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Shared guard for the metadata edits and delete: they operate on an
+    /// existing list and **never create**. Confirmed absent → nothing to
+    /// edit, return nil quietly. Unconfirmed → the cold-cache overwrite
+    /// hazard: surface ``writeUnconfirmedMessage``, sign nothing — the same
+    /// first-save guard ``mutateList`` runs.
+    private func resolveExistingList(author: String, dTag: String) async -> NostrEvent? {
+        let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
+        if let base { return base }
+        if !absenceConfirmed { lastWriteError = Self.writeUnconfirmedMessage }
+        return nil
+    }
+
+    private func signAndPublishList(tags: [[String]], content: String) async -> Bool {
+        do {
+            let signed = try await env.sign(Self.listKind, tags, content)
+            applyEvent(signed)
+            await env.publish(signed)
+            lastWriteError = nil
+            return true
+        } catch {
+            lastWriteError = error.localizedDescription
+            return false
         }
     }
 
@@ -561,7 +759,7 @@ final class RecipeBookmarkRepository {
 }
 
 private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
+    nonisolated var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 extension RecipeBookmarkRepository.Environment {
@@ -614,6 +812,9 @@ extension RecipeBookmarkRepository.Environment {
             },
             nowMs: {
                 Int64(Date().timeIntervalSince1970 * 1000)
+            },
+            removeCached: { author, dTag in
+                RecipeBookmarkCache.remove(author: author, dTag: dTag)
             }
         )
     }
@@ -657,5 +858,16 @@ enum RecipeBookmarkCache {
         if let current = byD[dTag], !RecipeBookmarkRepository.isNewerReplaceable(event, than: current) { return }
         byD[dTag] = event
         UserDefaults.standard.set(byD.values.map { $0.toJSON() }, forKey: key(event.pubkey))
+    }
+
+    /// Evict one list (3.2 delete) so a cache paint cannot resurrect a
+    /// deleted collection.
+    static func remove(author: String, dTag: String) {
+        var byD: [String: NostrEvent] = [:]
+        for existing in load(author: author) {
+            if let d = RecipeBookmarkRepository.dTagOf(existing) { byD[d] = existing }
+        }
+        guard byD.removeValue(forKey: dTag) != nil else { return }
+        UserDefaults.standard.set(byD.values.map { $0.toJSON() }, forKey: key(author))
     }
 }
