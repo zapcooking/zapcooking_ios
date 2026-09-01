@@ -1,348 +1,386 @@
-# Concern 2.5 — Sous Chef URL import — Step 1 findings
+# FINDINGS — Issue #6: subscribe path waits for NIP-42 AUTH (Concern C-B, Phase 1)
 
-Sources examined: frontend `~/projects/ZapCooking` (souschef page + server routes),
-Android `~/projects/zap_cooking_android` (SousChefScreen/ViewModel/ZapCookingApi),
-this repo at `origin/main` (d40b106). File:line cites below are against those trees.
-
-**Headline:** the URL import is **anonymous and ungated** — no NIP-98, no
-membership, per-IP rate limit only. The response is a **structured object,
-not markdown**. Android's flow is a **preview screen with direct Publish /
-Save / Edit**, and every publish-side piece it uses already exists on iOS
-(`RecipePublisher`'s single-image "Sous Chef Publish path",
-`RecipeComposeSession.prefillMarkdown`). One scope decision is flagged in §4.
+Investigated 2026-09-01 on `main` @ `2be233f`. Source read directly; relay behavior
+verified against `~/projects/member-relay` @ `3cbb019` (khatru v0.12.0 module source)
+and by a **read-only live probe of `wss://pantry.zap.cooking`** (three unauthenticated
+REQs, no EVENT/AUTH sent; script in session scratchpad, transcript inlined in §0).
+Android reference: `~/projects/zap_cooking_android`.
 
 ---
 
-## 1. The endpoint
+## 0. Headline findings (what changed since the Aug 5 investigation)
 
-**Web Sous Chef page** (`src/routes/souschef/+page.svelte:422`):
-`POST /api/extract-recipe` (same-origin relative path), body
-`{ type: 'url', pubkey, url }` — and for URL mode it sends **no Authorization
-header at all** (`+page.svelte:414-420`: NIP-98 is attached only for
-`image`/`text`). `pubkey` is sent but not load-bearing for URL
-(server docstring `src/routes/api/extract-recipe/+server.ts:23-27`).
-
-**Server route** (`src/routes/api/extract-recipe/+server.ts`): only
-`image`/`text` enter the NIP-98 + membership gate (`:90-143`); the `url`
-branch (`:158-189`) has **no auth** and a per-IP rate limit —
-`URL_PER_HOUR = 8`, `URL_PER_DAY = 30` (`:43-44`), KV scope `extract-url`.
-
-**Sibling** `POST /api/extract-recipe/public`
-(`src/routes/api/extract-recipe/public/+server.ts`): URL-only, body
-`{ url }`, same 8/hr·30/day scope, used by the anonymous landing hero
-(`src/components/LandingImportHero.svelte:131-135`) — **and by Android**:
-`api/ZapCookingApi.kt:187-193` posts `{"url": …}` (DTO
-`ExtractUrlRequest(val url: String)`, `:795-796`) to `/api/extract-recipe/public`
-with no auth, on `HttpClientFactory.getComputeClient()` (10 s connect / 75 s
-read, `relay/HttpClientFactory.kt:116-121`).
-
-**Response shape — structured object, no markdown.** Success envelope
-`{ success: true, recipe: NormalizedRecipe }`
-(`+server.ts:200-208`); `NormalizedRecipe`
-(`src/lib/parseRecipe.server.ts:69-80`, client mirror
-`src/lib/anonImport.ts:20-42`, Android DTO validated live at
-`ZapCookingApi.kt:886-899`):
+**F-1. The doc's central Nourish claim is falsified.** "Pantry requires NIP-42 AUTH
+on every read — even kind 1. A READ_ONLY account cannot read Nourish at all"
+(`ZAPCOOKING_IOS_BUILD.md:390-391`) is no longer true. member-relay's
+`rejectFilterPolicy` now has a public-Nourish carve-out
+(`relay/main.go:696-703` — `isPublicNourishFilter`: authors exactly
+`[nourishServicePubkey]` AND kinds exactly `[30078]`), recipes (`30023`) are always
+readable (`relay/main.go:708-711`), and group metadata / public-group content are
+readable unauthenticated (`relay/main.go:714-731`). Live probe of deployed pantry
+confirms all three:
 
 ```
-title, summary, chefsnotes, preptime, cooktime, servings: String  (default "")
-ingredients, directions, tags, imageUrls: [String]                (default [])
+REQ {authors:[fdd263f6…], kinds:[30078], limit:2}  → EVENT 30078, EVENT 30078, EOSE   (no AUTH demanded)
+REQ {kinds:[30023], limit:1}                       → EVENT 30023, EOSE                (no AUTH demanded)
+REQ {kinds:[30078], limit:1}   (no authors pin)    → ["AUTH", <challenge>] then
+                                                     ["CLOSED","probe1","auth-required: please authenticate"]
 ```
 
-`imageUrls` is up to 5 URLs, og:image/schema.org image first
-(`parseRecipe.server.ts:132-144`). Canonical markdown never crosses the
-wire — the web assembles it client-side at publish (`+page.svelte:562-570`),
-Android assembles it only for the Edit handoff (§4).
+Consequence: **a correctly-shaped Nourish read needs no AUTH and no key at all** —
+including for watch-only accounts. Issue #6 no longer blocks C-F for the basic
+Nourish score read. It still blocks: NIP-29 member/private groups on pantry, member
+app-data reads (grocery/planner: kind 30078 with `authors=[self]`,
+`relay/main.go:749-751` requires the authed pubkey to match), and any future
+members-only read.
 
-Failure envelope: `{ success: false, error, code }` where `code` is one of
-**11** values (`src/lib/extractErrors.ts:26-37`): `INVALID_REQUEST`,
-`INVALID_URL`, `UNSUPPORTED_URL`, `TEXT_TOO_LONG`, `SOURCE_BLOCKED`,
-`SOURCE_NOT_FOUND`, `SOURCE_UNAVAILABLE`, `SOURCE_TOO_LARGE`,
-`TOO_MANY_REDIRECTS`, `AI_UNAVAILABLE`, `INTERNAL`. Exception: the **429
-rate-limit body has no `code`** — it is
-`{ error: 'rate_limited', retryAfter, scope }`
-(`+server.ts:186`, `src/lib/ipRateLimit.server.ts:118,128`). Our 0.7a
-taxonomy already handles that via the status-429 fallback →
-`.rateLimited(retryAfter:)`… **except `retryAfter` only decodes if the
-envelope carries it — it does; `ErrorEnvelope` in `wisp/ZapCookingApi.swift:295-299`
-already has the field.** The web souschef page itself mishandles this (shows
-the literal string `rate_limited`); the taxonomy on iOS does better.
+**F-2. There are two subscribe stacks, and issue #6's four defects live only in one.**
+`GroupRelayPool` (NIP-29/scheduler, `GroupRelayPool.swift:9`) has all four defects.
+The general stack (`RelayPool` → `RelayConnectionPool` → `RelayConn`,
+`RelayPool.swift:22/631/455`) independently handles AUTH and already re-fires REQs
+after AUTH (`RelayPool.swift:603-612`) — it shares only a weaker form of defect 3
+(marks "authed" on send, ignores the AUTH `OK`). Nourish, as a one-shot read, would
+naturally ride `RelayPool.query`, **not** `GroupRelayPool` — the issue text's "Nourish
+reads pantry over the same path" is stale.
 
-### §2 doc comparison (ZAPCOOKING_IOS_BUILD.md:294-316) — differences to correct in this PR
+**F-3. khatru never volunteers the AUTH challenge on connect.** The challenge is
+generated per connection (khatru `handlers.go:71-77`) but the `AUTH` frame is only
+sent by `RequestAuth` on an `auth-required:` rejection of a REQ or EVENT
+(`handlers.go:265-268, 225-227, 313`; `utils.go:15-23`). Probe confirms the frame
+order: **AUTH challenge, then CLOSED**, both after our REQ. Therefore
+**"wait for AUTH before the first REQ" is impossible against pantry** — the first REQ
+is what provokes the challenge. The correct shape (and what Android's
+`AuthedRelayReader` does) is: optimistic REQ → on CLOSED auth-required, await AUTH
+*acceptance* → replay, bounded. This also means `waitForAuthIfNeeded`'s
+"no challenge yet → return immediately" branch (`GroupRelayPool.swift:161`) makes it
+a **no-op on every fresh connection** — including `DraftsViewModel.swift:144`'s
+existing call.
 
-1. **`:302` is incomplete:** `POST /api/extract-recipe` is not
-   image/text-only — it also accepts `type: 'url'` **with no auth** (that is
-   what the signed-in web page uses). `/public` (`:301`) is the URL-only
-   sibling used by the anon hero and by Android. Both rows are individually
-   correct; the table implies URL *must* go through `/public`, which is false.
-2. **Response shape is undocumented.** Add: structured `NormalizedRecipe`
-   (fields above), never markdown; `{success:false,error,code}` failures;
-   **429 carries no `code`** (status fallback required, `retryAfter` present).
-3. **Error-code vocabulary:** §2/0.7a pin only 4 extract codes
-   (`wispTests/ZapCookingApiTests.swift:146`); the live union is 11 (list
-   above). All pass through `apiRejected` today — additive, nothing breaks —
-   but the doc should carry the full list and the per-code user copy source.
-4. Phase 2.5 line (`:1022`) says "structured preview via the shared recipe
-   body → Save routes into 2.4" — confirmed accurate against Android.
+**F-4. The relay's `OK` for the AUTH event is correlatable but dropped on the floor
+on both stacks.** khatru replies `["OK", <authEventId>, true/false]`
+(`handlers.go:296-298`). iOS never retains the AUTH event id and never parses that
+OK (details §4). This is the root of "set on send". Stop-condition "AUTH OK can't be
+correlated" is **not** triggered — the id is right there in the signed event we build.
 
-## 2. Gating
+**F-5. Severity calibration (important for a right-sized fix).** For a *signing
+member* account, the current `GroupRelayPool` code usually recovers, with churn:
+cold connect and reconnect both go REQ → (AUTH+CLOSED) → sign-on-AUTH-frame →
+2s-sleep replay → served (khatru validates in websocket order, so the AUTH sent
+while the CLOSED was still queued is processed first). The *silently-empty-forever*
+cases are: (a) watch-only / signing failure — no AUTH ever sent, CLOSED→replay→CLOSED
+loops forever with no surfaced error; (b) AUTH rejected (`OK false`: clock skew,
+relay-URL mismatch vs `ServiceURL`) — client believes it authed, loops forever;
+(c) `CLOSED restricted:` (authed non-member) — see F-6. The fix's value is bounded
+recovery + an explicit watch-only/failure state, not "reads never worked."
 
-**URL import: open.** Not entitlement-gated, not credit-metered; IP rate
-limit only. No credit ledger exists anywhere in the extract path
-(`parseRecipe.server.ts` — flat OpenAI `gpt-4o-mini` call, `:385-397`).
-Image/text are Cook+-gated — and are **P2, out of scope here**
-(ZAPCOOKING_IOS_BUILD.md:1024).
+**F-6. New defect found (not in the issue's four): `CLOSED` with a non-auth reason
+replays in a hot loop.** `GroupRelayPool.swift:305-318` replays on **every** CLOSED;
+`needsAuth` only controls the 2s sleep. A `restricted: membership required`
+rejection (member-relay `relay/main.go:754`, and khatru re-CLOSEs every replay)
+produces an unbounded REQ/CLOSED ping-pong **with no sleep at all**, at network RTT
+rate, forever. A throwaway signing key joined to a pantry group hits exactly this.
 
-- Frontend gate (image/text only): `souschef/+page.svelte:384-388` redirects
-  non-members to `/membership` client-side; the server enforces via NIP-98 +
-  `hasActiveMembership` (`+server.ts:122-142`, fails **open** on membership-API
-  errors). The page uses the **public batch** membership store
-  (`GET /api/membership?pubkeys=`, `src/lib/stores/membershipStatus.ts:77`) —
-  it never calls `check-status` and never reads `owner`. Same on Android
-  (`SousChefViewModel.kt:77-101`).
-- The web page requires login to *view* (`+page.svelte:370-373`), but the
-  endpoint itself is anonymous; Android runs URL import with no signer at
-  all — works for READ_ONLY accounts.
+---
 
-**Consequence for this concern:** there is **no non-member state to build**.
-Shipping URL-only means nothing on the screen is gated. Android shows a
-banner ("**URL imports are on us.** Image and text imports are a Cook+ and
-above feature. View membership.", `SousChefScreen.kt:231-261`) — but that
-advertises modes we are not shipping, and with
-`FeatureFlags.membershipLinkoutEnabled = false` the link must not render.
-**Proposal: omit the banner entirely in v1.** The membership dialog copy
-Android uses when link-out is off ("Sous Chef image and text imports are
-part of Zap Cooking membership.", `SousChefScreen.kt:155-163`) becomes
-relevant only when P2 lands. No purchase UI is required or possible → no
-stop condition triggered.
+## 1. The subscribe path today
 
-**`owner: true` / check-status is not part of this concern's gate.** The
-prompt's hermetic-gate item ("`owner: false` and degraded public shape →
-gated") maps to the image/text modes; with URL-only scope there is no gate
-logic to test. Noted so the PR description can answer it explicitly.
+### Pools and entry points
 
-## 3. Android's Sous Chef flow (behavioral spec)
-
-- **Entry:** the Intelligence menu (purple `AutoAwesome` atom icon) in the
-  top bars of Feed and RecipeFeed screens (`ui/component/IntelligenceMenu.kt:63-72`,
-  `FeedScreen.kt:838-845`, `RecipeFeedScreen.kt:262-263` →
-  `Routes.SOUS_CHEF`). **No share-sheet target** — `AndroidManifest.xml:36-45`
-  has no `ACTION_SEND` filter; a URL cannot be shared into the app. The
-  drawer item was removed (`WispDrawerContent.kt:433-439`, callback kept for
-  call-site stability). So: **paste field only.**
-- **Screen** (`SousChefScreen.kt:187-428`): one multiline field, placeholder
-  "Paste a recipe URL, paste recipe text, or add a photo…", trailing
-  **paste-from-clipboard** icon (`:315-322`); mode auto-detected live
-  (`souschef/SousChefDetect.kt:25-32` — trimmed input matching
-  `^https?://\S+$` → URL); IME key becomes `Go` in URL mode; CTA
-  "🤖 Get Recipe".
-- **Loading:** in-button 18 dp spinner + `"Fetching and extracting recipe
-  from URL..."` (`SousChefScreen.kt:374-387`, `progressLine` `:432-436`)
-  plus a large body spinner (`:403-406`); field/paste/CTA disabled; **no
-  cancel** (Back exits and implicitly cancels).
-- **Result:** an in-place read-only **preview** rendered by the shared
-  `RecipeBody` (`:417-425`) with a serving multiplier, and three actions:
-  **Publish** (direct), **Save to my recipes** (bookmark), **Edit** (→
-  compose prefill).
-- **Partial extraction:** preview opens **regardless** — all fields default
-  and blank→nil (`ZapCookingApi.kt:908-930`); missing ingredient/direction
-  sections are simply omitted (`RecipeBody.kt:101,120`), **no warning**.
-  Missing **title** fails late, at publish: `"This recipe needs a title to
-  publish."` (`RecipePublisher.kt:72`). Missing **image** is the one
-  pre-publish block: Publish/Save disabled with reason
-  `"Add an image to publish — or Edit to attach one."`
-  (`SousChefScreen.kt:530-534`, gate `SousChefPublishConfirm.kt:20-21`).
-- **Source image:** `imageUrls` → `RecipeParser.Recipe.images`, cover =
-  `firstOrNull()`; the **remote source URL satisfies the photo rule**, and
-  Blossom re-host happens at publish time with source-URL fallback
-  (`RecipePublisher.kt:73-82`, 20 s cap). The **Edit path drops images**
-  (markdown handoff carries no image tags), so editing forces a device photo.
-- **Error copy, URL mode** (`SousChefViewModel.kt:171-197`), verbatim —
-  hardcoded Kotlin, not in strings.xml:
-  - `success=false`/null recipe → server `error`, else
-    `"Couldn't import a recipe from that link."`
-  - HTTP 429 → `"Too many imports right now — try again in a bit."`
-  - HTTP 400 → parsed server `error`, else
-    `"Couldn't read a recipe from that link."`
-  - other HTTP → `"Import failed (<code>)."`
-  - timeout (`InterruptedIOException`) →
-    `"That site is taking too long — try again in a moment."`
-  - other exception →
-    `"Network error — check your connection and try again."`
-- No kill switch exists on Android; `MEMBERSHIP_LINKOUT_ENABLED` gates only
-  the membership link-out.
-
-## 4. Prefill fit — and one scope decision to make
-
-Android maps the structured response into compose by **serializing to
-canonical markdown** (`souschef/SousChefComposeHandoff.kt:18-36`:
-`"# title\n" + RecipeSerializer.toContent(...)`, with the preview's serving
-multiplier applied via `IngredientScaler.scaleLine`) and calling
-`prefillFromMarkdown`. iOS has the identical variant:
-`RecipeComposeViewModel.prefillFromMarkdown` (`RecipeComposeViewModel.swift:154`)
-reached via `RecipeComposeSession.prefillMarkdown`
-(`wisp/RecipeComposeView.swift:7-18`, applied at `:203-205`), plus
-`RecipeSerializer.toContent` and `IngredientScaler` already ported. **The
-mapping is clean; no parser extension is needed. No stop condition.**
-
-Fields with no home in compose via that path (identical on Android/web —
-deliberate, not a gap): `summary`, `tags`, `imageUrls` (dropped;
-`prefillFromMarkdown` leaves images/categories/summary empty, web parity),
-and the **source page URL** (retained nowhere on any platform's normal path).
-The **direct-Publish** path keeps tags + first image: Android
-`SousChefViewModel.kt:247` (`categories = preview.recipe.hashtags`) →
-`RecipePublisher` single-image overload — whose iOS twin already exists and
-is documented as the "Sous Chef Publish path"
-(`RecipePublisher.swift:80-109`, currently zero callers).
-
-**⚠️ Scope decision.** The prompt's scope line says "recipe lands in
-`RecipeComposeView` prefilled → publishes through the existing path", but
-Android's primary flow is **preview → direct Publish / Save**, with Edit
-(compose prefill) as the third action. Two faithful options:
-
-- **(A) Android parity — recommended.** `SousChefView` = paste field →
-  preview (shared recipe rendering) → Publish (existing
-  `RecipePublisher.publish` single-image overload — its first caller) /
-  Save to my recipes (`RecipeBookmarkRepository`) / Edit (→
-  `.prefillMarkdown`). Keeps imported image + tags on the publish path; no
-  publisher changes; matches "behavioral spec: Android".
-- **(B) Literal scope reading.** URL field → straight into compose via
-  `.prefillMarkdown`. Simpler screen, but loses image/tags/summary, the
-  user must add a device photo before publish (photo rule), and
-  `RecipePublisher`'s Sous Chef overload stays dead code. A worse product
-  than Android and than the doc's own Phase 2.5 line ("structured preview …
-  Save routes into 2.4").
-
-I'll build **(A)** unless the go-ahead says otherwise. (A serving-multiplier
-control can be trimmed from v1 if we want the smallest faithful screen; the
-handoff scaling then collapses to multiplier = 1.)
-
-## 5. Photo requirement interaction
-
-Two different answers by path, both already true on iOS:
-
-- **Direct publish (preview):** yes — Android treats the imported source
-  image URL as satisfying the requirement **before** re-host
-  (`SousChefPublishConfirm.kt:20-21` computes `hasImage` from the remote
-  URL; re-host is at publish with fallback, `RecipePublisher.kt:73-82`).
-  iOS `RecipePublisher.publish` mirrors this exactly
-  (`RecipePublisher.swift:95-100`: guard on `recipe.image`, then
-  `reHost(...) ?? sourceImage`).
-- **Compose (Edit path):** no — the handoff drops images, and compose's
-  `blockReason` demands ≥1 uploaded photo
-  (`RecipeComposeViewModel.swift:365`). Deliberate Android/web parity.
-  (`addHostedImage(url:)` at `:294` *could* inject the source URL as `.done`,
-  but the compose publish path sends URLs as-is with **no re-host**, so a
-  third-party URL would land in the event without even a re-host attempt —
-  don't do it.)
-
-Under option (A) both behaviors carry over with zero changes to
-`RecipePublisher` or the compose VM validation.
-
-## 6. Live-gate feasibility
-
-**The endpoint is not gated, so the throwaway-key problem does not arise** —
-no key is needed at all. A live test is feasible today:
-
-- `SousChefLiveTests` (opt-in, same pattern as `Nip98LiveRoundTripTests` —
-  sentinel file `wispTests/.souschef_live_enable` or `SOUSCHEF_LIVE=1`,
-  `.tags(.liveNetwork)`): one `POST /api/extract-recipe/public` with a
-  stable real recipe URL, assert `success == true`, non-empty
-  `ingredients`/`directions`, and a decoded `imageUrls`. **No event is
-  published, no key is held, no cleanup is owed** (§7.13 does not apply).
-- Costs/risks to accept: consumes 1 of the shared per-IP 8/hr budget
-  (VM + dev machine may share an egress IP); server-side OpenAI spend;
-  dependence on a third-party site staying up and un-blocked → keep it
-  opt-in, single-shot, never in the default suite.
-
-**Manual gate** (belt-and-braces; the opt-in live test is the primary gate):
-
-1. Launch on the simulator, Recipes tab → purple sparkle (top-right of the
-   header row) → Sous Chef opens as a full-screen cover: sparkle + title,
-   two header lines, URL field with paste button, disabled "Get Recipe".
-2. Paste `https://www.bonappetit.com/recipe/bas-best-chocolate-chip-cookies`
-   → button reads "🤖 Get Recipe" (purple, enabled); keyboard return key
-   is **Go**.
-3. Tap it → in-button spinner + "Fetching and extracting recipe from
-   URL..." + centered spinner below the divider; field and paste disabled.
-4. Preview: hero image, title, summary, Prep/Cook/Servings chips, ½×–3×
-   scale row (2× doubles ingredient quantities and the Servings chip),
-   ingredients, numbered directions; Publish / Save to my recipes / Edit /
-   Discard below a divider. No byline, no engagement bar.
-5. Publish → confirm dialog "Publish recipe?" with the Android copy; confirm
-   → spinner in the button → lands on the recipe detail; **§7.13**: delete
-   the published test recipe from detail afterwards.
-6. Save to my recipes → "Save to My Kitchen?" honest confirm → toast
-   "Saved to My Kitchen" → recipe detail; recipe appears in My Kitchen →
-   Saved. Delete afterwards (removes it; Saved-list entry goes stale-benign).
-7. Edit → compose opens prefilled (title/ingredients/directions/details;
-   photos + categories empty, publish button names the block reason);
-   Close → back to the preview.
-8. Paste a non-URL ("hello") → button stays "Get Recipe", disabled.
-9. Kill switch: flip `sousChefImportEnabled` to `false`, rebuild → no
-   sparkle in the Recipes header.
-10. Watch-only account: preview shows "Sign in to publish or save this
-    recipe."; Publish/Save disabled, Edit enabled.
-
-## 7. Fixtures
-
-**No recorded HTTP fixtures exist in the frontend** — its tests `vi.mock`
-`parseRecipe` with an all-empty `MOCK_RECIPE`
-(`src/routes/api/extract-recipe/extract-recipe.server.test.ts:34-45`;
-`src/test/fixtures/` is grocery/mealplan only). Provenance for ours:
-
-1. **Hand-built from the typed contract** — `NormalizedRecipe` in
-   `parseRecipe.server.ts:69-80` (mirror `anonImport.ts:20-42`), field names
-   already validated live by Android (`ZapCookingApi.kt:886-899` doc
-   comment: "validated live"). This is the primary source.
-2. **One-shot live capture** — `curl` against `/api/extract-recipe/public`
-   with a real URL to snapshot a genuine body (spends one rate token; no
-   PII in the response). Nice-to-have to cross-check field casing.
-3. Error shapes straight from server source: `{success:false,error,code}`
-   (`+server.ts:200-208`, codes `extractErrors.ts:26-37`), the code-less
-   429 body (`ipRateLimit.server.ts:118,128`), and the `INTERNAL` catch-all
-   (`+server.ts:209-217`).
-
-Fixture set (≥3): **clean** (full recipe, multiple imageUrls), **partial**
-(empty title + empty ingredients, non-empty directions — exercises
-blank→nil and the no-warning preview), **error** (`SOURCE_BLOCKED` with
-copy), plus the **429-no-code** body for the taxonomy path.
-
-**Real-site inputs the web version is known to handle** (the UA-fix comment,
-`parseRecipe.server.ts:199-206`, names the sites that were specifically
-unblocked): `allrecipes.com`, `bonappetit.com`, `cooking.nytimes.com`.
-There is no allowlist — any public http(s) URL passes the SSRF guard
-(`src/lib/urlGuard.server.ts`).
-
-## 8. Files to create / modify (all new files under `wisp/`/`wispTests/` — zero pbxproj diff expected)
-
-| File | Action | Content |
+| Entry point | Location | Transport |
 |---|---|---|
-| `wisp/ZapCookingApi.swift` | modify | `extractRecipeFromUrl(url:)` → `POST /api/extract-recipe/public` on `HttpClientFactory.computeClient` through the existing `post(path:body:client:)` + `throwErrorIfNeeded` spine; DTOs `ExtractUrlRequest`, `ExtractRecipeResponse`, `NormalizedRecipe` (all-defaulted, Android parity); `toRecipe()` mapping → `RecipeParser.Recipe` (blank→nil). **No NIP-98 on this call** — Android sends none and the endpoint ignores auth; §2 note updated accordingly. |
-| `wisp/SousChefView.swift` | new | §8-named screen: paste field + clipboard button, URL detection, loading state (Android copy), preview via existing recipe rendering, Publish / Save / Edit actions, error text per §3 copy. Entry hidden when kill switch off. |
-| `wisp/SousChefViewModel.swift` | new | State machine (idle/loading/preview/error/publishing), error mapping from `ZapCookingApiError` → Android's copy per class (timeout → "That site is taking too long…" — asserts computeClient in play), re-entrancy guard (fixing Android's known gap at `SousChefViewModel.kt:166-169`). |
-| `FeatureFlags.swift` | modify | `static let sousChefImportEnabled: Bool = true` (fourth switch). Gating goes through a testable pure helper so "off → hidden" is assertable. |
-| `wisp/RecipeFeedView.swift` | modify | Entry point: trailing sparkle button in the Recipes-tab header (`header` HStack has a free trailing slot, `wisp/RecipeFeedView.swift:49-67`) — the iOS stand-in for Android's Intelligence-menu placement on RecipeFeedScreen. |
-| `MainView.swift` | modify | Present `SousChefView` (fullScreenCover, same pattern as `showRecipeCompose` at `:787`), route Edit → `RecipeComposeSession.prefillMarkdown`, Publish success → `RecipeRoute` push. |
-| `wispTests/SousChefTests.swift` | new | Hermetic: decoding over the ≥3 fixtures + 429-no-code; structured→`RecipeParser.Recipe` mapping (blank→nil); structured→markdown handoff → `prefillFromMarkdown` round-trip; service-uses-computeClient assertion (refactor to `generalClient` fails); kill-switch-off → entry hidden; the 7 not-yet-pinned extract codes through `apiRejected`. |
-| `wispTests/SousChefLiveTests.swift` | new | Opt-in live extraction per §6 (no key, no cleanup). |
-| `ZAPCOOKING_IOS_BUILD.md` | modify | §2 corrections (§1 above), §8 rows for the new files, 2.5 phase note. |
+| `GroupRelayPool.subscribe(relayUrl:filter:subId:)` | `GroupRelayPool.swift:94-110` | own socket-per-relay (`RelayState`) |
+| `RelayPool.subscribe(relays:filter:id:)` | `RelayPool.swift:180-192` | `RelayConnectionPool`/`RelayConn` |
+| `RelayPool.subscribe(queries:id:)` (outbox) | `RelayPool.swift:197-210` | same |
+| `RelayPool.stream(queries:)` (one-shot) | `RelayPool.swift:136-173` | same |
+| `RelayPool.query`/`queryDetailed` (one-shot) | `RelayPool.swift:77-130` | same |
 
-Not touched (per stop conditions): `RecipePublisher.swift` (its Sous Chef
-overload is consumed as-is), `Nip98*`, wallet/zap path, pbxproj.
+`GroupRelayPool.subscribe` call sites — exactly two:
+- `GroupListViewModel.swift:86` (five subs per group: msg/meta/admins/members/react, built at `:74-96`; `ensureRelay` first at `:70`).
+- `DraftsViewModel.swift:152` (scheduled posts against `wss://scheduler.nostrarchives.com`, `DraftsViewModel.swift:16`; preceded by the no-op-on-fresh-connect `waitForAuthIfNeeded` at `:144`, then a fixed 10s collect window `:161`).
 
-## Deviations from the prompt's assumptions, called out
+Other `GroupRelayPool` users (not subscribe): `ComposeViewModel.swift:1261-1262` and
+`DraftsViewModel.swift:180-181` (`ensureRelay` + `publishWithAuthRetry`),
+`GroupRoomViewModel.swift:116,180` (`publish`), `AppDataWipe.swift:24` (`shutdownAll`).
 
-1. **"`SousChefImportService` … with NIP-98"** — dropped: the URL endpoint
-   takes no auth (Android sends none; server ignores it). The call lives in
-   `ZapCookingApi` per §8's 1:1 file mapping. computeClient + 0.7a taxonomy
-   + 75 s timeout all apply as specified.
-2. **Non-member state / gate logic tests** — vacuous for URL-only scope
-   (§2). The `owner:true` machinery stays untouched; gate tests deferred to
-   the P2 image/text concern where they become meaningful.
-3. **"Paste or share a URL"** — Android has no share-sheet entry; per
-   "entry point per Android" this ships paste-only. (iOS's existing
-   ShareExtension routes shared URLs to the note composer; retargeting
-   recipe URLs to Sous Chef would be new behavior with no Android
-   precedent — flagged as a possible follow-up, not built here.)
-4. **Preview screen vs straight-to-compose** — §4 decision, recommending
-   Android parity (A).
+`RelayPool.subscribe` call sites (blast radius only if `RelayConn` is touched — §6):
+`FeedViewModel.swift:865,1190`, `MessagesViewModel.swift:54` (DMs),
+`DmConversationViewModel.swift:156`, `NotificationsViewModel.swift:560-618` (5 subs),
+`MuteRepository.swift:226`, `ThreadViewModel.swift:968,1119`,
+`NwcWallet.swift:138` (**wallet**), `PollTallyRepository.swift:399`,
+`EngagementRepository.swift:457`, `ArticleViewModel.swift:109-110`,
+`wisp/Live/LiveStreamViewModel.swift:64-74`, `wisp/Live/LiveStreamCoordinator.swift:30-38`.
+
+**Which pool will Nourish go through:** Nourish (3.5) is unbuilt; nothing binds it to
+`GroupRelayPool`. As a bounded one-shot read it fits `RelayPool.query`/`queryDetailed`
+— and given F-1, that path already works today, unauthenticated, provided the filter
+pins `authors=[NOURISH_SERVICE_PUBKEY]` and `kinds=[30078]` **exclusively** (the relay
+rejects any broader shape back to auth-gated). Recommendation: 3.5 should use
+`RelayPool.queryDetailed` with a relay-side-public filter; issue #6's fix is then for
+groups + member app-data, not a Nourish prerequisite.
+
+### `subscribe` → REQ on the wire (GroupRelayPool)
+
+1. `subscribe` requires `relays[relayUrl]` to already exist (`:95-97`); otherwise it
+   returns an **already-finished empty stream** — a second silent-empty hazard for
+   any caller that forgets `ensureRelay`. (Both current callers call it.)
+2. Registers `SubscriptionState` + filter JSON (`:99-102`), then `sendREQ`
+   **immediately** (`:103` → `:346-353`) — fire-and-forget `socket.send`, no auth
+   consult, no connect-state consult (URLSession queues sends made while connecting;
+   if `state.socket` is nil the payload is **silently dropped**, `:351`).
+
+### Every write to `isAuthenticated` (GroupRelayPool)
+
+| Line | Value | Trigger |
+|---|---|---|
+| `GroupRelayPool.swift:187` | `false` | `connect()` (fresh or reconnect) |
+| `GroupRelayPool.swift:215` | `false` | `tearDown()` (release/shutdown) |
+| `GroupRelayPool.swift:235` | `false` | `scheduleReconnect()` |
+| `GroupRelayPool.swift:336` | `true` | `authenticate()` — immediately after the AUTH frame is **enqueued** (fire-and-forget send; not even send-completion, let alone the relay's `OK`). Also resumes all `authCompletionContinuations`. |
+
+Believed claim confirmed, with one precision fix: for **watch-only** accounts
+`authenticate` does *not* bail on the `guard let keypair` (`:330`) — watch-only is
+`Keypair(privkey: "", pubkey:)` (`NostrKey.swift:70-76`), which is present in
+`state.keypair`. The failure is `Schnorr.sign` throwing on the empty key
+(`Nip42.swift:17-18` → `NostrEvent.swift:110` → `Schnorr.swift:7`), caught at
+`GroupRelayPool.swift:339-341`. Net effect identical (no AUTH, no error surfaced),
+but the doc/issue wording "bails on a missing keypair" is imprecise.
+
+### The CLOSED handler (GroupRelayPool.swift:305-318)
+
+- Detects auth by substring `reason.contains("auth-required")` (`:311`). Does not
+  recognize `restricted:` (see F-6) — every CLOSED replays.
+- auth-required → unstructured `Task` sleeps a fixed 2s, then `replayREQ` (`:361-365`,
+  guarded only on subscription existence — not on socket identity or auth state, so a
+  replay can land on a fresh unauthed or dead socket).
+- **Replay is not bounded**: khatru re-sends the AUTH challenge and re-CLOSEs on every
+  rejected replay (`utils.go:15-23`), so a never-succeeding AUTH is an infinite
+  2s-period loop; a `restricted:` rejection is an infinite zero-delay loop.
+
+## 2. The write path (which works)
+
+- `GroupRelayPool.publishWithAuthRetry` (`:141-153`): `waitForAuthIfNeeded(5s)` →
+  `publish(10s)` → on `.authRequired` wait again and retry once (bounded: 1 retry).
+- `publish` (`:119-137`) awaits **the relay's `OK` for the published event**,
+  correlated via `pendingPublishes[event.id]` (`:123`, resolved in the OK handler
+  `:280-298`), with a real timeout task. This per-event-id OK correlation is exactly
+  the machinery the AUTH `OK` needs and doesn't have.
+- `waitForAuthIfNeeded` (`:158-173`): returns immediately if `isAuthenticated`
+  (set-on-send, so lies) **or if no challenge has arrived** (`:161`) — per F-3 that
+  makes it a no-op on every fresh khatru connection. The write path actually works
+  because `publish` observes the per-event `OK false auth-required` *after* the
+  challenge exchange has been provoked, then retries — not because the wait works.
+- Reusable by reads? The awaiting primitive (`authCompletionContinuations` +
+  `awaitAuth`, `:175-180`) is read-usable as-is and embeds no write-only assumptions
+  — but it resumes on *send*, inheriting defect 3. Fixing when it resumes (on `OK`)
+  fixes both paths at once. The `RelayPool.publish` one-shot AUTH dance
+  (`RelayPool.swift:255-289`) is per-event/ephemeral-socket and not reusable.
+
+## 3. Reconnect (GroupRelayPool)
+
+Torn down vs. survives on a drop (`scheduleReconnect`, `:228-243`): socket/session
+destroyed; `isAuthenticated`/`lastChallenge` cleared (good — Android's stale-flag bug
+is not present); `subscriptions` and `subscriptionFilters` **survive** (streams stay
+open); `pendingPublishes` survive (die by their own timeouts). Backoff 2^n capped 30s.
+Full `tearDown` (`:209-226`, release/logout only) finishes every stream and resumes
+all auth waiters unconditionally — note a watch-only caller awaiting auth is resumed
+*successfully-looking* here; nothing distinguishes "authed" from "gave up".
+
+Actual reconnect order (`connect`, `:184-207`):
+
+```
+socket created + resume()                        :189-193
+  └─ REQ replay for EVERY filter (synchronous)   :196-198   ← before reader exists
+reader task started                              :200-204
+  └─ relay: ["AUTH", challenge] then ["CLOSED", subId, "auth-required…"] per sub
+       ├─ AUTH frame  → sign + send + isAuthenticated=true (on send)   :329-342
+       └─ CLOSED      → unstructured Task: sleep 2s → replayREQ        :305-318
+            └─ khatru processed our AUTH in-order first ⇒ replay served
+               (unless OK was false ⇒ loop forever, F-5b)
+```
+
+So defect 4 confirmed: **filter replay always precedes AUTH** by construction — but
+note khatru *cannot* challenge before a REQ (F-3), so the fix is not "AUTH first,
+then REQ" literally; it is "REQ may provoke; replay only after AUTH acceptance."
+
+Races: all mutations are actor-isolated (no data race), but the CLOSED replay
+`Task` (`:312`) is unstructured and can interleave with a concurrent reconnect —
+firing a replay onto a fresh unauthed socket (converges only via relay re-challenge)
+or a nil socket (silently dropped, `:351`), and can duplicate `connect()`'s own
+replay of the same subId. On `RelayConn` the equivalent ordering is: fresh socket →
+replay all REQs (`RelayPool.swift:537`) → AUTH frame → sign/send → replay all REQs
+again (`:611`); serial receive loop, no task race; CLOSED auth-required is ignored
+(sub kept, `:590-597`) — which works against khatru's AUTH-before-CLOSED frame order,
+observed in the probe.
+
+One extra note: `ensureRelay` refreshes `state.keypair` (`:64`) but an already-open
+socket keeps its relay-side authed pubkey; on account switch, if the pool is not
+`shutdownAll`'d, subsequent activity rides the *old* identity's auth. (Logout wipes
+via `AppDataWipe.swift:24`; account-switch path not verified — flagging, not owning.)
+
+## 4. AUTH `OK` handling
+
+- **Not parsed on either stack.** `GroupRelayPool`'s OK handler (`:280-298`) only
+  consults `pendingPublishes` keyed by *published* event id; `authenticate()`
+  discards the signed AUTH event after sending, so the id is never retained and the
+  relay's `["OK", authEventId, …]` matches nothing and is dropped. `RelayConn`
+  ignores OK frames entirely on the sub path (`RelayPool.swift:614-615`), and
+  `respondToAuthChallenge` returns send-success (`:61-73`).
+- Correlation is straightforward: `Nip42.buildAuthEvent` returns the signed event
+  (`Nip42.swift:11-20`) — retain `event.id`, resolve on the matching OK. khatru
+  guarantees the OK, true or false (`handlers.go:296-298`). Confirmed root of
+  "set on send".
+
+## 5. Android reference
+
+- `collectAuthCompleted` (`GroupListViewModel.kt:121-134`): collects the
+  `RelayPool.authCompleted` `SharedFlow` (`RelayPool.kt:244-246`); on an emission for
+  a relay hosting joined groups, re-sends all group REQs (`sendGroupReqs`).
+- **What it awaits — precision:** Android emits `authCompleted` and adds to
+  `authenticatedRelays` immediately after the AUTH event is *sent*
+  (`RelayPool.kt:592-595` tier-1, `:608-611` tier-2) — **Android also marks on send,
+  not on `OK`**. Issue #6's "do not mark authed until accepted" goes beyond the
+  Android reference; it's still the right call (khatru OKs the auth event, and
+  `OK false` is the invisible failure mode), but the report should not claim Android
+  does it. Android *does* clear `authenticatedRelays` on every disconnect
+  (`RelayPool.kt:569,1049,1143,1202,1261`).
+- Android's actual pantry-read machinery is `AuthedRelayReader`
+  (`relay/AuthedRelayReader.kt`): bounded loop (`maxAttempts=3`) of
+  await-connected → REQ → race(EOSE | CLOSED-auth | timeout); on auth-CLOSED, poll
+  `isAuthenticated` up to 8s then retry the REQ; on timeout, retry only if
+  `reconnectGeneration` changed. Note `isAuthRequired` treats **`restricted`** the
+  same as `auth-required` (`:121-123`).
+- **Watch-only on Android:** no signer registered → `collectAuthChallenges` drops the
+  challenge (`RelayPool.kt:580` — `authSigner ?: return@collect`); relay-layer result
+  is the same silent empty as iOS. Android avoids the UX hole one layer up by gating
+  Nourish/publish/NIP-98 features on "account has a signing key" (doc Gate 0-D).
+
+## 6. Blast radius
+
+Direct (consumers of `GroupRelayPool.subscribe` — affected by the fix):
+
+| Consumer | Effect of subscribe-awaits-AUTH | Immediate-REQ reliance |
+|---|---|---|
+| `GroupListViewModel.swift:86` (NIP-29 groups) | Intended beneficiary. No spinner keyed on first event found — stream-fed UI. **Caveat:** public groups are readable *without* auth (`relay/main.go:719-731`), so watch-only must NOT be pre-emptively refused by account type; `.authUnavailable` may only surface when the relay actually auth-gates the filter. | none |
+| `DraftsViewModel.swift:143-162` (scheduled posts) | Has a **fixed 10s collect window** after subscribe; an unbounded await inside `subscribe` would silently eat the window. The await must be bounded and the existing `waitForAuthIfNeeded` call at `:144` (currently a no-op, F-3) should become meaningful or be removed. | fixed-window collect |
+| `GroupRoomViewModel`, `ComposeViewModel` | publish-only (`publishWithAuthRetry`) — untouched; benefits indirectly from a truthful `isAuthenticated`. | — |
+
+Indirect (only if the fix also touches `RelayConn` — **recommend it does not**, this PR):
+every `RelayPool.subscribe/query/stream` consumer listed in §1, including
+**`NwcWallet.swift:138`** (NWC wallet subscriptions ride `RelayConn`) and the DM
+inbox (`MessagesViewModel.swift:54`, NIP-17 relays incl. AUTH-required
+`wss://auth.nostr1.com` — currently recovers per the 0-H analysis, verified against
+`RelayPool.swift:590-612`). Touching `RelayConn` would put wallet and DM behavior in
+scope — brushing two stop conditions. `RelayConn`'s shared send-vs-accept weakness
+should be a documented follow-up issue, not part of this diff. The 3.1b/3.2 sessions
+(`RecipeBookmarkRepository.swift:398,807`, `NoteListRepository.swift:28`,
+`RecipeRepository` queries) are all one-shot `RelayPool.query*` — unaffected.
+Spam-filter inputs (`SafetyFilter`/NSpam) consume events post-delivery; no REQ-timing
+dependency.
+
+**Confirmed the fix does not need to touch** `SparkWallet` (Spark SDK, no relay
+pool), the zap/NIP-57 path (`ZapSender` uses one-shot `RelayPool.publish`), `Nip98`
+(HTTP), or `RecipePublisher` (publish path; its pantry mirror is 30023, which
+pantry's write gate exempts from AUTH — `relay/main.go:487-515`, and
+`RecipePublisher.swift:68-70` documents it). No stop condition triggered.
+
+## 7. Proposed design (proposal only — nothing implemented)
+
+Per-relay auth state machine (replaces `isAuthenticated: Bool` + `lastChallenge`):
+
+```
+                 ┌── socket opens ──────────────────────────────┐
+ disconnected ──►│ connected(unauthed)                          │
+                 │   │  AUTH challenge frame                    │
+                 │   ▼                                          │
+                 │ challenged ── sign+send, retain authEventId ─► authPending(id)
+                 │   │ sign throws (watch-only/bad key)         │   │ OK(id,true)   ▼
+                 │   ▼                                          │   ▼          authenticated
+                 │ authUnavailable (terminal per connection)    │ OK(id,false) → authFailed(reason)
+                 └── any disconnect → disconnected (clear challenge, id, state) ──┘
+```
+
+- **`isAuthenticated` ⇒ `.authenticated`, flipped only on `OK(authEventId, true)`.**
+  `authenticate()` retains the AUTH event id; the OK handler resolves it (reusing the
+  `pendingPublishes`-style correlation). Auth waiters resume on `authenticated`,
+  `authFailed`, or `authUnavailable` — with a *distinguishable* outcome, unlike
+  today's `tearDown` blanket resume.
+- **`subscribe` stays optimistic** (F-3: the REQ provokes the challenge) but becomes
+  outcome-aware: on `CLOSED auth-required` → if `authUnavailable`, finish the stream
+  with an explicit `.authUnavailable`; else await auth completion (event-driven on
+  the OK, bounded ~10s), then replay — **bounded total replays (3, matching
+  Android's `maxAttempts`), no fixed 2s sleep**. `CLOSED restricted:*` → surface
+  `.closed(reason)`, **never replay** (fixes F-6). Relays that never challenge
+  behave exactly as today.
+- **Reconnect:** `connect()` no longer replays filters unconditionally before the
+  reader exists. Order: open socket → start reader → send REQs (provokes challenge
+  where needed) → on `OK(auth, true)` replay all filters once. The post-OK replay is
+  the recovery mechanism and is ordered after acceptance on the actor — no race with
+  the CLOSED path because CLOSED no longer self-replays on a timer.
+- **Surface / watch-only hook:** `subscribe` returns a stream of a small enum
+  (working name `GroupSubEvent`: `.event(NostrEvent)`, terminal
+  `.authUnavailable`, terminal `.closed(reason)`) — or equivalently
+  `AsyncStream<NostrEvent>` plus a completion reason; exact shape amendable. The
+  classification mirrors `RecipeSaveGate` (`wisp/BookmarkActionTarget.swift:24`):
+  the pool reports transport truth; the feature layer maps `.authUnavailable` to the
+  established `.needsKey` toast pattern (`RecipeSaveActions.needsKeyMessage` family)
+  rather than inventing a parallel watch-only state. Determination is **by relay
+  response, not by account type** (public groups must keep working watch-only). This
+  is the hook for Gate 0-D and for any future members-only read; basic Nourish reads
+  don't need it (F-1).
+
+### Tests
+
+Hermetic (require a transport seam — `GroupRelayPool` currently hardwires
+`URLSession`; injecting a socket protocol is Phase 2 work, `#require` throughout):
+
+1. `authSend_withoutOK_doesNotAuthenticate` — pre-fix fails: flag is true at `:336`
+   before any OK.
+2. `authOKFalse_yieldsAuthFailed_andStopsReplaying` — pre-fix fails: OK false is
+   ignored; replay loops.
+3. `closedAuthRequired_awaitsAcceptThenReplays_bounded` — pre-fix fails: replay fires
+   after a wall-clock 2s regardless of auth state, unboundedly.
+4. `closedRestricted_neverReplays_surfacesReason` — pre-fix fails: hot replay loop
+   (F-6).
+5. `reconnect_replaysFiltersOnlyAfterAuthOK` — pre-fix fails: `connect()` replays at
+   `:196-198` before the reader exists.
+6. `watchOnly_authGatedSub_yieldsAuthUnavailable` — pre-fix fails: stream stays open
+   and silently empty.
+7. `watchOnly_publicFilter_stillDelivers` — guards against the wrong fix (pre-emptive
+   refusal by account type); passes pre-fix, must still pass post-fix.
+
+Live gates (cloud VM, sentinel-file pattern, I write / VM runs):
+- Throwaway signing key vs `wss://pantry.zap.cooking` member-gated filter → sequence
+  logged REQ → AUTH → OK(true) → replay → `CLOSED restricted` → explicit terminal
+  state, ≤3 replays. (A throwaway key *can* AUTH; it fails on membership — the
+  explicit-state assertion is on `restricted`, and `.authUnavailable` is exercised by
+  the watch-only variant with no key material at all.)
+- Member key → subscribe delivers events; challenge → AUTH → OK → replay-REQ sequence
+  in the log. **Member key supply:** read at runtime from an env var / VM-local
+  keychain item named in the sentinel shell block Seth writes; the test skips (not
+  fails) when unset; never in the repo, never in `GATE.md`.
+- Socket killed mid-subscription → reconnect log matches the §7 ordering.
+- Each live gate would fail pre-fix on: unbounded replays (1), missing post-OK replay
+  ordering (2, 3), no explicit terminal state (1).
+
+### Doc corrections Phase 2 owes (`ZAPCOOKING_IOS_BUILD.md`)
+
+- `:390-391` and `:1156-1157`: pantry no longer AUTH-gates public-Nourish or recipe
+  reads (member-relay `feat/open-writes` + `isPublicNourishFilter`; probe-verified).
+  Issue #6 is a member-content/groups prerequisite, not a Nourish-read blocker.
+- §7.1: "authenticate bails on a missing keypair" → actually present-but-empty
+  privkey; the sign throws (`:339`). Same effect, different mechanism.
+- §5 Android reference: `collectAuthCompleted` re-fires on AUTH **send**, not accept
+  — "mark on OK" is an iOS improvement over Android, not a port.
+- `:249` inherited-capabilities row still oversells "NIP-42 with auth-required
+  retry" (writes only — §7.1 already says so; the table row should cross-reference).
+
+---
+
+**Stop-condition review:** none triggered. No wallet/zap/NIP-98/publisher change
+needed (recommended scope excludes `RelayConn`); the two subscribe paths are now
+mapped and Nourish's is clear (`RelayPool.query`, public filter); the AUTH OK is
+correlatable by event id; DM behavior is untouched; no pbxproj involvement
+(all edits in existing root files + new tests under `wispTests/`).
+
+**Open question for go-ahead (doesn't block):** should `RelayConn`'s send-vs-accept
+weakness become its own tracked issue now, so the PR description can point at it?
