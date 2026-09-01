@@ -77,7 +77,14 @@ have already accepted the plugin do not need the flag.
 | **536** | `@Test` annotations on disk. Includes the five skipped live tests (NIP-98, recipe-publish, recipe-compose, saved-list, NIP-56). Not a pass count. |
 
 The five live network tests are opt-in and **skipped** in the default run (so
-they do not add a pass or a network dependency). Future hermetic gate reports
+they do not add a pass or a network dependency). **Gate criterion on the
+MacinCloud box (C-G, 2026-09-01): main's failure set is four — #4 plus three
+`SafetyTests` (`notificationDropsReplyInBlockedSubThread`,
+`notificationIngestZapJudgedByResolvedActor`,
+`purgeNonWotQualifiedScrubsInMemoryItems`).** That set is environmental
+(issue #57): the same commit run serially on a MacBook Air passes every
+SafetyTests case with only #4 failing. Judge a concern against the box's
+four; a fifth failure is the concern's. Future hermetic gate reports
 compare against **530/1**. Post-2.4-open was 529/1; post-4.1 was 508/1; post-3.1 was 488/1; post-3.1-pre-review was 484/1;
 post-HiddenRecipes / post-2.3 was 468/1; post-1.8b was 430/1; post-0.6
 was 194/1.
@@ -554,6 +561,12 @@ In 2023 Apple forced Damus to remove **zaps on posts**, treating tips connected
 to digital content as IAP-requiring; zaps at the **profile** level were allowed.
 
 The practical landscape has moved since. <cite index="18-1">Primal ships a built-in non-custodial Lightning wallet on iOS and its zap support is central to the app</cite>, and <cite index="20-1">Primal v3.0 in March 2026 added zap-based poll voting and NIP-47 NWC wallet support</cite> — so post-level zaps are evidently being approved in practice today. But that is precedent-by-observation, not a written guideline change, and review is uneven.
+
+**Precedent on record (C-G, 2026-09-01):** upstream Wisp — the fork this app
+is built on — ships post-level zaps on the App Store today, and so does
+Primal. `FeatureFlags.zapsOnPosts` ships **`true`**; the `ZapGate` seam is a
+contingency, not a decision to remove them. If 3.1.1 is ever raised, that
+precedent is the argument, and the flip is the fallback.
 
 **Ruling: ship zaps, but behind a kill switch.** Mirror Android's
 `MEMBERSHIP_LINKOUT_ENABLED` pattern with a compile-time flag
