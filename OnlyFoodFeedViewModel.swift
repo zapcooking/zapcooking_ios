@@ -94,6 +94,7 @@ final class OnlyFoodFeedViewModel {
     @ObservationIgnored private var sweepSourceId: UUID?
     @ObservationIgnored private var followsObserver: NSObjectProtocol?
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
+    @ObservationIgnored private var publishObserver: NSObjectProtocol?
 
     @ObservationIgnored private let filter: OnlyFoodFilter
     @ObservationIgnored private let follows: () -> [String]
@@ -139,6 +140,9 @@ final class OnlyFoodFeedViewModel {
         if let hideObserver {
             NotificationCenter.default.removeObserver(hideObserver)
         }
+        if let publishObserver {
+            NotificationCenter.default.removeObserver(publishObserver)
+        }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
         }
@@ -172,6 +176,7 @@ final class OnlyFoodFeedViewModel {
         ensureProfileUpdatesSubscription()
         observeFollowsChanges()
         observeContentHidden()
+        observeOwnPublishes()
         let mode = self.mode
         let st = stateOf(mode)
         if !st.loaded {
@@ -506,6 +511,56 @@ final class OnlyFoodFeedViewModel {
             st.placedIds.subtract(eventIds)
         }
         emitCurrentMode()
+    }
+
+    // MARK: - Own publishes (Concern C-H)
+
+    /// `.nostrEventPublished` → ``insertOwnPublished(_:)``. Same shape as the
+    /// `contentHidden` observer; `FeedViewModel.observeOwnPublishes` is the
+    /// home-tab precedent.
+    private func observeOwnPublishes() {
+        guard publishObserver == nil else { return }
+        publishObserver = NotificationCenter.default.addObserver(
+            forName: .nostrEventPublished, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let event = note.userInfo?["event"] as? NostrEvent else { return }
+            MainActor.assumeIsolated {
+                _ = self?.insertOwnPublished(event)
+            }
+        }
+    }
+
+    /// Optimistic insert of the user's own freshly published kind-1 into the
+    /// per-mode caches — **no relay query** (§7.4). The note goes through the
+    /// exact `accept` the relay ingest uses: it must carry a ``FoodHashtags``
+    /// `t` tag, pass the mute / structural filter, and (Following) come from
+    /// a followed author. A note that would not come back from the relay is
+    /// not painted either — that is what makes the "post, then see it" gate
+    /// honest rather than cosmetic. Placed at the top: `mergeFeedOrder` only
+    /// appends unplaced ids on a settled mode, and re-sorts by `createdAt`
+    /// on an unsettled one, so the newest note lands first either way.
+    ///
+    /// Returns the modes the note was inserted into (tests).
+    @discardableResult
+    func insertOwnPublished(_ event: NostrEvent) -> [Mode] {
+        guard event.pubkey == pubkey, event.kind == 1 else { return [] }
+        var inserted: [Mode] = []
+        for mode in Mode.allCases {
+            let st = stateOf(mode)
+            guard st.seen[event.id] == nil else { continue }
+            let followsSet: Set<String>? = (mode == .following) ? Set(follows()) : nil
+            guard accept(event, follows: followsSet) else { continue }
+            st.seen[event.id] = event
+            if st.settled {
+                st.ordered.insert(event, at: 0)
+                st.placedIds.insert(event.id)
+            }
+            inserted.append(mode)
+        }
+        guard !inserted.isEmpty else { return [] }
+        if inserted.contains(self.mode) { emitCurrentMode() }
+        observeProfiles(in: [event])
+        return inserted
     }
 
     private func observeFollowsChanges() {
