@@ -254,11 +254,34 @@ no key is needed at all. A live test is feasible today:
   dependence on a third-party site staying up and un-blocked → keep it
   opt-in, single-shot, never in the default suite.
 
-**Manual gate** (belt-and-braces, will be written into this file under
-"Manual gate" during Step 2): simulator run — paste an AllRecipes URL →
-loading copy → preview with image/title/ingredients → Publish blocked only
-per rules → (optionally) publish + delete per §7.13 if we exercise the live
-publish, otherwise stop at the preview.
+**Manual gate** (belt-and-braces; the opt-in live test is the primary gate):
+
+1. Launch on the simulator, Recipes tab → purple sparkle (top-right of the
+   header row) → Sous Chef opens as a full-screen cover: sparkle + title,
+   two header lines, URL field with paste button, disabled "Get Recipe".
+2. Paste `https://www.bonappetit.com/recipe/bas-best-chocolate-chip-cookies`
+   → button reads "🤖 Get Recipe" (purple, enabled); keyboard return key
+   is **Go**.
+3. Tap it → in-button spinner + "Fetching and extracting recipe from
+   URL..." + centered spinner below the divider; field and paste disabled.
+4. Preview: hero image, title, summary, Prep/Cook/Servings chips, ½×–3×
+   scale row (2× doubles ingredient quantities and the Servings chip),
+   ingredients, numbered directions; Publish / Save to my recipes / Edit /
+   Discard below a divider. No byline, no engagement bar.
+5. Publish → confirm dialog "Publish recipe?" with the Android copy; confirm
+   → spinner in the button → lands on the recipe detail; **§7.13**: delete
+   the published test recipe from detail afterwards.
+6. Save to my recipes → "Save to My Kitchen?" honest confirm → toast
+   "Saved to My Kitchen" → recipe detail; recipe appears in My Kitchen →
+   Saved. Delete afterwards (removes it; Saved-list entry goes stale-benign).
+7. Edit → compose opens prefilled (title/ingredients/directions/details;
+   photos + categories empty, publish button names the block reason);
+   Close → back to the preview.
+8. Paste a non-URL ("hello") → button stays "Get Recipe", disabled.
+9. Kill switch: flip `sousChefImportEnabled` to `false`, rebuild → no
+   sparkle in the Recipes header.
+10. Watch-only account: preview shows "Sign in to publish or save this
+    recipe."; Publish/Save disabled, Edit enabled.
 
 ## 7. Fixtures
 
