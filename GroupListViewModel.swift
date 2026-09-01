@@ -84,8 +84,17 @@ final class GroupListViewModel {
             let task = Task { [weak self] in
                 guard let self else { return }
                 let stream = await self.pool.subscribe(relayUrl: relayUrl, filter: filter, subId: subId)
-                for await event in stream {
-                    await self.handleIncoming(event: event, relayUrl: relayUrl, groupId: groupId)
+                for await item in stream {
+                    switch item {
+                    case .event(let event):
+                        await self.handleIncoming(event: event, relayUrl: relayUrl, groupId: groupId)
+                    case .authUnavailable, .authFailed, .notMember, .closed:
+                        // Relay refused this sub (watch-only, rejected AUTH, or
+                        // not a member); the stream is finished. Surfacing to
+                        // the group UI is the feature layer's hook — same
+                        // classification family as `RecipeSaveGate.needsKey`.
+                        return
+                    }
                 }
             }
             tasks.append(task)

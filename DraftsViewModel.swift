@@ -152,9 +152,17 @@ final class DraftsViewModel {
         let stream = await GroupRelayPool.shared.subscribe(relayUrl: relay, filter: filter, subId: subId)
 
         var collected: [String: NostrEvent] = [:]
+        var refusal: String?
         let collectTask = Task { @MainActor in
-            for await event in stream {
-                collected[event.id] = event
+            for await item in stream {
+                switch item {
+                case .event(let event):
+                    collected[event.id] = event
+                case .authUnavailable:
+                    refusal = "Scheduled posts need an account with a signing key."
+                case .authFailed(let reason), .notMember(let reason), .closed(let reason):
+                    refusal = "Scheduler relay refused the query: \(reason)"
+                }
             }
         }
         // Give the relay 10s to deliver everything (matches Android).
@@ -163,6 +171,11 @@ final class DraftsViewModel {
         collectTask.cancel()
 
         scheduledPosts = collected.values.sorted { $0.createdAt > $1.createdAt }
+        // A relay refusal with nothing delivered was a silent empty list
+        // before issue #6 made the state explicit.
+        if scheduledPosts.isEmpty, let refusal {
+            errorMessage = refusal
+        }
     }
 
     /// Sign a NIP-09 deletion (kind 5 with `e`+`k` tags) and send it to the
