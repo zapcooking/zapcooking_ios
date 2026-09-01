@@ -678,18 +678,27 @@ final class RecipeBookmarkRepository {
         keypair: Keypair?
     ) async -> Bool {
         guard keypair != nil else { return isCoordInList(dTag, coord) }
-        if Self.shouldRefuseHiddenAdd(
-            coordinate: coord,
-            currentlySaved: isCoordInList(dTag, coord),
-            desired: desired
-        ) {
-            return isCoordInList(dTag, coord)
-        }
         guard !isWriting else { return isCoordInList(dTag, coord) }
         isWriting = true
         defer { isWriting = false }
         let author = keypair!.pubkey
         let (base, absenceConfirmed) = await resolveCarryForward(author: author, dTag: dTag)
+        // The hidden gate needs the carry-forward truth, not the in-memory
+        // fill: on a cold session `isCoordInList` is false even when the
+        // relay list already holds the coordinate, and feeding that to the
+        // gate turned a toggle-off into a refused "add". Unsave of an
+        // already-stored hidden coordinate must stay allowed — the gate's
+        // own contract — so it runs after the resolve, like every other
+        // membership decision in this type.
+        let currentlySaved = base.map { Self.parseCoordinates($0).contains(coord) }
+            ?? isCoordInList(dTag, coord)
+        if Self.shouldRefuseHiddenAdd(
+            coordinate: coord,
+            currentlySaved: currentlySaved,
+            desired: desired
+        ) {
+            return currentlySaved
+        }
         switch Self.planMutation(
             base: base,
             absenceConfirmed: absenceConfirmed,
