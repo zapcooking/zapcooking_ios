@@ -357,23 +357,27 @@ private struct StreamInfoBar: View {
                 }
             }
             Spacer()
-            Button(action: onZap) {
-                HStack(spacing: 4) {
-                    Image(systemName: "bolt.fill")
-                        .foregroundStyle(Color.wispZapColor)
-                    if zapTotalSats > 0 {
-                        Text(formatSats(zapTotalSats))
-                            .font(.caption.weight(.medium))
-                    } else {
-                        Text("Zap")
-                            .font(.caption.weight(.medium))
+            // Zaps the host with the stream's `a` tag — tied to content, so
+            // it follows the §4.8 post-level kill switch.
+            if ZapGate.postZapVisible() {
+                Button(action: onZap) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(Color.wispZapColor)
+                        if zapTotalSats > 0 {
+                            Text(formatSats(zapTotalSats))
+                                .font(.caption.weight(.medium))
+                        } else {
+                            Text("Zap")
+                                .font(.caption.weight(.medium))
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.wispSurfaceVariant.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.wispSurfaceVariant.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -507,10 +511,13 @@ private struct LiveChatBubble: View {
             } label: {
                 Label("React", systemImage: "face.smiling")
             }
-            Button {
-                onZap()
-            } label: {
-                Label("Zap", systemImage: "bolt.fill")
+            // Zaps the chat message by id — post-level (§4.8 kill switch).
+            if ZapGate.postZapVisible() {
+                Button {
+                    onZap()
+                } label: {
+                    Label("Zap", systemImage: "bolt.fill")
+                }
             }
         }
     }

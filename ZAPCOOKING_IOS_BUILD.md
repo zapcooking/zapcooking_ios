@@ -77,7 +77,14 @@ have already accepted the plugin do not need the flag.
 | **536** | `@Test` annotations on disk. Includes the five skipped live tests (NIP-98, recipe-publish, recipe-compose, saved-list, NIP-56). Not a pass count. |
 
 The five live network tests are opt-in and **skipped** in the default run (so
-they do not add a pass or a network dependency). Future hermetic gate reports
+they do not add a pass or a network dependency). **Gate criterion on the
+MacinCloud box (C-G, 2026-09-01): main's failure set is four — #4 plus three
+`SafetyTests` (`notificationDropsReplyInBlockedSubThread`,
+`notificationIngestZapJudgedByResolvedActor`,
+`purgeNonWotQualifiedScrubsInMemoryItems`).** That set is environmental
+(issue #57): the same commit run serially on a MacBook Air passes every
+SafetyTests case with only #4 failing. Judge a concern against the box's
+four; a fifth failure is the concern's. Future hermetic gate reports
 compare against **530/1**. Post-2.4-open was 529/1; post-4.1 was 508/1; post-3.1 was 488/1; post-3.1-pre-review was 484/1;
 post-HiddenRecipes / post-2.3 was 468/1; post-1.8b was 430/1; post-0.6
 was 194/1.
@@ -555,6 +562,12 @@ to digital content as IAP-requiring; zaps at the **profile** level were allowed.
 
 The practical landscape has moved since. <cite index="18-1">Primal ships a built-in non-custodial Lightning wallet on iOS and its zap support is central to the app</cite>, and <cite index="20-1">Primal v3.0 in March 2026 added zap-based poll voting and NIP-47 NWC wallet support</cite> — so post-level zaps are evidently being approved in practice today. But that is precedent-by-observation, not a written guideline change, and review is uneven.
 
+**Precedent on record (C-G, 2026-09-01):** upstream Wisp — the fork this app
+is built on — ships post-level zaps on the App Store today, and so does
+Primal. `FeatureFlags.zapsOnPosts` ships **`true`**; the `ZapGate` seam is a
+contingency, not a decision to remove them. If 3.1.1 is ever raised, that
+precedent is the argument, and the flip is the fallback.
+
 **Ruling: ship zaps, but behind a kill switch.** Mirror Android's
 `MEMBERSHIP_LINKOUT_ENABLED` pattern with a compile-time flag
 (`FeatureFlags.zapsOnPosts`) that collapses post-level zap affordances to
@@ -601,8 +614,38 @@ Rules that follow from it, and are **not negotiable in v1**:
   will be wrong too. This is a web-repo task that blocks iOS submission.
 - **Age rating**: the Market is 18+ gated on web; the stated app floor is 13+.
   Confirm the rating matches what the app actually exposes.
-- **Encryption export compliance**: the app ships secp256k1, NIP-44, ChaCha20.
-  `ITSAppUsesNonExemptEncryption` must be set correctly in `Info.plist`.
+- **Encryption export compliance** (Concern C-G, 4.5):
+  `ITSAppUsesNonExemptEncryption` = **`true`** in `Info.plist` and
+  `ShareExtension/Info.plist`. Reasoning, so nobody re-derives it:
+  - Apple's definition of `NO`: the app, *including linked third-party
+    libraries*, uses no encryption or only encryption exempt from export
+    documentation — in practice "limited to what the OS provides" (HTTPS via
+    `URLSession`, CryptoKit) or limited to authentication / digital signature
+    / decryption-only / banking / medical / IP-protection uses.
+  - What we ship, and why none of that fits: `ChaCha20.swift` is an in-app
+    implementation of a standard cipher used for **confidentiality** (NIP-44
+    DMs, private lists, the iCloud key backup ciphertext); `swift-secp256k1`
+    (libsecp256k1) does Schnorr signing *and* ECDH conversation keys for
+    NIP-04 / NIP-44; the Breez Spark SDK is a binary Lightning stack with its
+    own crypto. Signing alone would be exempt; encrypting messages is not.
+    Apple's own table: "industry standard algorithm, not provided within the
+    Apple operating system" → non-exempt, French declaration only if
+    distributing in France, no CCATS (that is for proprietary algorithms).
+  - Consequence: the key being present (either value) is what stops the
+    per-upload questionnaire. With `true` and no
+    `ITSEncryptionExportComplianceCode`, expect App Store Connect to ask once
+    per build until the app-level **App Encryption Documentation** is set in
+    App Information (standard algorithms, mass market) — a one-time answer,
+    no Apple review, no code issued for standard algorithms. If a French
+    declaration is filed Apple returns a compliance code; add it to the plist
+    then. Seth's compliance action, outside the app: the annual BIS/NSA
+    **self-classification report** (due 1 February) that mass-market
+    standard-crypto apps owe under License Exception ENC.
+  - The only honest route to `false` is EAR §742.15(b) "publicly available"
+    source (the repo is public) — that requires an email notification of the
+    source URL to BIS and NSA *before* relying on it, and does not obviously
+    cover the Breez binary. Not taken. Nostur ships `false`; Damus sets
+    nothing. Precedent-by-observation, not a reason.
 
 ---
 
@@ -1226,11 +1269,29 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   only (publish-verify-delete, §7.13). **Not wired this PR:** group rooms,
   DMs, live streams. Android `ReportsScreen` (mod inbox) is not ported —
   that is a read surface for admins, not the Guideline 1.2 reporter path.
-- 4.2 In-app account deletion path
-- 4.3 Privacy policy + child-safety links in-app; **web policy corrected first**
+- 4.2 In-app account deletion path. **Investigated, not built** (C-G):
+  Apple's account-deletion guidance requires the user to *initiate* deletion
+  in-app, allows finishing on a web page linked directly, and says apps
+  outside regulated industries "should not require people to … send an
+  email". `zap.cooking/delete-account` — Android's answer — *is* an email
+  flow, so a bare link-out is the thing that guidance names as
+  insufficient. What "delete" can mean on iOS today: `AppDataWipe` (local
+  key + data, keeps `com.wisp.apple-backup`), `KeychainBackupService
+  .deleteBackup` (the iCloud-Keychain blob — the only recovery path),
+  server-side membership/credit records (no API; email-only), NIP-09 /
+  NIP-62 events (advisory). SIWA token revocation: the app never retains an
+  authorization code or refresh token, so there is nothing to revoke and no
+  server to do it. Approach is Seth's call; the About screen is the natural
+  home for the entry.
+- 4.3 Privacy policy + child-safety links in-app — **done** (C-G): drawer →
+  Settings → **About** → Policies (Privacy Policy, Terms of Service, Child
+  Safety Standards), `PolicyLinks` / `AboutView`, same paths as Android's
+  `AboutScreen`, opened in the system browser. The destination privacy
+  policy still carries the two retention claims flagged in §4.4 — **web
+  policy correction pending**, it gates the App Privacy label, not the link.
 - 4.4 App Privacy nutrition label: OpenAI, Blossom, Giphy,
   Cloudflare analytics (IP + coarse location), crash-report DM relays
-- 4.5 `ITSAppUsesNonExemptEncryption`; export compliance
+- 4.5 `ITSAppUsesNonExemptEncryption` = `true`; reasoning in §4.4 — **done** (C-G)
 - 4.6 App Review demo account (a seeded npub with recipes + an active Cook+
   entitlement so reviewers can see gated features work)
 - 4.7 Screenshots, description, keywords, age rating.
@@ -1239,8 +1300,17 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   while you cook." **Do not** claim Lock Screen countdown or Dynamic
   Island until Live Activities (option B) ship. "Keep the screen on"
   is 1.8b (`CookWakeLock`), not 1.8a.
-- 4.8 Kill switches verified: zaps-on-posts flag flips cleanly; no membership
-  link-out anywhere; credit-purchase code not compiled in
+- 4.8 Kill switches verified — **done** (C-G). `zapsOnPosts` was consulted
+  by only two of five post-level surfaces (article / recipe bar) and there
+  it only dropped the `e` tag while keeping the bolt on the content. Now
+  every post-level affordance branches on `ZapGate.postZapVisible()` — the
+  kind-1 card bolt (tap + long-press quick zap), NIP-69 zap-poll vote rows,
+  article / recipe bar, live-stream host zap (`a`-tagged) and chat-message
+  zap — and `ProfileView` is the one surviving zap entry when the flag is
+  off. `membershipLinkoutEnabled` / `noteReviewCreditPurchaseEnabled`: no
+  surface consults them because none exists (no `Cook+` copy, no price, no
+  `zap.cooking/membership` URL, no credit endpoints in `ZapCookingApi`);
+  `ZapGateTests.sellNothingFlagsStayOff` pins them `false`.
 
 ---
 

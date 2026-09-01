@@ -7,6 +7,9 @@ struct PollSection: View {
     let pollEvent: NostrEvent
     var onCastVote: ([String]) -> Void
     var onZapVote: (Int) -> Void
+    /// NIP-69 zap votes are zaps on the poll event — post-level, so they
+    /// follow the §4.8 kill switch. Off: the poll renders its results only.
+    var zapVotingEnabled: Bool = ZapGate.postZapVisible()
 
     @State private var tallyRepo = PollTallyRepository.shared
     @State private var pendingMultiSelections: Set<String> = []
@@ -163,7 +166,7 @@ struct PollSection: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             ForEach(visibleOptions, id: \.index) { option in
-                if showResults {
+                if showResults || !zapVotingEnabled {
                     ZapPollResultRow(
                         label: option.label,
                         sats: tally.satsCounts[option.index] ?? 0,

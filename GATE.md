@@ -1,67 +1,77 @@
-# GATE — concern-c-h/onlyfood-compose @ ca2cdcb
-Concern C-H: kind-1 composer on the OnlyFood tab (FAB → app-level ComposePresenter,
-editor seeded with a visible, removable `#foodstr`; optimistic insert of the
-user's own note). Local build only on Seth's MacBook Air; gates run on the
-MacinCloud box by hand. This file is frozen at "ready for gates"; results are
-recorded in the PR description.
+# GATE — concern-c-g/compliance @ c9e5907
+Concern C-G: Phase 4 compliance surface — 4.3 in-app policy links, 4.5 export
+compliance key, 4.8 kill-switch verification (`ZapGate`), 4.2 investigated only.
+Local build only on Seth's MacBook Air; gates run on the MacinCloud box by hand.
+Frozen at "ready for gates"; results go in the PR description.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build` (generic iOS Simulator) and `build-for-testing` (iPhone 17 Pro): green.
-- Warnings in touched files identical to origin/main (faca9f7) built on the same
-  DerivedData: one pre-existing "reference to captured var 'self'" in
-  OnlyFoodFeedViewModel (main line 519, now 574). Zero new.
-- pbxproj: no diff. New files: wisp/OnlyFoodCompose.swift,
-  wispTests/ComposeSeedTests.swift, wispTests/OnlyFoodComposeTests.swift,
-  wispTests/OnlyFoodOwnPublishTests.swift, wispTests/OnlyFoodComposeLiveTests.swift.
+- `build` (iPhone 17 / OS 26.2): green, flag `true` (shipped) and flag `false`
+  (flip demonstration, reverted before commit).
+- Warnings in touched files: zero new. `LiveStreamView.swift:284` ("captured
+  var self") is byte-identical on origin/main and above every C-G edit.
+- Step 0 (serial hermetic from this primary checkout, existing DerivedData):
+  680 tests / 77 suites, 1 failure = #4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`.
+  All of `SafetyTests` passed, including the three box failures and the local
+  #43 one.
+- pbxproj: no diff. New files: `wisp/ZapGate.swift`, `wisp/AboutView.swift`,
+  `wispTests/ZapGateTests.swift`, `wispTests/PolicyLinksTests.swift`.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout concern-c-h/onlyfood-compose && git pull --ff-only
-~/gate.sh
+git fetch origin
+~/gate.sh concern-c-g/compliance
 ```
 Expected: main's failure set exactly (#4 FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
-plus the three SafetyTests) and +20 new passes:
-ComposeSeedTests (4), OnlyFoodComposeTests (6), OnlyFoodOwnPublishTests (10).
-OnlyFoodComposeLiveTests is skipped unless the sentinel below exists.
+plus the three SafetyTests) and +8 new passes: ZapGateTests (4), PolicyLinksTests (4).
+No live sentinel this concern — nothing here touches a relay.
 
-## Gate 2 — FAB visibility (simulator, by hand)
-1. Launch, OnlyFood tab: pencil FAB bottom-right (accessibility id `new-food-post`),
-   same spot as the Recipes "+" FAB; shifts up when the mini audio player is showing.
-2. Swipe the drawer open from the left edge: FAB gone. Close it: FAB back.
-3. Sign in watch-only (npub): no FAB on OnlyFood (nor on Home / Recipes).
-4. Tap the FAB: composer opens with `#foodstr` on the first line, a `#foodstr` chip
-   above the editor, caret on the third line. Delete the text: chip disappears.
+## Gate 2 — policy links reachable and opening (simulator, by hand)
+1. Launch signed in. Swipe the drawer open → Settings → **About** (last row
+   under Settings, `info.circle`).
+2. Sheet titled "About", section "Policies", three rows in this order:
+   Privacy Policy, Terms of Service, Child Safety Standards
+   (accessibility ids `policy-link-privacy`, `policy-link-terms`,
+   `policy-link-child-safety`). Version line below.
+3. Tap each: Safari opens `https://zap.cooking/privacy`, `/terms`,
+   `/child-safety` — the same pages Android's About → Policies opens. No web
+   view inside the app.
 
-## Gate 3 + 4 — live publish-verify-delete (§7.13, MacinCloud)
-Sentinel: `wispTests/.onlyfood_compose_live_enable` (or `ONLYFOOD_COMPOSE_LIVE=1`).
-No key file needed — the test mints an ephemeral keypair, never prints it, and
-holds it until the kind-5 is accepted and a re-query by id on every relay that
-served the note comes back empty. Content marker `iOS C-H OnlyFood live gate <ts>`
-is not a recipe d-tag and is on no hide list.
+## Gate 3 — export compliance key
 ```sh
-cd /Users/user301940/Development/zapcooking_ios
-touch wispTests/.onlyfood_compose_live_enable
-xcodebuild test -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -parallel-testing-enabled NO \
-  -only-testing:wispTests/OnlyFoodComposeLiveTests \
-  2>&1 | tee ~/c-h-live.log | grep -E "OnlyFoodCompose live:|Test Suite|passed|failed|error:"
-rm wispTests/.onlyfood_compose_live_enable
+plutil -p Info.plist | grep ITSAppUsesNonExemptEncryption
+plutil -p ShareExtension/Info.plist | grep ITSAppUsesNonExemptEncryption
 ```
-Expected lines in ~/c-h-live.log:
-- `publishAccepted=[...]` non-empty (gate 3).
-- No failure on "defaults did not echo the note through the OnlyFood #t filter";
-  the echo passes `FoodHashtags.hasFoodTag` and `OnlyFoodFilter.live().decideKind1 == .accept`
-  (gate 4: the note is exactly what the feed's REQ + accept chain admits).
-- `searchRelayIndexedAfter=<s>` or `NOT_WITHIN_<n>s` — finding, not assertion. In-app
-  visibility does not depend on it: the optimistic insert paints the note
-  immediately, and after a relaunch the Global cache paint seeds from the
-  EventStore row PostPublisher persisted. If the archive has not indexed it, the
-  note is absent from a *cold-install* Global until it does; record the number.
-- `deleteAccepted=[...]` non-empty and no "still served after delete" failure.
-  A hang or runner death before that line is a leak: the key is gone with the
-  process. Do not add a hide-list prefix; report the id from `id=` instead.
+Expected: `"ITSAppUsesNonExemptEncryption" => 1` in both. Reasoning:
+ZAPCOOKING_IOS_BUILD.md §4.4 "Encryption export compliance".
+
+## Gate 4 — kill switch demonstrated (simulator, by hand)
+Structural check first — every post-level zap affordance branches on the seam,
+and nothing reads the flag directly except the seam and its doc comment:
+```sh
+grep -n "ZapGate.postZapVisible" PostCardView.swift PollSection.swift \
+  wisp/ArticleView.swift wisp/RecipeDetailView.swift wisp/Live/LiveStreamView.swift
+grep -rn "FeatureFlags.zapsOnPosts" --include='*.swift' . | grep -v "ZapGate\|///\|// "
+```
+Expected: six hits in the first grep (card action bar, poll vote rows,
+article bar default, recipe detail, stream host zap, chat-message zap); the
+second grep is empty.
+
+Then the flip:
+1. In `FeatureFlags.swift` set `zapsOnPosts = false`. Build, launch, sign in
+   with a key that has a wallet configured (Wallet drawer row).
+2. Home / OnlyFood card action bar: reply, heart, repost, bookmark, chevron —
+   **no bolt**, and a long-press where it sat does nothing (quick zap is gone
+   with it).
+3. Recipe detail engagement bar and an article: **no bolt**.
+4. A NIP-69 zap poll (Global feed, kind 6969): options render as result bars,
+   no bolt vote rows.
+5. A live stream (if one is up): no "Zap" pill on the info bar, no "Zap" in a
+   chat message's context menu.
+6. Someone else's profile: lightning-address tap / zap button **still opens
+   the zap sheet** (`eventId: nil`). This is the Damus split.
+7. Revert the flag to `true`. `git diff FeatureFlags.swift` must be empty
+   before Gate 5.
 
 ## Gate 5 — pbxproj
 `git diff origin/main --stat -- wisp.xcodeproj` → empty.

@@ -1093,8 +1093,13 @@ struct PostCardView: View {
                 repostAction
                 Spacer()
             }
-            zapAction
-            Spacer()
+            // Post-level zap (tap, long-press quick zap). Hidden wholesale when
+            // `FeatureFlags.zapsOnPosts` is off (§4.8 kill switch); the
+            // author's profile keeps its own zap button.
+            if ZapGate.postZapVisible() {
+                zapAction
+                Spacer()
+            }
             Button {
                 activeSheet = .addToList
             } label: {
