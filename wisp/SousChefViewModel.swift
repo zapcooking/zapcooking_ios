@@ -76,6 +76,9 @@ final class SousChefViewModel {
         // for (its known gap) — the state machine owns it here.
         if state == .loading { return }
         state = .loading
+        // A fresh import starts a fresh publish story — a stale publish
+        // error from the previous preview must not render under the next.
+        publishState = .idle
         Task {
             do {
                 let recipe = try await importRecipe(url)

@@ -348,6 +348,12 @@ struct SousChefTests {
         )
         #expect(vm.publishState == .error("Sign in to publish recipes."))
 
+        // A fresh import clears the stale publish error (it must not
+        // render under the next preview).
+        vm.importUrl("https://e.com/other")
+        #expect(vm.publishState == .idle)
+        try? await waitUntil { vm.state != .loading }
+
         await vm.saveToCookbook(
             publisher: RecipePublisher.shared,
             bookmarks: RecipeBookmarkRepository.shared,
@@ -372,6 +378,11 @@ struct SousChefTests {
         func increment() { value += 1 }
     }
 
+    private struct WaitTimedOut: Error {}
+
+    /// Poll until `condition` holds; records AND throws on timeout so the
+    /// test fails fast at the wait site instead of running on in an
+    /// invalid state.
     @MainActor
     private func waitUntil(
         timeout: TimeInterval = 5,
@@ -383,5 +394,6 @@ struct SousChefTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("waitUntil timed out")
+        throw WaitTimedOut()
     }
 }

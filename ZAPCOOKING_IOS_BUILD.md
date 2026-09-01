@@ -1058,7 +1058,7 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   `FeatureFlags.sousChefImportEnabled` (off → entry hidden,
   `SousChefGate.entryVisible`). Error copy is Android's, mapped from the
   0.7a taxonomy; the timeout branch keys on
-  `ZapCookingApi.timedOutTransportMessage`. **No share-sheet entry**
+  `SousChefImportService.timedOutTransportMessage`. **No share-sheet entry**
   (Android has none either — the existing ShareExtension keeps routing to
   the note composer; "share URL → Sous Chef" is a tracked follow-up).
   Image/text import is NIP-98 + member-gated (P2), and the upsell banner
