@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// The My Kitchen hub behind `BottomTab.kitchen` (Concern 3.2).
+/// The My Kitchen hub behind `BottomTab.kitchen` (Concern 3.2 / 3.5).
 ///
 /// Android (`RecipeFeedScreen.kt` COOKBOOK segment) has five sub-tabs in
 /// order Saved · Published · Grocery · Planner · Nourish. Grocery and
 /// Planner are Phase 5; iOS ships Saved · Published · Nourish, preserving
-/// Android's relative order. Nourish is a placeholder entry card only —
-/// Concern C-F wires it.
+/// Android's relative order. Nourish is an entry card into Explore
+/// (Concern 3.5). The tab is hidden when `nourishEnabled` is off.
 ///
 /// The selected section is plain `@State`: this view stays mounted at the
 /// kitchen stack's root, so the selection survives pushing a recipe and
@@ -25,6 +25,10 @@ enum MyKitchenSection: String, CaseIterable, Identifiable {
         case .nourish: "Nourish"
         }
     }
+
+    static func visibleCases(nourishEnabled: Bool = FeatureFlags.nourishEnabled) -> [MyKitchenSection] {
+        allCases.filter { $0 != .nourish || nourishEnabled }
+    }
 }
 
 struct MyKitchenView: View {
@@ -42,6 +46,9 @@ struct MyKitchenView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: RecipeCollectionRoute.self) { route in
                 RecipeCollectionDetailView(route: route)
+            }
+            .navigationDestination(for: NourishExploreRoute.self) { _ in
+                NourishExploreView()
             }
     }
 
@@ -69,7 +76,7 @@ struct MyKitchenView: View {
     private var sectionTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(MyKitchenSection.allCases) { tab in
+                ForEach(MyKitchenSection.visibleCases()) { tab in
                     let selected = section == tab
                     Button {
                         section = tab
@@ -101,7 +108,7 @@ struct MyKitchenView: View {
         case .published:
             PublishedRecipesView(keypair: keypair)
         case .nourish:
-            NourishPlaceholderView()
+            NourishPlaceholderView(path: $path)
         }
     }
 }

@@ -213,6 +213,24 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 rm -f wispTests/.save_toggle_live_enable
 ```
 
+**Live Nourish pantry canary** (opt-in; Concern 3.5). No key. Raw
+unauthenticated WebSocket to `wss://pantry.zap.cooking` with
+`NourishFilter.publicCorpus`. Expects `EOSE` and **no `AUTH`** — this
+is also a canary for `isPublicNourishFilter`. Do not drive this through
+`RelayPool.query` (that stack will AUTH if a key is in-process).
+
+```
+touch wispTests/.nourish_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/NourishLiveTests \
+  test
+rm -f wispTests/.nourish_live_enable
+```
+
 **Live NIP-56 report** (opt-in; Concern 4.1). Uses an ephemeral keypair —
 never a real nsec. Publishes a kind-1984 to `RelayDefaults.defaults` only
 (not the indexer union — that hung ~1030s in 3.1), verifies it, then
@@ -376,23 +394,36 @@ already paid for on Android:
 Port Android's `Nip98Test` goldens **verbatim** into `wispTests/` before writing
 the implementation. This is the one file where a test-first order is mandatory.
 
-### Nourish (both relay-read AND endpoint-compute)
+### Nourish (relay-read now; compute deferred)
 
-Read path: **kind 30078**, author = a fixed `NOURISH_SERVICE_PUBKEY`, filter
-`#d = "nourish:30023:<author>:<dTag>"`, on **`wss://pantry.zap.cooking`**.
-Content is JSON scores; **trust the stored `overall`**, don't recompute.
-A miss means the member-gated `POST /api/nourish` computes it and the server
-publishes back to pantry for future readers.
+Read path: **kind 30078**, author = the fixed Nourish service pubkey
+`fdd263f69f9e95a2a0a58ec3e7e8053011214fa66007d93b26d2f4717d31917b`, on
+**`wss://pantry.zap.cooking`**, via **`RelayPool.query`** (not
+`GroupRelayPool`). The pinned public filter is
+`authors=[service]` + `kinds=[30078]` exclusively (`NourishFilter.publicCorpus`).
+`#d` / `#l` / `limit` only **narrow**; they do not AUTH-gate
+(member-relay `isPublicNourishFilter`). Content is JSON scores;
+**trust the stored `overall`**, don't recompute.
+
+My Kitchen › Nourish is an **entry card** into Nourish Explore (corpus
+read, `limit=200`). Recipe detail fetches one score by
+`#d = "nourish:30023:<author>:<dTag>"`. A miss is **quiet absence**,
+never an error. An unexpected AUTH challenge on the pinned REQ is an
+**explicit error**, never an empty screen.
+
+⚠️ **Corrected (Concern 3.5 / C-B Phase 1 probe):** Pantry does **not**
+require NIP-42 AUTH on every read. A filter pinned to the service
+author + kind 30078 is public unauthenticated. Issue
+https://github.com/zapcooking/zapcooking_ios/issues/6 **no longer
+blocks Nourish read** — that issue is the `GroupRelayPool` subscribe
+path; Nourish does not use it. `RelayPool.query` already re-fires
+after AUTH.
+
+Compute (`POST /api/nourish`, pubkey-in-body, member-gated) is
+**deferred** to item 15. A miss does **not** trigger compute in 3.5.
 
 Scores are **8 dimensions**: gut, protein, realFood, antiInflammatory,
-bloodSugar, immuneSupportive, brainHealth, heartHealth + weighted overall.
-
-⚠️ **Pantry requires NIP-42 AUTH on every read** — even kind 1. A READ_ONLY
-account cannot read Nourish at all. The inherited iOS AUTH retry covers
-**writes** (`publishWithAuthRetry` / publish-path challenge handling). The
-**subscribe / read** path does *not* wait for AUTH — see §7.1 and
-https://github.com/zapcooking/zapcooking_ios/issues/6. Hard prerequisite for
-Phase 3.5.
+bloodSugar, immuneSupportive, brainHealth, heartHealth + stored overall.
 
 ### iOS key recovery (Concern 0.2)
 
@@ -461,14 +492,14 @@ Ranked. The cut line is after P1.
 8. Sous Chef URL import → preview → save
 9. Saved recipes + "My Kitchen" hub (Saved / Published minimum)
 10. OnlyFood feed (the foodstr social layer)
-11. Nourish **read** (cheap on iOS — NIP-42 already exists — and it is the most
-    visible thing that makes this app not-a-generic-Nostr-client)
+11. Nourish **read** (Explore + recipe-detail card; pantry public filter;
+    issue #6 does not block)
 12. Cook mode + timers
 13. Food-first onboarding (topics, creator starter pack, save-a-recipe)
 
 ### P2 — Fast follow after approval
 14. Cheffy chat (+ save-to-recipes hand-off)
-15. Nourish compute + Nourish Explore
+15. Nourish **compute** (`POST /api/nourish`) — Explore already shipped in 3.5
 16. Grocery lists + meal planner
 17. NIP-22 comments on recipes
 18. Recipe trend pill, Memories, recipe packs / cookbooks
@@ -1115,9 +1146,10 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   no-op. HiddenRecipes coordinates are refused on add (unsave still
   allowed). Pending state is the button only; unconfirmed copy is
   Android's `WRITE_UNCONFIRMED_MESSAGE` verbatim.
-- 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner / Nourish
-  land in P2). Retires the `.kitchen` placeholder; the tab becomes a valid
-  launch/deep-link destination in the same PR.
+- 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner land in
+  P2). Nourish tab is the 3.5 entry card (Explore CTA). Retires the
+  `.kitchen` placeholder; the tab becomes a valid launch/deep-link
+  destination in the same PR.
 - 3.3 **OnlyFood feed** — kind-1 feed over the ~85-tag `FoodHashtags` set,
   Global | Following modes, **mute-only filtering** (no spam scorer — §7.3),
   per-mode result cache, pull-to-refresh as the only re-query path. Retires
@@ -1146,15 +1178,21 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 - 3.4 Food-first onboarding: curated creator starter pack (**Seth owes the
   list** — Android's is still the inherited generic set), food-framed copy,
   topic picker, save-a-recipe first-run step.
-- 3.5 Nourish **read**: `NourishParser` + pantry NIP-42 read + `NourishCard`
-  (green-island visual: strong ≥7 `#22C55E`, moderate 4–6 `#4ADE80`, light 0–3
-  `#86EFAC`; soft language for low scores; no letter grades; "Not medical
-  advice" footer). Renders **only when a score comes back** — a miss is quiet
-  absence, never an error.
-  **Hard prerequisite:** fix
-  https://github.com/zapcooking/zapcooking_ios/issues/6 (subscribe path must
-  wait for / re-fire after NIP-42 AUTH). Without that, pantry reads silently
-  return empty — including Nourish.
+- 3.5 Nourish **read** (Concern C-F): `NourishParser` + pinned pantry
+  `RelayPool.query` (`NourishFilter.publicCorpus`: authors=service,
+  kinds=[30078], limit=200) + Nourish Explore (My Kitchen CTA) +
+  `NourishCard` on recipe detail (green-island visual: strong ≥7 `#22C55E`,
+  moderate 4–6 `#4ADE80`, light 0–3 `#86EFAC`; soft language for low
+  scores; no letter grades; "Not medical advice" footer). Renders **only
+  when a score comes back** — a miss is quiet absence, never an error.
+  An unexpected AUTH challenge on the pinned REQ is an explicit error,
+  never an empty screen. Kill switch `FeatureFlags.nourishEnabled`
+  (default `true`). **Issue #6 no longer blocks Nourish read** — do not
+  use `GroupRelayPool`. Compute (`POST /api/nourish`) is item 15, not
+  this concern.
+  **Live gate:** `wispTests/NourishLiveTests` — unauthenticated pinned
+  REQ against `wss://pantry.zap.cooking`, expects EOSE and no AUTH
+  (`touch wispTests/.nourish_live_enable`).
 
 ---
 
@@ -1194,7 +1232,8 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 ### Phase 5 — P2 fast follows
 
 Cheffy (+ `CheffyIcon` ported from the web SVG, brand copy pools, save-to-recipes
-hand-off), Nourish compute + Explore, grocery lists + meal planner (NIP-44
+hand-off), Nourish compute (`POST /api/nourish`; Explore already shipped
+in 3.5), grocery lists + meal planner (NIP-44
 self-encrypted, `GroceryEvents`/`MealPlanEvents`), NIP-22 comments, trend pill,
 Memories, recipe packs.
 
@@ -1231,21 +1270,16 @@ Memories, recipe packs.
 Each of these cost real debugging time on Android. They are listed with the iOS
 action, not just the story.
 
-**7.1 — Relay AUTH is per-connection, and the inherited iOS retry is writes-only.**
-Android's pantry reads failed three ways: `authenticatedRelays` was never
-cleared on a transient disconnect (so `isAuthenticated` stayed stale-true and
-queries fired onto an unauthed socket), and `resyncSubscriptions` re-sent the
-tracked REQ on reconnect *before* the fresh socket's AUTH.
-→ **iOS finding (Concern B):** `RelayPool` / `GroupRelayPool.publishWithAuthRetry`
-cover **writes**. The **subscribe / read** path does not: (1)
-`GroupRelayPool.subscribe` has no `waitForAuthIfNeeded`; (2) CLOSED
-`auth-required` sleeps 2s and replays once instead of awaiting AUTH; (3)
-`isAuthenticated` flips when the AUTH event is *sent*, not accepted; (4)
-reconnect clears auth then re-REQs filters before AUTH. Watch-only never AUTH
-(missing keypair) → silent empty rooms. Tracked as
-https://github.com/zapcooking/zapcooking_ios/issues/6 — **Phase 3.5 blocker**
-(Nourish reads pantry on the same path). Reference: Android
-`collectAuthCompleted` re-fire.
+**7.1 — Relay AUTH is per-connection.** `GroupRelayPool.subscribe` still
+does not wait for AUTH (issue
+https://github.com/zapcooking/zapcooking_ios/issues/6). **That issue no
+longer blocks Nourish read.** Nourish uses `RelayPool.query`, which
+re-issues every REQ after a successful AUTH (`RelayPool.swift` AUTH
+branch). Pantry kind-30078 with `authors` pinned to the Nourish service
+pubkey is public without AUTH (`isPublicNourishFilter`); an AUTH
+challenge on that shape is a policy regression and must surface as an
+error, not an empty Explore/card. `GroupRelayPool` remains out of scope
+for Nourish.
 
 **7.2 — Subscription IDs must be process-wide unique.**
 An instance-scoped counter restarted at 0 per nav back-stack entry, so
@@ -1406,8 +1440,9 @@ rough effort signal only.
 | `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `RecipeBookmarkButton` + `ArticleActionBar` recipe branch | **3.1b** |
 | `nostr/FoodHashtags.kt` + `FoodTopics.kt` + `repo/OnlyFoodFilter.kt` | 277 | `FoodHashtags.swift` … | 3.3 |
 | `viewmodel/OnlyFoodFeedViewModel.kt` + `ui/screen/OnlyFoodFeedScreen.kt` | 1136 | `OnlyFoodFeedViewModel.swift` + View | 3.3 |
-| `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `NourishParser.swift`, `NourishRepository.swift` | 3.5 |
-| `ui/component/NourishCard.kt` + `NourishSectionPanels.kt` | 442 | `NourishCard.swift` | 3.5 |
+| `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `wisp/NourishParser.swift`, `wisp/NourishRepository.swift`, `wisp/NourishDiscovery.swift` | **3.5 read** (compute deferred) |
+| `ui/component/NourishCard.kt` + `NourishSectionPanels.kt` | 442 | `wisp/NourishCard.swift` | **3.5** (card only; compute panels deferred) |
+| `ui/screen/NourishExploreScreen.kt` + `viewmodel/NourishExploreViewModel.kt` | — | `wisp/NourishExploreView.swift` + VM | **3.5** (moved up from item 15) |
 | `nostr/Nip56.kt` + `ui/screen/ReportsScreen.kt` | 398 | `Nip56.swift` + `ReportSender` + `ReportedContent` + `ReportSheet` (reporter path; admin inbox not ported) | 4.1 |
 | `ui/screen/CheffyScreen.kt` + `viewmodel/CheffyViewModel.kt` + `cheffy/Cheffy.kt` + `CheffyIcon.kt` | 804 | `CheffyView.swift` … | 5 |
 | `mealplan/*` + `repo/GroceryRepository.kt` + `PlannerRepository.kt` + `nostr/GroceryEvents.kt` | 1550 | grocery + planner | 5 |

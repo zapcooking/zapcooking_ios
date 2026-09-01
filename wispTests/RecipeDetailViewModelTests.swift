@@ -2,6 +2,12 @@ import Foundation
 import Testing
 @testable import wisp
 
+/// Quiet pantry miss — existing detail tests must not open a socket.
+struct StubNourish: NourishScoring, Sendable {
+    var result: NourishFetchResult = .miss
+    func fetchScore(author: String, dTag: String) async -> NourishFetchResult { result }
+}
+
 /// Gate for Concern 1.3 — detail consumes `RecipeRepository`, applies
 /// `IngredientScaler` to ingredients + servings only, and survives the
 /// live-data holes §7.7 paid for (missing `published_at`, missing servings,
@@ -26,8 +32,15 @@ struct RecipeDetailViewModelTests {
         return repo
     }
 
-    private func makeVM(_ repo: RecipeRepository) -> RecipeDetailViewModel {
-        RecipeDetailViewModel(repository: repo, loadProfile: { _ in nil })
+    private func makeVM(
+        _ repo: RecipeRepository,
+        nourish: (any NourishScoring)? = nil
+    ) -> RecipeDetailViewModel {
+        RecipeDetailViewModel(
+            repository: repo,
+            loadProfile: { _ in nil },
+            nourish: nourish ?? StubNourish()
+        )
     }
 
     private func recipeEvent(

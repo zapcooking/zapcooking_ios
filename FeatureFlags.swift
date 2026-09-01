@@ -39,6 +39,12 @@ enum FeatureFlags {
     /// and no Sous Chef surface is reachable.
     static let sousChefImportEnabled: Bool = true
 
+    /// Nourish read (Concern 3.5) — pantry kind-30078 Explore + recipe-detail
+    /// card. Operational kill switch, not a compliance one: when `false`, the
+    /// My Kitchen Nourish tab and the detail card disappear. Compute
+    /// (`POST /api/nourish`) is deferred (build-doc item 15).
+    static let nourishEnabled: Bool = true
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the
