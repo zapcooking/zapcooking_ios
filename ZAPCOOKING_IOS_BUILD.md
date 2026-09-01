@@ -264,7 +264,7 @@ than Android did — but plan against that order of magnitude, not against
 | Capability | Swift symbol | Why it matters here |
 |---|---|---|
 | Kind-30023 article load + render | `ArticleViewModel`, `ArticleView`, `ArticleRoute`, `ArticleCache` | Recipe detail branches from this, exactly as Android branched `ArticleScreen` |
-| **NIP-42 relay AUTH with `auth-required` retry** | `Nip42.buildAuthEvent`, `RelayPool.query` (L274, L593), `GroupRelayPool.publishWithAuthRetry` | **Big win.** Pantry reads (Nourish) work day one. Android had to build `AuthedRelayReader` from scratch after a multi-day debugging cycle |
+| **NIP-42 relay AUTH with `auth-required` retry** | `Nip42.buildAuthEvent`, `RelayPool.query` (L274, L593), `GroupRelayPool.publishWithAuthRetry` | ~~Big win~~ **Overstated — writes only** (§7.1). The subscribe/read path needed issue #6 (state machine landed on `issue-6/subscribe-auth`, §7.14); public Nourish/recipe reads turned out not to need AUTH at all (§ Nourish) |
 | Outbox/inbox routing | `RelayScoreBoard`, `RelayPool`, `GroupRelayPool` | Recipe reads fan out over an articles-relay union; publish goes to write relays |
 | Blossom media upload | `BlossomClient.upload`, `GifBlossomUploader` | Recipe cover images |
 | Signing | `Signer.sign`, `Schnorr`, `NostrEvent.sign` | Local-key only — see Gate 0-D |
@@ -424,6 +424,19 @@ Compute (`POST /api/nourish`, pubkey-in-body, member-gated) is
 
 Scores are **8 dimensions**: gut, protein, realFood, antiInflammatory,
 bloodSugar, immuneSupportive, brainHealth, heartHealth + stored overall.
+
+Pantry policy detail (issue #6 Phase 1, Sep 1; member-relay
+`rejectFilterPolicy`, verified by live probe against deployed pantry): three
+shapes are served unauthenticated — (a) filters pinned to **exactly**
+`authors=[NOURISH_SERVICE_PUBKEY]` AND `kinds=[30078]` and nothing broader
+(`isPublicNourishFilter`); (b) recipe reads (`kinds=[30023]` only); (c) group
+metadata (39000–39009) and public-group content. Any broader shape (extra
+kinds, extra/missing authors) falls back to auth-gated. What still requires
+NIP-42: member/private NIP-29 group content, and member app-data reads (kind
+30078 with `authors=[self]` — grocery/planner). Those ride issue #6 (landed
+in #53, §7.1/§7.14) — a members-only-read prerequisite. 3.5 uses
+`RelayPool.queryReportingAuth` with the pinned public filter so an
+unexpected challenge surfaces as an error.
 
 ### iOS key recovery (Concern 0.2)
 
@@ -1179,7 +1192,7 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   list** — Android's is still the inherited generic set), food-framed copy,
   topic picker, save-a-recipe first-run step.
 - 3.5 Nourish **read** (Concern C-F): `NourishParser` + pinned pantry
-  `RelayPool.query` (`NourishFilter.publicCorpus`: authors=service,
+  `RelayPool.queryReportingAuth` (`NourishFilter.publicCorpus`: authors=service,
   kinds=[30078], limit=200) + Nourish Explore (My Kitchen CTA) +
   `NourishCard` on recipe detail (green-island visual: strong ≥7 `#22C55E`,
   moderate 4–6 `#4ADE80`, light 0–3 `#86EFAC`; soft language for low
@@ -1188,8 +1201,10 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   An unexpected AUTH challenge on the pinned REQ is an explicit error,
   never an empty screen. Kill switch `FeatureFlags.nourishEnabled`
   (default `true`). **Issue #6 no longer blocks Nourish read** — do not
-  use `GroupRelayPool`. Compute (`POST /api/nourish`) is item 15, not
-  this concern.
+  use `GroupRelayPool`. Issue #6 (landed in #53) remains the prerequisite
+  for **members-only** pantry reads: private NIP-29 groups and member
+  app-data (grocery/planner). Compute (`POST /api/nourish`) is item 15,
+  not this concern.
   **Live gate:** `wispTests/NourishLiveTests` — unauthenticated pinned
   REQ against `wss://pantry.zap.cooking`, expects EOSE and no AUTH
   (`touch wispTests/.nourish_live_enable`).
@@ -1270,15 +1285,39 @@ Memories, recipe packs.
 Each of these cost real debugging time on Android. They are listed with the iOS
 action, not just the story.
 
-**7.1 — Relay AUTH is per-connection.** `GroupRelayPool.subscribe` still
-does not wait for AUTH (issue
-https://github.com/zapcooking/zapcooking_ios/issues/6). **That issue no
-longer blocks Nourish read.** Nourish uses `RelayPool.query`, which
-re-issues every REQ after a successful AUTH (`RelayPool.swift` AUTH
-branch). Pantry kind-30078 with `authors` pinned to the Nourish service
-pubkey is public without AUTH (`isPublicNourishFilter`); an AUTH
-challenge on that shape is a policy regression and must surface as an
-error, not an empty Explore/card. `GroupRelayPool` remains out of scope
+**7.1 — Relay AUTH is per-connection, and the inherited iOS retry is writes-only.**
+Android's pantry reads failed three ways: `authenticatedRelays` was never
+cleared on a transient disconnect (so `isAuthenticated` stayed stale-true and
+queries fired onto an unauthed socket), and `resyncSubscriptions` re-sent the
+tracked REQ on reconnect *before* the fresh socket's AUTH.
+→ **iOS finding (Concern B):** `RelayPool` / `GroupRelayPool.publishWithAuthRetry`
+cover **writes**. The **subscribe / read** path does not: (1)
+`GroupRelayPool.subscribe` has no `waitForAuthIfNeeded`; (2) CLOSED
+`auth-required` sleeps 2s and replays once instead of awaiting AUTH; (3)
+`isAuthenticated` flips when the AUTH event is *sent*, not accepted; (4)
+reconnect clears auth then re-REQs filters before AUTH. Watch-only never AUTH
+(missing keypair) → silent empty rooms. Tracked as
+https://github.com/zapcooking/zapcooking_ios/issues/6. Reference: Android
+`collectAuthCompleted` re-fire.
+**Corrections (issue #6 Phase 1, Sep 1; fix on `issue-6/subscribe-auth`, §7.14):**
+(a) *not* a 3.5 blocker — public Nourish reads need no AUTH (§ Nourish); the
+defects gate members-only reads (private groups, member app-data). (b) The
+watch-only mechanism is present-but-empty privkey — `authenticate`'s keypair
+guard passes and `Schnorr.sign` throws — same silent effect, different line.
+(c) khatru never volunteers the AUTH challenge: the first REQ provokes it, so
+"wait for AUTH before the first REQ" is impossible; the correct shape is
+optimistic REQ → await *acceptance* → bounded replay. (d) Android's
+`collectAuthCompleted` also fires on AUTH **send**, not on the relay's `OK` —
+mark-on-OK is an iOS improvement over the reference, not a port. (e) A fifth
+defect: CLOSED with a non-auth reason (`restricted:` membership) replayed
+immediately and unboundedly — a hot loop at RTT rate.
+**Nourish (Concern 3.5):** uses `RelayPool.query` /
+`RelayPool.queryReportingAuth`, which re-issues every REQ after a successful
+AUTH (`RelayPool.swift` AUTH branch) and reports whether any relay sent
+`AUTH` / `CLOSED auth-required`. Pantry kind-30078 with `authors` pinned to
+the Nourish service pubkey is public without AUTH (`isPublicNourishFilter`);
+an AUTH challenge on that shape is a policy regression and must surface as
+an error, not an empty Explore/card. `GroupRelayPool` remains out of scope
 for Nourish.
 
 **7.2 — Subscription IDs must be process-wide unique.**
@@ -1409,6 +1448,32 @@ delete is confirmed; a hang/timeout runs cleanup with that same key
 instead of retrying; target `RelayDefaults.defaults`; never mint another
 `HiddenRecipes` prefix. 2.4 ships this protocol too.
 
+**7.14 — "AUTH sent" is not "AUTH accepted." Only the relay's `OK` for the
+kind-22242 event id is.**
+Both this fork's `GroupRelayPool` *and* the Android reference marked a
+connection authenticated the moment the AUTH frame went out, and neither
+parsed the relay's `["OK", <authEventId>, true/false]` verdict (khatru always
+sends one). An `OK false` — clock skew, a `relay` tag not matching the
+relay's `ServiceURL`, a bad key — was therefore invisible: the client
+believed it was authed, replayed REQs, got `CLOSED auth-required` again, and
+looped forever with an empty screen. Every "why is this AUTH relay silently
+empty" debugging cycle starts here.
+→ **iOS action (issue #6, `issue-6/subscribe-auth`):** `GroupRelayPool` runs
+a per-connection state machine (`GroupRelayAuthState`: idle → pending(id) →
+authenticated / failed(reason) / unavailable) that retains the AUTH event id
+and settles **only** on the correlated `OK`. Subscriptions refused by the
+relay end with one explicit terminal `GroupSubEvent` (`.authUnavailable` /
+`.authFailed` / `.notMember` / `.closed`) instead of a silent empty stream,
+and every replay path is bounded — nothing loops at RTT rate. Reconnect
+starts the reader before any REQ and replays filters only after the machine
+settles. Watch-only is classified by the relay's challenge (empty-privkey
+sign failure → `.unavailable`), never pre-emptively by account type — public
+data on the same relay keeps flowing. `RelayConn` (the general
+`RelayPool` stack) still has the send-not-accepted weakness in bounded form —
+tracked as https://github.com/zapcooking/zapcooking_ios/issues/50; do not
+"fix" it as a drive-by, its blast radius includes NWC wallet subs and the DM
+inbox.
+
 ---
 
 ## 8. Symbol map — Kotlin → Swift
@@ -1440,6 +1505,7 @@ rough effort signal only.
 | `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `RecipeBookmarkButton` + `ArticleActionBar` recipe branch | **3.1b** |
 | `nostr/FoodHashtags.kt` + `FoodTopics.kt` + `repo/OnlyFoodFilter.kt` | 277 | `FoodHashtags.swift` … | 3.3 |
 | `viewmodel/OnlyFoodFeedViewModel.kt` + `ui/screen/OnlyFoodFeedScreen.kt` | 1136 | `OnlyFoodFeedViewModel.swift` + View | 3.3 |
+| `relay/AuthedRelayReader.kt` + `RelayPool.kt` `authCompleted`/`authenticatedRelays` | 155+ | `GroupRelayPool` NIP-42 state machine: `GroupRelayAuthState` + `GroupSubEvent` terminals (`GroupRelayPool.swift`) — improves on the reference: settles on the AUTH `OK`, not on send (§7.14) | issue #6 |
 | `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `wisp/NourishParser.swift`, `wisp/NourishRepository.swift`, `wisp/NourishDiscovery.swift` | **3.5 read** (compute deferred) |
 | `ui/component/NourishCard.kt` + `NourishSectionPanels.kt` | 442 | `wisp/NourishCard.swift` | **3.5** (card only; compute panels deferred) |
 | `ui/screen/NourishExploreScreen.kt` + `viewmodel/NourishExploreViewModel.kt` | — | `wisp/NourishExploreView.swift` + VM | **3.5** (moved up from item 15) |
