@@ -66,7 +66,7 @@ struct RecipeSaveToggleTests {
 
     // MARK: - Save / unsave through the 3.1 path
 
-    @Test func toggle_save_writesDefaultList30001Shape() async {
+    @Test func toggle_save_writesDefaultList30001Shape() async throws {
         let probe = Probe()
         probe.confirm = .confirmedAbsent
         let repo = RecipeBookmarkRepository(env: probe.env)
@@ -77,8 +77,9 @@ struct RecipeSaveToggleTests {
         #expect(saved == true)
         #expect(repo.isRecipeBookmarked(recipe()))
         #expect(probe.signed.count == 1)
-        let tags = probe.signed[0].tags
-        #expect(probe.signed[0].kind == RecipeBookmarkRepository.listKind)
+        let signedList = try #require(probe.signed.first)
+        let tags = signedList.tags
+        #expect(signedList.kind == RecipeBookmarkRepository.listKind)
         #expect(tags.contains(["d", RecipeBookmarkRepository.defaultListDTag]))
         #expect(tags.contains(["title", RecipeBookmarkRepository.defaultListTitle]))
         #expect(tags.contains(["a", coordA]))
@@ -86,7 +87,7 @@ struct RecipeSaveToggleTests {
         #expect(!repo.isWriting)
     }
 
-    @Test func toggle_unsave_dropsTheCoordinate() async {
+    @Test func toggle_unsave_dropsTheCoordinate() async throws {
         let probe = Probe()
         probe.confirm = .found(listEvent(tags: [
             ["d", RecipeBookmarkRepository.defaultListDTag],
@@ -99,8 +100,9 @@ struct RecipeSaveToggleTests {
         let stillSaved = await repo.toggle(event: recipe(), keypair: kp)
         #expect(stillSaved == false)
         #expect(!repo.isRecipeBookmarked(recipe()))
-        #expect(probe.signed[0].tags.contains(["a", "30023:\(author):shakshuka"]))
-        #expect(!probe.signed[0].tags.contains(["a", coordA]))
+        let signedList = try #require(probe.signed.first)
+        #expect(signedList.tags.contains(["a", "30023:\(author):shakshuka"]))
+        #expect(!signedList.tags.contains(["a", coordA]))
     }
 
     @Test func toggle_unconfirmedCold_signsNothing_fillUnchanged() async {
@@ -169,7 +171,8 @@ struct RecipeSaveToggleTests {
         let stillSaved = await repo.toggle(event: hiddenEvent, keypair: kp)
         #expect(stillSaved == false)
         #expect(probe.signed.count == 1)
-        #expect(!probe.signed[0].tags.contains(["a", coord]))
+        let signedList = try #require(probe.signed.first)
+        #expect(!signedList.tags.contains(["a", coord]))
     }
 
     @Test func createList_hiddenSeed_omittedFromCoords() async throws {
@@ -181,8 +184,9 @@ struct RecipeSaveToggleTests {
         let dTag = await repo.createList(title: "Weeknight", seedEvent: hiddenEvent, keypair: try makeKeypair())
         #expect(dTag == "weeknight")
         #expect(probe.signed.count == 1)
-        #expect(!probe.signed[0].tags.contains(["a", coord]))
-        #expect(probe.signed[0].tags.contains(["t", RecipeBookmarkRepository.collectionTag]))
+        let signedList = try #require(probe.signed.first)
+        #expect(!signedList.tags.contains(["a", coord]))
+        #expect(signedList.tags.contains(["t", RecipeBookmarkRepository.collectionTag]))
     }
 
     // MARK: - Helpers
