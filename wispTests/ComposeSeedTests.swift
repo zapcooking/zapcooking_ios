@@ -42,6 +42,25 @@ struct ComposeSeedTests {
         #expect(vm.hashtags == ["foodstr"])
     }
 
+    /// The draft is kept verbatim — leading / trailing whitespace included.
+    /// Only enough newlines are added to put the seed on its own paragraph.
+    @Test func composer_seedAppend_keepsDraftWhitespaceVerbatim() {
+        let kp = freshKeypair()
+        defer { UserDefaults.standard.removeObject(forKey: autosaveKey(kp)) }
+        let cases: [(draft: String, expected: String)] = [
+            ("  indented draft", "  indented draft\n\n#foodstr"),
+            ("trailing space ", "trailing space \n\n#foodstr"),
+            ("one newline\n", "one newline\n\n#foodstr"),
+            ("two newlines\n\n", "two newlines\n\n#foodstr"),
+            ("three newlines\n\n\n", "three newlines\n\n\n#foodstr"),
+        ]
+        for c in cases {
+            UserDefaults.standard.set(["content": c.draft], forKey: autosaveKey(kp))
+            let vm = ComposeViewModel(keypair: kp, initialText: "#foodstr\n\n")
+            #expect(vm.content == c.expected, "draft=\(c.draft.debugDescription)")
+        }
+    }
+
     @Test func composer_seedAlreadyInDraft_isNotDuplicated() {
         let kp = freshKeypair()
         UserDefaults.standard.set(["content": "#foodstr\n\nstill drafting"], forKey: autosaveKey(kp))
