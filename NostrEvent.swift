@@ -191,6 +191,9 @@ struct NostrFilter {
     var tTags: [String]?
     var dTags: [String]?
     var aTags: [String]?
+    /// NIP-32 self-labels (`#l`). Used by Nourish Explore; omitted on the
+    /// pinned public corpus filter.
+    var lTags: [String]?
     var limit: Int?
     var since: Int?
     var until: Int?
@@ -208,6 +211,7 @@ struct NostrFilter {
         if let tTags { dict["#t"] = tTags }
         if let dTags { dict["#d"] = dTags }
         if let aTags { dict["#a"] = aTags }
+        if let lTags { dict["#l"] = lTags }
         if let limit { dict["limit"] = limit }
         if let since { dict["since"] = since }
         if let until { dict["until"] = until }

@@ -35,6 +35,7 @@ wispTests/.recipe_publish_live_enable
 wispTests/.recipe_bookmark_live_enable
 wispTests/.nip56_live_enable
 wispTests/.recipe_compose_live_enable
+wispTests/.nourish_live_enable
 
 ## Member key for the issue-6 live gate (nsec — must never be committed)
 wispTests/.group_auth_member_nsec

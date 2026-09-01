@@ -61,10 +61,14 @@ enum RelayDefaults {
         "wss://relay.nostr.net"
     ]
 
-    /// `members` — the Pantry, `wss://pantry.zap.cooking`. NIP-42 auth-gated;
-    /// used for Nourish reads (kind 30078) and as a mirror target for recipe
-    /// publishes. Reads here REQUIRE the subscribe-path AUTH fix (issue #6) —
-    /// without it pantry reads silently return empty.
+    /// `members` — the Pantry, `wss://pantry.zap.cooking`. Writes and
+    /// non-public reads are NIP-42 auth-gated. Nourish kind-30078 reads are
+    /// **public** when the filter pins `authors` to the Nourish service pubkey
+    /// and `kinds` to `[30078]` exclusively (`isPublicNourishFilter`); extra
+    /// `#d`/`#l`/limit only narrow. Use `RelayPool.query`, not
+    /// `GroupRelayPool` — issue #6 does not block this path. An AUTH
+    /// challenge on that pinned REQ is a policy regression, not an empty
+    /// corpus.
     nonisolated static let members: [String] = [
         "wss://pantry.zap.cooking"
     ]

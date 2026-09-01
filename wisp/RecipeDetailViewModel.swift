@@ -33,9 +33,14 @@ final class RecipeDetailViewModel {
     private(set) var scale: Double = 1.0
     /// Author profile, hydrated best-effort. A miss is quiet absence.
     private(set) var authorProfile: ProfileData?
+    /// Nourish section (Concern 3.5, read-only). Loading and a pantry miss
+    /// are `.hidden` (nothing renders). AUTH on the pinned public REQ is
+    /// `.authError`, never a quiet miss.
+    private(set) var nourishUi: RecipeNourishUi = .hidden
 
     @ObservationIgnored private let repository: RecipeRepository
     @ObservationIgnored private let loadProfile: (String) async -> ProfileData?
+    @ObservationIgnored private let nourish: any NourishScoring
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var loadedCoordinate: String?
 
@@ -43,12 +48,14 @@ final class RecipeDetailViewModel {
     /// naming isolated statics are evaluated in the caller's isolation.
     init(
         repository: RecipeRepository? = nil,
-        loadProfile: ((String) async -> ProfileData?)? = nil
+        loadProfile: ((String) async -> ProfileData?)? = nil,
+        nourish: (any NourishScoring)? = nil
     ) {
         self.repository = repository ?? RecipeRepository.shared
         self.loadProfile = loadProfile ?? { pubkey in
             await ProfileRepository.shared.ensure([pubkey])[pubkey]
         }
+        self.nourish = nourish ?? NourishRepository.shared
     }
 
     func setScale(_ value: Double) {
@@ -86,11 +93,17 @@ final class RecipeDetailViewModel {
             recipe = nil
             authorProfile = nil
             notFound = false
+            nourishUi = .hidden
         }
 
         loadGeneration += 1
         let generation = loadGeneration
         if event == nil { isLoading = true }
+
+        let nourishTask = Task { () -> NourishFetchResult in
+            guard NourishGate.entryVisible() else { return .miss }
+            return await self.nourish.fetchScore(author: author, dTag: dTag)
+        }
 
         // The repository is cache-first, then the articles union, then the
         // same `deduped` reduction. There is no other source.
@@ -103,6 +116,13 @@ final class RecipeDetailViewModel {
             notFound = true
             isLoading = false
         }
+
+        let nourishResult = await nourishTask.value
+        guard generation == loadGeneration else { return }
+        nourishUi = RecipeNourishUi.from(
+            nourishResult,
+            enabled: NourishGate.entryVisible()
+        )
     }
 
     func cancel() {

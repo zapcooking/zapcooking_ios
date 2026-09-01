@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// My Kitchen › Nourish — placeholder slot only (Concern 3.2). Android's
-/// `NourishEntrySection` copy verbatim (`strings.xml:947–949`); the button
-/// is inert here. Concern C-F (Phase 3.5) wires the Nourish explore route
-/// and enables it — no logic lands in 3.2.
+/// My Kitchen › Nourish — Android `NourishEntrySection` copy verbatim.
+/// CTA pushes `NourishExploreRoute` when `NourishGate.entryVisible`.
 struct NourishPlaceholderView: View {
+    @Binding var path: NavigationPath
+
     var body: some View {
         VStack(spacing: 12) {
             Spacer()
@@ -19,7 +19,7 @@ struct NourishPlaceholderView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button {
-                // Concern C-F wires the Nourish explore route.
+                path.append(NourishExploreRoute())
             } label: {
                 Text("Explore Nourish")
                     .font(AppFont.titleMedium)
@@ -29,8 +29,8 @@ struct NourishPlaceholderView: View {
                     .background(Color.wispPrimary, in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(true)
-            .opacity(0.5)
+            .disabled(!NourishGate.entryVisible())
+            .opacity(NourishGate.entryVisible() ? 1 : 0.5)
             .accessibilityIdentifier("explore-nourish")
             Spacer()
         }

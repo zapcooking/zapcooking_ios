@@ -80,7 +80,7 @@ enum RelayPool {
         timeout: TimeInterval = 8,
         waitForAllRelays: Bool = false
     ) async -> [NostrEvent] {
-        await queryDetailed(relays: relays, filter: filter, timeout: timeout, waitForAllRelays: waitForAllRelays).events
+        await queryReportingAuth(relays: relays, filter: filter, timeout: timeout, waitForAllRelays: waitForAllRelays).events
     }
 
     /// Like `query`, but also reports how many distinct relays sent EOSE — i.e. actually
@@ -94,8 +94,26 @@ enum RelayPool {
         timeout: TimeInterval = 8,
         waitForAllRelays: Bool = false
     ) async -> (events: [NostrEvent], relaysResponded: Int) {
+        let r = await queryReportingAuth(
+            relays: relays, filter: filter, timeout: timeout, waitForAllRelays: waitForAllRelays
+        )
+        return (r.events, r.relaysResponded)
+    }
+
+    /// Same sockets and AUTH-replay as `query`, plus whether any relay sent
+    /// `AUTH` or `CLOSED … auth-required` during the collect. Nourish uses
+    /// this so an unexpected challenge on a pinned public REQ is an error,
+    /// not an empty corpus.
+    static func queryReportingAuth(
+        relays: [String],
+        filter: NostrFilter,
+        timeout: TimeInterval = 8,
+        waitForAllRelays: Bool = false
+    ) async -> RelayQueryOutcome {
         let urls = relays.compactMap(Self.wsURL)
-        guard !urls.isEmpty else { return ([], 0) }
+        guard !urls.isEmpty else {
+            return RelayQueryOutcome(events: [], relaysResponded: 0, authChallenged: false)
+        }
 
         let subId = "q-" + String(UUID().uuidString.prefix(8)).lowercased()
         let reqFrame = "[\"REQ\",\"\(subId)\",\(filter.toJSON())]"
@@ -105,7 +123,8 @@ enum RelayPool {
         let collector = QueryCollector()
         let sink = RelaySink(
             onEvent: { event, _ in collector.add(event) },
-            onEose: { _ in collector.markEose() }
+            onEose: { _ in collector.markEose() },
+            onAuth: { _ in collector.markAuth() }
         )
         await RelayConnectionPool.shared.register(subId: subId, relays: relayReqs, sink: sink)
 
@@ -126,7 +145,11 @@ enum RelayPool {
         }
 
         await RelayConnectionPool.shared.deregister(subId: subId)
-        return (collector.events, collector.eoseCount)
+        return RelayQueryOutcome(
+            events: collector.events,
+            relaysResponded: collector.eoseCount,
+            authChallenged: collector.authChallenged
+        )
     }
 
     // MARK: - Streaming query (one-shot, per-relay filters)
@@ -299,6 +322,13 @@ enum RelayPool {
 
 // MARK: - RelayQuery
 
+/// Outcome of `RelayPool.queryReportingAuth`.
+nonisolated struct RelayQueryOutcome: Sendable {
+    var events: [NostrEvent]
+    var relaysResponded: Int
+    var authChallenged: Bool
+}
+
 /// One (relay, filters) pair for `RelayPool.stream` / `subscribe(queries:)`.
 /// Multiple filters are sent as a single multi-filter `REQ` to that relay —
 /// matching Android's `OutboxRouter` and avoiding multiple sockets to one host
@@ -382,6 +412,7 @@ private final class QueryCollector: @unchecked Sendable {
     private var _events: [NostrEvent] = []
     private var seen = Set<String>()
     private var _eose = 0
+    private var _auth = false
 
     func add(_ event: NostrEvent) {
         lock.lock(); defer { lock.unlock() }
@@ -391,6 +422,10 @@ private final class QueryCollector: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         _eose += 1
     }
+    func markAuth() {
+        lock.lock(); defer { lock.unlock() }
+        _auth = true
+    }
     var events: [NostrEvent] {
         lock.lock(); defer { lock.unlock() }
         return _events
@@ -398,6 +433,10 @@ private final class QueryCollector: @unchecked Sendable {
     var eoseCount: Int {
         lock.lock(); defer { lock.unlock() }
         return _eose
+    }
+    var authChallenged: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _auth
     }
 }
 
@@ -434,15 +473,18 @@ final class RelaySink: @unchecked Sendable {
     let onEvent: @Sendable (_ event: NostrEvent, _ relayUrl: String) -> Void
     let onEose: @Sendable (_ relayUrl: String) -> Void
     let onClosed: @Sendable (_ relayUrl: String, _ reason: String) -> Void
+    let onAuth: @Sendable (_ relayUrl: String) -> Void
 
     init(
         onEvent: @escaping @Sendable (_ event: NostrEvent, _ relayUrl: String) -> Void,
         onEose: @escaping @Sendable (_ relayUrl: String) -> Void = { _ in },
-        onClosed: @escaping @Sendable (_ relayUrl: String, _ reason: String) -> Void = { _, _ in }
+        onClosed: @escaping @Sendable (_ relayUrl: String, _ reason: String) -> Void = { _, _ in },
+        onAuth: @escaping @Sendable (_ relayUrl: String) -> Void = { _ in }
     ) {
         self.onEvent = onEvent
         self.onEose = onEose
         self.onClosed = onClosed
+        self.onAuth = onAuth
     }
 }
 
@@ -593,6 +635,9 @@ actor RelayConn {
                 if reason.lowercased().contains("auth-required") {
                     // NIP-42: don't tear the sub down — the AUTH branch replays
                     // the REQ on the same socket once we've signed the challenge.
+                    // Surface the challenge so callers like Nourish can treat
+                    // an unexpected AUTH on a public filter as an error.
+                    if let sub = subs[subId] { sub.sink.onAuth(urlString) }
                     continue
                 }
                 if let sub = subs[subId] {
@@ -603,6 +648,7 @@ actor RelayConn {
             case "AUTH":
                 guard arr.count >= 2, let challenge = arr[1] as? String else { continue }
                 lastChallenge = challenge
+                for (_, sub) in subs { sub.sink.onAuth(urlString) }
                 let didAuth = await RelayPool.respondToAuthChallenge(
                     challenge: challenge, urlString: urlString, ws: socket
                 )

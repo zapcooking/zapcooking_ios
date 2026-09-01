@@ -21,8 +21,9 @@ import SwiftUI
 /// silent no-op).
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
-/// - Data from `RecipeRepository` via `RecipeDetailViewModel`. No relay
-///   queries from this view.
+/// - Recipe bytes from `RecipeRepository` via `RecipeDetailViewModel`.
+/// - Nourish scores are an independent pantry read (Concern 3.5); a miss
+///   is quiet absence. Compute is deferred.
 /// - Scale chips ½× / 1× / 2× / 3×; servings scale, prep / cook do not.
 /// - Zap affordance respects `FeatureFlags.zapsOnPosts` (Gate 0-F).
 /// - Cook mode is Concern 1.8b — launched from this screen, snapshotted
@@ -309,6 +310,7 @@ struct RecipeDetailView: View {
                             .padding(.horizontal, 16)
                             .padding(.bottom, 16)
                     }
+                    nourishSection
                     Divider()
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -316,6 +318,29 @@ struct RecipeDetailView: View {
                     Spacer().frame(height: 32)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var nourishSection: some View {
+        switch viewModel.nourishUi {
+        case .hidden:
+            EmptyView()
+        case .scored(let score):
+            NourishCard(score: score)
+        case .authError:
+            VStack(alignment: .leading, spacing: 8) {
+                Divider()
+                Text("Nourish")
+                    .font(AppFont.titleMedium)
+                    .foregroundStyle(Color.wispOnSurface)
+                Text("Something went wrong. Please try again.")
+                    .font(AppFont.bodyLarge)
+                    .foregroundStyle(Color.wispOnSurfaceVariant)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("nourish-auth-error")
         }
     }
 
