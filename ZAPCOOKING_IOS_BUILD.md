@@ -195,6 +195,24 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 rm -f wispTests/.recipe_bookmark_live_enable
 ```
 
+**Live save-toggle write** (opt-in; Concern 3.1b). Same §7.13 protocol as
+the 3.1 list gate: ephemeral key, `RelayDefaults.defaults`, hold the key
+until kind-5 (`e`+`a`+`k`) is accepted and
+`30001:<pubkey>:nostrcooking-bookmarks` is gone. Exercises `toggle`
+(UI path) save → list carries the coordinate → unsave → gone → delete.
+
+```
+touch wispTests/.save_toggle_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/RecipeSaveToggleLiveTests \
+  test
+rm -f wispTests/.save_toggle_live_enable
+```
+
 **Live NIP-56 report** (opt-in; Concern 4.1). Uses an ephemeral keypair —
 never a real nsec. Publishes a kind-1984 to `RelayDefaults.defaults` only
 (not the indexer union — that hung ~1030s in 3.1), verifies it, then
@@ -1043,6 +1061,19 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   (publish-verify-delete on `RelayDefaults.defaults`; a hang is a leak;
   do not mint another hide-list prefix).
   Rename / delete / cover stay with 3.2.
+  **3.1b Landed:** save toggle on recipe detail. Tap → default Saved list;
+  long-press → `RecipeListChooserSheet` (checklist + inline "New list",
+  Android `RecipeListChooserSheet.kt`). Overflow "Save to collection…"
+  opens the same sheet — iOS extra vs Android, for discoverability.
+  ⚠️ **Corrected assumption:** `ArticleActionBar` used to always open
+  `AddToNoteListSheet` (kind **30003**). Recipes now route through
+  `RecipeBookmarkRepository` (kind **30001**) via `BookmarkActionTarget`;
+  plain articles keep 30003. Watch-only: reply / react / zap stay hidden
+  (same as `ArticleView`); a bookmark-only control stays visible and tap
+  is `RecipeSaveGate.needsKey` (the 4.1 toast path) — Android is a silent
+  no-op. HiddenRecipes coordinates are refused on add (unsave still
+  allowed). Pending state is the button only; unconfirmed copy is
+  Android's `WRITE_UNCONFIRMED_MESSAGE` verbatim.
 - 3.2 My Kitchen hub: Saved / Published tabs (Grocery / Planner / Nourish
   land in P2). Retires the `.kitchen` placeholder; the tab becomes a valid
   launch/deep-link destination in the same PR.
@@ -1330,6 +1361,8 @@ rough effort signal only.
 | `ui/screen/RecipeComposeScreen.kt` + `viewmodel/RecipeComposeViewModel.kt` | 996 | `RecipeComposeView.swift` + VM | 2.4 |
 | `ui/screen/SousChefScreen.kt` + `viewmodel/SousChefViewModel.kt` + `souschef/*` | 1172 | `SousChefView.swift` + VM | 2.5 |
 | `repo/RecipeBookmarkRepository.kt` | 985 | `RecipeBookmarkRepository.swift` | 3.1 |
+| `ui/component/RecipeListChooserSheet.kt` | 190 | `wisp/RecipeListChooserSheet.swift` | **3.1b** |
+| `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `RecipeBookmarkButton` + `ArticleActionBar` recipe branch | **3.1b** |
 | `nostr/FoodHashtags.kt` + `FoodTopics.kt` + `repo/OnlyFoodFilter.kt` | 277 | `FoodHashtags.swift` … | 3.3 |
 | `viewmodel/OnlyFoodFeedViewModel.kt` + `ui/screen/OnlyFoodFeedScreen.kt` | 1136 | `OnlyFoodFeedViewModel.swift` + View | 3.3 |
 | `nostr/NourishParser.kt` + `repo/NourishRepository.kt` | 639 | `NourishParser.swift`, `NourishRepository.swift` | 3.5 |

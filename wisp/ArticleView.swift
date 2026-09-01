@@ -407,12 +407,20 @@ struct ArticleView: View {
 /// Internal so `RecipeDetailView` (Concern 1.3) reuses this bar rather than
 /// forking it. `zapsOnPosts` is Gate 0-F: when false, the zap is profile-level
 /// (`eventId` nil) instead of attached to the post.
+///
+/// Bookmark routing (Concern 3.1b): `RecipeParser.isRecipe` →
+/// `RecipeBookmarkRepository` (kind 30001); otherwise the inherited
+/// kind-30003 `AddToNoteListSheet`. Recipes: tap toggles the default Saved
+/// list, long-press opens `RecipeListChooserSheet`.
 struct ArticleActionBar: View {
     let article: NostrEvent
     let keypair: Keypair
     let replyCount: Int
     let authorProfile: ProfileData?
     var zapsOnPosts: Bool = FeatureFlags.zapsOnPosts
+    /// Skip `RecipeParser.isRecipe` when the caller already knows (recipe
+    /// detail always passes `.recipeBookmark`).
+    var knownBookmarkTarget: BookmarkActionTarget? = nil
 
     @Environment(ComposePresenter.self) private var composePresenter: ComposePresenter?
     @Environment(WalletStore.self) private var walletStore: WalletStore?
@@ -422,6 +430,9 @@ struct ArticleActionBar: View {
     @State private var showRepostDialog = false
     @State private var showZapSheet = false
     @State private var showBookmarkSheet = false
+    /// Cached so `RecipeParser.isRecipe` does not re-run on every engagement
+    /// re-render. Seeded on appear / when `article.id` changes.
+    @State private var bookmarkTarget: BookmarkActionTarget?
 
     private var box: EngagementBox { engagementRepo.box(for: article.id) }
     private var myPubkey: String { keypair.pubkey }
@@ -431,7 +442,10 @@ struct ArticleActionBar: View {
     }
     private var iReposted: Bool { box.counts.reposters.contains(myPubkey) }
     private var iZapped: Bool { box.counts.zappers.contains { $0.pubkey == myPubkey } }
-    private var isBookmarked: Bool {
+    private var resolvedBookmarkTarget: BookmarkActionTarget {
+        bookmarkTarget ?? knownBookmarkTarget ?? BookmarkActionTarget.of(event: article)
+    }
+    private var isNoteBookmarked: Bool {
         !noteListRepo.listsContaining(noteId: article.id).isEmpty
     }
 
@@ -507,19 +521,14 @@ struct ArticleActionBar: View {
             .buttonStyle(.plain)
             Spacer()
 
-            // Bookmark
-            Button {
-                showBookmarkSheet = true
-            } label: {
-                actionItem(
-                    icon: isBookmarked ? "bookmark.fill" : "bookmark",
-                    count: nil,
-                    tint: isBookmarked ? Color.wispPrimary : nil
-                )
-            }
-            .buttonStyle(.plain)
+            // Bookmark — recipes: kind 30001 (`RecipeBookmarkRepository`);
+            // everything else: inherited kind 30003 note-list sheet.
+            bookmarkControl
         }
         .foregroundStyle(.secondary)
+        .onChange(of: article.id, initial: true) { _, _ in
+            bookmarkTarget = knownBookmarkTarget ?? BookmarkActionTarget.of(event: article)
+        }
         .sheet(isPresented: $showZapSheet) {
             if let store = walletStore {
                 ZapSheet(
@@ -539,6 +548,26 @@ struct ArticleActionBar: View {
             NavigationStack {
                 AddToNoteListSheet(keypair: keypair, event: article)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var bookmarkControl: some View {
+        switch resolvedBookmarkTarget {
+        case .recipeBookmark:
+            RecipeBookmarkButton(event: article, keypair: keypair)
+        case .noteList:
+            Button {
+                showBookmarkSheet = true
+            } label: {
+                actionItem(
+                    icon: isNoteBookmarked ? "bookmark.fill" : "bookmark",
+                    count: nil,
+                    tint: isNoteBookmarked ? Color.wispPrimary : nil
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add to List")
         }
     }
 
