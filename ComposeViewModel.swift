@@ -133,7 +133,33 @@ final class ComposeViewModel {
         // spliced at publish time, and reply context still lives in tags — only
         // the editor body is restored.
         loadLocalAutosave()
-        if !initialText.isEmpty { content = initialText }
+        applyInitialText(initialText)
+        // Derive the hashtag chips / `t` tags from whatever the editor opens
+        // with. Before this, a restored autosave or a pre-seeded body only
+        // recomputed on the next keystroke, so publishing it untouched lost
+        // its `t` tags (harmless for a bolt11 seed; fatal for `#foodstr`).
+        recomputeHashtags()
+    }
+
+    /// Merge caller-supplied seed text (share extension, wallet invoice,
+    /// OnlyFood `#foodstr`) with the restored local autosave instead of
+    /// overwriting it. Pre-existing bug: `initialText` used to replace the
+    /// restored body outright, so opening a seeded composer silently
+    /// discarded an unsent draft. Seed into an empty body as-is; append it
+    /// below a non-empty one unless the body already contains it. The
+    /// restored draft is kept **verbatim** — only enough newlines are added
+    /// to put the seed on its own paragraph.
+    private func applyInitialText(_ initialText: String) {
+        guard !initialText.isEmpty else { return }
+        if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            content = initialText
+            return
+        }
+        let seed = initialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !seed.isEmpty, !content.contains(seed) else { return }
+        let trailingNewlines = content.reversed().prefix { $0 == "\n" }.count
+        let separator = String(repeating: "\n", count: max(0, 2 - trailingNewlines))
+        content += separator + seed
     }
 
     // MARK: - Local autosave (instant restore on reopen)
