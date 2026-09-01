@@ -72,6 +72,7 @@ struct MainView: View {
     @State private var showSocialGraph = false
     @State private var showSafety = false
     @State private var showProofOfWork = false
+    @State private var showAbout = false
     @State private var showMediaServers = false
     @State private var hashtagSetRepo = HashtagSetRepository.shared
     @Environment(AudioPlayerStore.self) private var audioPlayer
@@ -242,6 +243,10 @@ struct MainView: View {
                 onOpenMediaServers: {
                     closeDrawer()
                     showMediaServers = true
+                },
+                onOpenAbout: {
+                    closeDrawer()
+                    showAbout = true
                 }
             )
             .frame(width: drawerWidth)
@@ -573,6 +578,11 @@ struct MainView: View {
         .sheet(isPresented: $showProofOfWork) {
             NavigationStack {
                 ProofOfWorkSettingsView()
+            }
+        }
+        .sheet(isPresented: $showAbout) {
+            NavigationStack {
+                AboutView()
             }
         }
         .sheet(isPresented: $showMediaServers) {

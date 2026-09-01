@@ -27,6 +27,9 @@ struct SidebarDrawerView: View {
     var onOpenProofOfWork: () -> Void = {}
     var onOpenRelays: () -> Void = {}
     var onOpenMediaServers: () -> Void = {}
+    /// Settings → About: policy links (privacy, terms, child safety) — the
+    /// in-app placement Android uses (drawer → About → Policies).
+    var onOpenAbout: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
 
@@ -380,6 +383,7 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "face.smiling", label: "Custom Emojis", indented: true) {
                 onOpenCustomEmojis()
             }
+            DrawerRow(icon: "info.circle", label: "About", indented: true) { onOpenAbout() }
             // DrawerRow(icon: "heart", label: "Relay Health", indented: true) { onClose() }
             // DrawerRow(icon: "ladybug", label: "Console", indented: true) { onClose() }
             Color.clear.frame(height: 1).id("settingsBottom")
