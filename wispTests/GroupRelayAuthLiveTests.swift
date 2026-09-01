@@ -12,8 +12,10 @@ import Testing
 ///
 /// Keys: gates 1–2 mint ephemeral throwaway keys in memory — never a real
 /// nsec, never printed, never written to disk. Gate 3 needs an actual pantry
-/// member key, supplied ONLY via the `ZC_MEMBER_NSEC` environment variable on
-/// the VM (the gate skips when unset); it is never committed, logged, or
+/// member key, supplied via the `ZC_MEMBER_NSEC` environment variable or —
+/// hosted test runs don't deliver `TEST_RUNNER_` env forwarding — the
+/// git-ignored file `wispTests/.group_auth_member_nsec` (trimmed); the gate
+/// skips when neither is present. The key is never committed, logged, or
 /// echoed — the frame log truncates frames and the key never appears in one.
 ///
 /// What each gate would fail on if the fix were wrong:
@@ -40,17 +42,29 @@ struct GroupRelayAuthLiveTests {
             || env["TEST_RUNNER_GROUP_AUTH_LIVE"] == "1"
     }
 
-    /// Trait-safe presence check; the key itself is parsed inside the test.
-    nonisolated private static var memberNsecSet: Bool {
+    /// The member nsec: `ZC_MEMBER_NSEC` env var, else the git-ignored file
+    /// `wispTests/.group_auth_member_nsec` (trimmed) — hosted test runs don't
+    /// deliver `TEST_RUNNER_` env forwarding, so the VM can drop the key in
+    /// the file instead. Never committed, logged, or echoed.
+    nonisolated private static var memberNsecRaw: String? {
         let env = ProcessInfo.processInfo.environment
-        let nsec = env["ZC_MEMBER_NSEC"] ?? env["TEST_RUNNER_ZC_MEMBER_NSEC"]
-        return !(nsec ?? "").isEmpty
+        if let nsec = env["ZC_MEMBER_NSEC"] ?? env["TEST_RUNNER_ZC_MEMBER_NSEC"],
+           !nsec.isEmpty {
+            return nsec
+        }
+        let fileURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent(".group_auth_member_nsec")
+        guard let raw = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Trait-safe presence check; the key itself is parsed inside the test.
+    nonisolated private static var memberNsecSet: Bool { memberNsecRaw != nil }
+
     private static var memberKeypair: Keypair? {
-        let env = ProcessInfo.processInfo.environment
-        guard let nsec = env["ZC_MEMBER_NSEC"] ?? env["TEST_RUNNER_ZC_MEMBER_NSEC"],
-              !nsec.isEmpty else { return nil }
+        guard let nsec = memberNsecRaw else { return nil }
         return NostrKey.parseNsec(nsec)
     }
 
@@ -175,7 +189,7 @@ struct GroupRelayAuthLiveTests {
         .enabled(if: GroupRelayAuthLiveTests.isDeliberatelyEnabled,
                  "Opt in: touch wispTests/.group_auth_live_enable"),
         .enabled(if: GroupRelayAuthLiveTests.memberNsecSet,
-                 "Set ZC_MEMBER_NSEC in the VM environment (never committed)")
+                 "Supply the member key: ZC_MEMBER_NSEC env var, or the file wispTests/.group_auth_member_nsec (git-ignored, never committed)")
     )
     func memberKey_subscribeSurvivesAuth_andReconnectReordersCorrectly() async throws {
         let keypair = try #require(Self.memberKeypair)
