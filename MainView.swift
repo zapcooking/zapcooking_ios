@@ -53,6 +53,7 @@ struct MainView: View {
     @State private var showPolls = false
     @State private var showCompose = false
     @State private var showRecipeCompose = false
+    @State private var showSousChef = false
     /// App-level router for reply / quote / emoji-reaction composers triggered
     /// from any feed card. Hosted from this view's stable root (see body) so the
     /// composer sheet is never anchored to a recyclable `LazyVStack` row, which
@@ -750,6 +751,7 @@ struct MainView: View {
                     path: $recipesPath,
                     onOpenDrawer: openDrawer,
                     avatarURL: viewModel.userProfile?.picture,
+                    onSousChef: SousChefGate.entryVisible() ? { showSousChef = true } : nil,
                     viewModel: recipeFeedVM
                 )
                 if !drawerOpen && !isWatchOnly {
@@ -793,6 +795,19 @@ struct MainView: View {
                         recipesPath.append(RecipeRoute(author: author, dTag: dTag))
                     },
                     onDismiss: { showRecipeCompose = false }
+                )
+            }
+            .fullScreenCover(isPresented: $showSousChef) {
+                SousChefView(
+                    keypair: keypair,
+                    onPublished: { author, dTag, savedToCookbook in
+                        showSousChef = false
+                        if savedToCookbook {
+                            SuccessToast.shared.show(SousChefGate.savedToast)
+                        }
+                        recipesPath.append(RecipeRoute(author: author, dTag: dTag))
+                    },
+                    onDismiss: { showSousChef = false }
                 )
             }
         }

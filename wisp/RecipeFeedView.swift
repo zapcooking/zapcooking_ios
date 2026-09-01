@@ -11,6 +11,10 @@ struct RecipeFeedView: View {
     @Binding var path: NavigationPath
     var onOpenDrawer: () -> Void
     var avatarURL: String?
+    /// Sous Chef entry (Concern 2.5). Nil hides the header button — the
+    /// host passes nil when `SousChefGate.entryVisible()` is false, so the
+    /// kill switch removes the entry point entirely.
+    var onSousChef: (() -> Void)?
 
     @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -21,12 +25,14 @@ struct RecipeFeedView: View {
         path: Binding<NavigationPath>,
         onOpenDrawer: @escaping () -> Void,
         avatarURL: String? = nil,
+        onSousChef: (() -> Void)? = nil,
         viewModel: RecipeFeedViewModel? = nil
     ) {
         self.keypair = keypair
         self._path = path
         self.onOpenDrawer = onOpenDrawer
         self.avatarURL = avatarURL
+        self.onSousChef = onSousChef
         self.viewModel = viewModel ?? RecipeFeedViewModel()
     }
 
@@ -60,6 +66,19 @@ struct RecipeFeedView: View {
                     .foregroundStyle(Color.wispOnSurface)
 
                 Spacer(minLength: 0)
+
+                // Sous Chef — the iOS stand-in for Android's Intelligence
+                // menu slot in this top bar (purple sparkle, web parity).
+                if let onSousChef {
+                    Button(action: onSousChef) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(SousChefView.sousChefPurple)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Sous Chef")
+                    .accessibilityIdentifier("sous-chef-entry")
+                }
             }
             categoryChips
         }

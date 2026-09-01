@@ -31,6 +31,14 @@ enum FeatureFlags {
     /// surfaces render a message, never a "tap to subscribe" link.
     static let membershipLinkoutEnabled: Bool = false
 
+    /// Sous Chef URL import (Concern 2.5) — free anonymous
+    /// `/api/extract-recipe/public` extraction into a preview + publish
+    /// flow. Nothing on the URL path is gated or sold, so this is a plain
+    /// operational kill switch, not a compliance one: when `false`, the
+    /// Recipes-tab entry point disappears (`SousChefGate.entryVisible`)
+    /// and no Sous Chef surface is reachable.
+    static let sousChefImportEnabled: Bool = true
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the

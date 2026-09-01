@@ -316,8 +316,8 @@ Verified against `ZapCookingApi.kt` @ 4389530:**
 
 | Endpoint | Auth | Gate |
 |---|---|---|
-| `POST /api/extract-recipe/public` | **none** | free, per-IP 8/hr · 30/day |
-| `POST /api/extract-recipe` (`type: image`/`text`) | **NIP-98** (`authedPost`) | members; 401 → sign-in, 403 → members-only |
+| `POST /api/extract-recipe/public` (`{url}` only) | **none** | free, per-IP 8/hr · 30/day (`extract-url` scope) |
+| `POST /api/extract-recipe` (`type: url`/`image`/`text`) | ⚠️ **`url` mode: none** — the server gates only `image`/`text` (NIP-98 via `authedPost`); the web souschef page sends `type: url` with no Authorization header at all | `url`: free, same per-IP scope as `/public`; `image`/`text`: members; 401 → sign-in, 403 → members-only |
 | `POST /api/zappy` (Cheffy) + `/zappy/scan` | **pubkey-in-body** | members; 403 → members-only |
 | `POST /api/nourish` + `/nourish/scan` | **pubkey-in-body** | members, fail-closed |
 | `GET /api/membership?pubkey=` | none | public batch read |
@@ -327,6 +327,31 @@ Verified against `ZapCookingApi.kt` @ 4389530:**
 
 Keep request models auth-agnostic so the remaining pubkey-in-body endpoints are
 a one-call swap when the server finishes migrating to NIP-98.
+
+**Extract-recipe response contract (verified against the frontend for 2.5):**
+
+- Success is `{ success: true, recipe: NormalizedRecipe }` — a **structured
+  object, never markdown**: `title/summary/chefsnotes/preptime/cooktime/
+  servings` (strings, may be empty) + `ingredients/directions/tags/imageUrls`
+  (arrays, may be empty). `imageUrls` is up to 5, og:image first. Canonical
+  markdown is assembled client-side (web `createMarkdown`, iOS
+  `SousChefViewModel.composeHandoffMarkdown`).
+- Failure is `{ success: false, error, code }` with an 11-code vocabulary
+  (`src/lib/extractErrors.ts`): `INVALID_REQUEST`, `INVALID_URL`,
+  `UNSUPPORTED_URL`, `TEXT_TOO_LONG`, `SOURCE_BLOCKED`, `SOURCE_NOT_FOUND`,
+  `SOURCE_UNAVAILABLE`, `SOURCE_TOO_LARGE`, `TOO_MANY_REDIRECTS`,
+  `AI_UNAVAILABLE`, `INTERNAL`. All ride the additive envelope →
+  `apiRejected(code:message:)`.
+- ⚠️ **The 429 body carries no `code`** — it is
+  `{ error: 'rate_limited', retryAfter, scope }` (`ipRateLimit.server.ts`),
+  so classification is by status (→ `.rateLimited(retryAfter:)`). The web
+  souschef page gets this wrong (renders the literal `rate_limited`); do not
+  copy it.
+- There is no URL allowlist — any public http(s) URL passes the server's
+  SSRF guard. Known-good sites (UA-fix comment in `parseRecipe.server.ts`):
+  AllRecipes, Bon Appétit, NYT Cooking — and per-site fetches still flake
+  (AllRecipes returned `SOURCE_UNAVAILABLE` on 2026-09-01 while Bon Appétit
+  extracted cleanly).
 
 **Timeouts:** every AI endpoint needs a **long-timeout client (~75s)**, not the
 general 15s one. Android learned this the hard way on Nourish (LLM + awaited
@@ -1037,9 +1062,25 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   A no-image publish cannot land without a publisher change, which is
   out of scope. Blossom fallback-to-source-URL is the 2.3 Sous Chef
   re-host path; compose marks a failed pick as Failed and blocks.
-- **2.5 Sous Chef** — URL field → free anon `/api/extract-recipe/public` →
-  structured preview via the shared recipe body → Save routes into 2.4.
-  Image/text import is NIP-98 + member-gated (P2).
+- **2.5 Sous Chef** — **Landed.** URL field → free anon
+  `/api/extract-recipe/public` (`SousChefImportService` on `computeClient`,
+  no NIP-98 — the URL mode is ungated; §2) → read-only preview
+  (`SousChefView` + `SousChefViewModel`, Android `SousChefScreen` parity:
+  paste field, live URL detection, ½–3× multiplier) → **Publish** (the
+  2.3 `RecipePublisher` single-image path — source-image re-host with
+  URL fallback, first real caller), **Save to my recipes** (publish +
+  default Saved list, best-effort list write), or **Edit**
+  (structured → markdown hand-off → `RecipeComposeSession.prefillMarkdown`;
+  images/summary/tags drop by design, Android/web parity). Entry: purple
+  sparkle in the Recipes-tab header; kill switch
+  `FeatureFlags.sousChefImportEnabled` (off → entry hidden,
+  `SousChefGate.entryVisible`). Error copy is Android's, mapped from the
+  0.7a taxonomy; the timeout branch keys on
+  `SousChefImportService.timedOutTransportMessage`. **No share-sheet entry**
+  (Android has none either — the existing ShareExtension keeps routing to
+  the note composer; "share URL → Sous Chef" is a tracked follow-up).
+  Image/text import is NIP-98 + member-gated (P2), and the upsell banner
+  ships with it, not before.
 
 **GATE 2:** publish a recipe from the device, confirm it renders on
 `zap.cooking` web and in the Android app.
@@ -1359,7 +1400,7 @@ rough effort signal only.
 | `nostr/RecipeFormat.kt` + `RecipeFormats.kt` + `Nip23RecipeFormat.kt` + `Nip333RecipeFormat.kt` | 374 | `RecipeFormat.swift` … | 2.2 |
 | `repo/RecipePublisher.kt` | 390 | `RecipePublisher.swift` | 2.3 |
 | `ui/screen/RecipeComposeScreen.kt` + `viewmodel/RecipeComposeViewModel.kt` | 996 | `RecipeComposeView.swift` + VM | 2.4 |
-| `ui/screen/SousChefScreen.kt` + `viewmodel/SousChefViewModel.kt` + `souschef/*` | 1172 | `SousChefView.swift` + VM | 2.5 |
+| `ui/screen/SousChefScreen.kt` + `viewmodel/SousChefViewModel.kt` + `souschef/*` | 1172 | `SousChefView.swift` + `SousChefViewModel.swift` (incl. `SousChefGate` = Android `SousChefPublishConfirm`+`SousChefDetect`) + `SousChefImportService.swift` (DTOs live here, not in `ZapCookingApi.swift`) — **URL mode only**; image/text + upsell banner arrive with P2 | 2.5 |
 | `repo/RecipeBookmarkRepository.kt` | 985 | `RecipeBookmarkRepository.swift` | 3.1 |
 | `ui/component/RecipeListChooserSheet.kt` | 190 | `wisp/RecipeListChooserSheet.swift` | **3.1b** |
 | `ui/component/ActionBar.kt` recipe bookmark | — | `BookmarkActionTarget` + `RecipeBookmarkButton` + `ArticleActionBar` recipe branch | **3.1b** |
