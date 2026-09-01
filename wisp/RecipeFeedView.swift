@@ -15,6 +15,10 @@ struct RecipeFeedView: View {
     /// host passes nil when `SousChefGate.entryVisible()` is false, so the
     /// kill switch removes the entry point entirely.
     var onSousChef: (() -> Void)?
+    /// Cheffy entry (Concern C-E). Same contract: nil when
+    /// `CheffyGate.entryVisible()` is false. With both entries present the
+    /// sparkle becomes Android's Intelligence menu (Sous Chef → Cheffy).
+    var onCheffy: (() -> Void)?
 
     @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -26,6 +30,7 @@ struct RecipeFeedView: View {
         onOpenDrawer: @escaping () -> Void,
         avatarURL: String? = nil,
         onSousChef: (() -> Void)? = nil,
+        onCheffy: (() -> Void)? = nil,
         viewModel: RecipeFeedViewModel? = nil
     ) {
         self.keypair = keypair
@@ -33,7 +38,14 @@ struct RecipeFeedView: View {
         self.onOpenDrawer = onOpenDrawer
         self.avatarURL = avatarURL
         self.onSousChef = onSousChef
+        self.onCheffy = onCheffy
         self.viewModel = viewModel ?? RecipeFeedViewModel()
+    }
+
+    private var sparkle: some View {
+        Image(systemName: "sparkles")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(SousChefView.sousChefPurple)
     }
 
     private var columns: [GridItem] {
@@ -67,17 +79,34 @@ struct RecipeFeedView: View {
 
                 Spacer(minLength: 0)
 
-                // Sous Chef — the iOS stand-in for Android's Intelligence
-                // menu slot in this top bar (purple sparkle, web parity).
-                if let onSousChef {
-                    Button(action: onSousChef) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(SousChefView.sousChefPurple)
+                // Android's Intelligence menu slot in this top bar (purple
+                // sparkle, web parity): a menu when both AI tools are on,
+                // a direct button when only one is, nothing when neither.
+                if let onSousChef, let onCheffy {
+                    Menu {
+                        Button(action: onSousChef) {
+                            Label("Sous Chef", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("sous-chef-entry")
+                        Button(action: onCheffy) {
+                            Label("Cheffy", systemImage: "bubble.left.and.text.bubble.right")
+                        }
+                        .accessibilityIdentifier("cheffy-entry")
+                    } label: {
+                        sparkle
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Sous Chef")
-                    .accessibilityIdentifier("sous-chef-entry")
+                    .accessibilityLabel("AI tools")
+                    .accessibilityIdentifier("intelligence-menu")
+                } else if let onSousChef {
+                    Button(action: onSousChef) { sparkle }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Sous Chef")
+                        .accessibilityIdentifier("sous-chef-entry")
+                } else if let onCheffy {
+                    Button(action: onCheffy) { sparkle }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cheffy")
+                        .accessibilityIdentifier("cheffy-entry")
                 }
             }
             categoryChips

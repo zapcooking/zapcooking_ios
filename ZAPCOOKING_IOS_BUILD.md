@@ -339,11 +339,22 @@ its own code and the Swift port must follow the code.**
 ⚠️ **The auth model is mixed and has drifted since the Android doc was written.
 Verified against `ZapCookingApi.kt` @ 4389530:**
 
+⚠️ **This table's auth column is unreliable — it has been wrong twice** (Sous
+Chef's URL import was listed as NIP-98 + member-gated and is anonymous; Cheffy
+was listed as pubkey-in-body and has been NIP-98 since 2026-08-17, which also
+broke Android's Cheffy in production — `zap_cooking_android#245`, audit
+`#246`). Android's `ZapCookingApi.kt` is not a source of truth either: it is
+the client that drifted. **Verify every endpoint against the web handler
+(`zapcooking/frontend` `src/routes/api/**/+server.ts` at `origin/main`) and a
+production probe before building against it**, and record the web commit you
+verified against in the concern's report.
+
 | Endpoint | Auth | Gate |
 |---|---|---|
 | `POST /api/extract-recipe/public` (`{url}` only) | **none** | free, per-IP 8/hr · 30/day (`extract-url` scope) |
 | `POST /api/extract-recipe` (`type: url`/`image`/`text`) | ⚠️ **`url` mode: none** — the server gates only `image`/`text` (NIP-98 via `authedPost`); the web souschef page sends `type: url` with no Authorization header at all | `url`: free, same per-IP scope as `/public`; `image`/`text`: members; 401 → sign-in, 403 → members-only |
-| `POST /api/zappy` (Cheffy) + `/zappy/scan` | **pubkey-in-body** | members; 403 → members-only |
+| `POST /api/zappy` (Cheffy) | **NIP-98, header optional** (frontend `04cf67cd`, 2026-08-17; body `pubkey` ignored) | any active membership; absent header = anonymous → **bare 403, no `code`** (`apiRejected(code:nil)` — a pantry outage is the same 403); invalid header → 401; whole-response, no streaming; `computeClient` |
+| `POST /api/zappy/scan` (fridge photo → ingredients) | **NIP-98 required** (401 without) | members + per-IP 8/hr · 30/day (`code: RATE_LIMITED`); not built on iOS (C-E excluded it) |
 | `POST /api/nourish` + `/nourish/scan` | **pubkey-in-body** | members, fail-closed |
 | `GET /api/membership?pubkey=` | none | public batch read |
 | `POST /api/membership/check-status` | **NIP-98** | success = `owner: true`; bad sig **silently degrades**, does not 4xx; `403` = server flag off |
@@ -1317,7 +1328,18 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
 ### Phase 5 — P2 fast follows
 
 Cheffy (+ `CheffyIcon` ported from the web SVG, brand copy pools, save-to-recipes
-hand-off), Nourish compute (`POST /api/nourish`; Explore already shipped
+hand-off) — **Landed (C-E):** `CheffyView` / `CheffyViewModel` / `CheffyService`
+(`authedPost` NIP-98 spine on `computeClient`, request model carries no identity),
+`Cheffy` copy pools + recipe gates (web `$lib/cheffy` verbatim), `CheffyIcon`
+(web SVG paths via `SvgPath`), Recipes-tab sparkle → Intelligence menu (Sous
+Chef → Cheffy), kill switch `FeatureFlags.cheffyEnabled` / `CheffyGate`.
+Gate is message-only (§4.3): watch-only and verified-non-member (owner check)
+render `Cheffy.membersOnlyMessage`; an in-chat bare 403 renders as
+"unavailable", never a denial. Save → `RecipeComposeSession.prefillMarkdown`
+(the Sous Chef seam; no second publish path). `/api/zappy/scan` excluded.
+Live gates need a pantry-granted member key (`wispTests/.zc_member_nsec`,
+git-ignored, `ZC_MEMBER_NSEC` env) — the same key serves Nourish compute later.
+Nourish compute (`POST /api/nourish`; Explore already shipped
 in 3.5), grocery lists + meal planner (NIP-44
 self-encrypted, `GroceryEvents`/`MealPlanEvents`), NIP-22 comments, trend pill,
 Memories, recipe packs.
