@@ -85,6 +85,32 @@ final class RecipeRepository {
     @ObservationIgnored private(set) var tagInFlight: Task<Void, Never>?
     @ObservationIgnored private var tagSubmitGeneration = 0
 
+    /// Independent authored-session state (Concern 3.2 — the My Kitchen
+    /// Published tab). Same union, `authorFeedFilter`, same dedup and
+    /// HiddenRecipes reduction, own submit path so opening My Kitchen does
+    /// not cancel the mounted Recipes tab. Port of Android
+    /// `RecipeRepository.AuthoredSession`.
+    private(set) var authoredRecipes: [NostrEvent] = []
+    private(set) var isAuthoredLoading = false
+    private(set) var hasAuthoredLoaded = false
+
+    /// The pubkey ``loadAuthoredFeed(author:limit:)`` last started.
+    @ObservationIgnored private(set) var activeAuthor: String?
+
+    @ObservationIgnored private var authoredByCoordinate: [String: NostrEvent] = [:]
+
+    @ObservationIgnored private(set) var authoredInFlight: Task<Void, Never>?
+    @ObservationIgnored private var authoredSubmitGeneration = 0
+
+    /// Coordinates the author deleted this session, mapped to the deleted
+    /// event's `created_at` (Concern 3.2). Ingest drops any copy dated at or
+    /// before that stamp, so a laggard relay that has not yet received the
+    /// blanked replacement cannot resurrect the card mid-session — the
+    /// in-memory analog of Android's `deletedEventsRepo.markDeletedAddress`.
+    /// A strictly newer republish at the coordinate passes the filter and
+    /// revives the address, same as Android.
+    @ObservationIgnored private var deletedCoordinateStamps: [String: Int] = [:]
+
     /// Every recipe event seen this session, keyed by addressable coordinate.
     /// This is what makes `requestRecipe` cache-first for anything the feed has
     /// already pulled.
@@ -217,6 +243,7 @@ final class RecipeRepository {
     func dropHidden() {
         recipes = visible(Self.deduped(Array(byCoordinate.values)))
         tagRecipes = visible(Self.deduped(Array(tagByCoordinate.values)))
+        authoredRecipes = visible(Self.deduped(Array(authoredByCoordinate.values)))
     }
 
     // MARK: - Feed
@@ -357,7 +384,7 @@ final class RecipeRepository {
     /// as it is *now* instead of accumulating events no relay still serves.
     func ingest(_ events: [NostrEvent], reset: Bool = false) {
         let held = reset ? [] : Array(byCoordinate.values)
-        let merged = Self.deduped(held + events)
+        let merged = dropDeleted(Self.deduped(held + events))
         // `merged` is one event per coordinate already; the uniquing closure is
         // belt-and-braces and keeps the first, which is the canonical one.
         byCoordinate = Dictionary(
@@ -417,7 +444,7 @@ final class RecipeRepository {
             waitForAllRelays: true
         )
 
-        guard let winner = Self.deduped(events).first(where: { Self.coordinate($0) == key }) else {
+        guard let winner = dropDeleted(Self.deduped(events)).first(where: { Self.coordinate($0) == key }) else {
             return nil
         }
         if isReported(winner) { return nil }
@@ -512,7 +539,7 @@ final class RecipeRepository {
         guard let tag = activeTag else { return }
         let matching = events.filter { RecipeParser.matchesCategory($0, tag) }
         let held = reset ? [] : Array(tagByCoordinate.values)
-        let merged = Self.deduped(held + matching)
+        let merged = dropDeleted(Self.deduped(held + matching))
         tagByCoordinate = Dictionary(
             merged.map { (Self.coordinate($0), $0) },
             uniquingKeysWith: { first, _ in first }
@@ -528,6 +555,137 @@ final class RecipeRepository {
         tagInFlight = Task { @MainActor in
             await work()
             if generation == self.tagSubmitGeneration { self.isTagLoading = false }
+        }
+    }
+
+    // MARK: - Authored feed (Concern 3.2 — My Kitchen Published)
+
+    /// Relay filter for one author's recipes, from the format seam.
+    func authorFeedFilter(author: String, limit: Int, until: Int? = nil) -> NostrFilter {
+        format.authorFeedFilter(author: author, limit: limit, until: until)
+    }
+
+    /// Cache-first + union-backed authored feed — the Published tab's one
+    /// fetch path. The filter is a repository query (`authorFeedFilter`),
+    /// never a view-side `.filter`, so Published inherits the same dedup,
+    /// tiebreaker, and HiddenRecipes reduction as everything else.
+    ///
+    /// One-shot per author, like ``load(limit:)``: SwiftUI re-runs `.task`
+    /// on state changes and an identical filter must not re-hit the same
+    /// connection (§7.4). ``refreshAuthoredFeed(limit:)`` is the re-query.
+    /// Own submit path — must not cancel the main-feed or tag jobs.
+    func loadAuthoredFeed(author: String, limit: Int = 100) {
+        let trimmed = author.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if activeAuthor == trimmed, hasAuthoredLoaded || isAuthoredLoading { return }
+
+        activeAuthor = trimmed
+        hasAuthoredLoaded = false
+        authoredByCoordinate = [:]
+        authoredRecipes = []
+
+        submitAuthored {
+            await self.paintAuthoredFromCache(trimmed)
+            await self.fetchAuthoredPage(author: trimmed, limit: limit)
+        }
+    }
+
+    /// Pull-to-refresh / post-delete re-query for the active author.
+    /// Merges — an empty union must not blank a cache-painted grid.
+    func refreshAuthoredFeed(limit: Int = 100) {
+        guard let author = activeAuthor else { return }
+        submitAuthored { await self.fetchAuthoredPage(author: author, limit: limit) }
+    }
+
+    /// Local ingest for the authored session: ObjectBox seed plus whatever
+    /// the main feed already holds for this author. No socket, does not
+    /// mark the session loaded.
+    func paintAuthoredFromCache(_ author: String) async {
+        let cached = await seedCache()
+        guard !Task.isCancelled, activeAuthor == author else { return }
+        let held = Array(byCoordinate.values)
+        let matches = (cached + held).filter { $0.pubkey == author }
+        guard !matches.isEmpty else { return }
+        ingestAuthored(matches)
+    }
+
+    /// Fold events into the authored session. Does **not** rewrite
+    /// ``recipes`` and does not move the main feed's paging cursor. Events
+    /// by any other pubkey are dropped — a relay answering an `authors`
+    /// filter loosely must not leak someone else's recipe into Published.
+    func ingestAuthored(_ events: [NostrEvent], reset: Bool = false) {
+        guard let author = activeAuthor else { return }
+        let matching = events.filter { $0.pubkey == author }
+        let held = reset ? [] : Array(authoredByCoordinate.values)
+        let merged = dropDeleted(Self.deduped(held + matching))
+        authoredByCoordinate = Dictionary(
+            merged.map { (Self.coordinate($0), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        authoredRecipes = visible(merged)
+    }
+
+    private func submitAuthored(_ work: @escaping @MainActor () async -> Void) {
+        authoredInFlight?.cancel()
+        authoredSubmitGeneration += 1
+        let generation = authoredSubmitGeneration
+        isAuthoredLoading = true
+        authoredInFlight = Task { @MainActor in
+            await work()
+            if generation == self.authoredSubmitGeneration { self.isAuthoredLoading = false }
+        }
+    }
+
+    private func fetchAuthoredPage(author: String, limit: Int) async {
+        let filter = authorFeedFilter(author: author, limit: limit)
+        let events = await RelayPool.query(
+            relays: relays,
+            filter: filter,
+            timeout: 12,
+            waitForAllRelays: true
+        )
+
+        guard !Task.isCancelled, activeAuthor == author else { return }
+
+        let matched = events.filter { $0.pubkey == author }
+        ingestAuthored(matched)
+        persist(matched.filter { !HiddenRecipes.isHidden($0) })
+        hasAuthoredLoaded = true
+    }
+
+    // MARK: - Author delete (Concern 3.2)
+
+    /// Evict an author-deleted coordinate from every session — feed, tag
+    /// feed, authored — and record its `created_at` so a laggard relay's
+    /// copy cannot resurrect it before the blanked replacement propagates.
+    /// Port of Android `RecipeRepository.removeRecipe`.
+    ///
+    /// Called by the delete UI after `RecipePublisher.delete` returns —
+    /// `ingest` drops non-recipes, so the blanked replacement itself cannot
+    /// do this eviction (see `RecipePublisher.Environment.applyLocalDeletion`).
+    /// `asOf` is the deleted event's own `created_at`: copies dated at or
+    /// before it are the deleted version; a strictly newer republish is a
+    /// new recipe and passes.
+    func removeRecipe(coordinate: String, asOf createdAt: Int) {
+        deletedCoordinateStamps[coordinate] = max(
+            deletedCoordinateStamps[coordinate] ?? Int.min, createdAt
+        )
+        byCoordinate.removeValue(forKey: coordinate)
+        tagByCoordinate.removeValue(forKey: coordinate)
+        authoredByCoordinate.removeValue(forKey: coordinate)
+        recipes = visible(Self.deduped(Array(byCoordinate.values)))
+        tagRecipes = visible(Self.deduped(Array(tagByCoordinate.values)))
+        authoredRecipes = visible(Self.deduped(Array(authoredByCoordinate.values)))
+    }
+
+    /// Drop copies of author-deleted coordinates dated at or before the
+    /// deletion stamp. Applied inside every ingest and the network half of
+    /// ``requestRecipe(author:dTag:)`` — one reduction, every session.
+    private func dropDeleted(_ events: [NostrEvent]) -> [NostrEvent] {
+        guard !deletedCoordinateStamps.isEmpty else { return events }
+        return events.filter { event in
+            guard let stamp = deletedCoordinateStamps[Self.coordinate(event)] else { return true }
+            return event.createdAt > stamp
         }
     }
 

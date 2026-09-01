@@ -4,10 +4,13 @@ import SwiftUI
 /// servings chips, chef's notes, scaled ingredients, numbered directions,
 /// reused engagement bar.
 ///
-/// Author edit opens ``RecipeComposeView``. Delete is **not** on this
-/// screen yet. When it lands, call `RecipeFeedViewModel.refresh()` after
-/// `RecipePublisher.delete` returns — `RecipeRepository.ingest` drops
-/// non-recipes, so a blanked replacement cannot evict the live card.
+/// Author edit opens ``RecipeComposeView``. Author delete (Concern 3.2)
+/// lives on this screen's overflow — the only delete entry point, Android
+/// parity (`RecipeDetailScreen.kt`: the Published tile has no delete). On
+/// success it calls `RecipeRepository.removeRecipe(coordinate:asOf:)` for
+/// the instant eviction, then `RecipeFeedViewModel.refresh()` +
+/// `refreshAuthoredFeed()` — `RecipeRepository.ingest` drops non-recipes,
+/// so the blanked replacement cannot evict the live card on its own.
 ///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Data from `RecipeRepository` via `RecipeDetailViewModel`. No relay
@@ -25,6 +28,13 @@ struct RecipeDetailView: View {
     @State private var cookSession: CookModeSession?
     @State private var composeSession: RecipeComposeSession?
     @State private var muteRepo = MuteRepository.shared
+    /// Delete-propagation hook (Concern 3.2, contract 1): a thin observer
+    /// over `RecipeRepository.shared`, used only to `refresh()` after a
+    /// successful delete so the card leaves the feed without relaunch.
+    @State private var feedVM = RecipeFeedViewModel()
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
+    @State private var deleteFailureMessage: String?
     @Environment(\.dismiss) private var dismiss
 
     private var activeUserIsWatchOnly: Bool {
@@ -70,6 +80,53 @@ struct RecipeDetailView: View {
                 onDismiss: { composeSession = nil }
             )
         }
+        // Android `RecipeDetailScreen.kt` delete dialog, copy verbatim.
+        .alert("Delete recipe?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                Task { await performDelete() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Send a deletion request to relays for this recipe? This cannot be guaranteed, and there's no undo.")
+        }
+        .alert(
+            "Couldn't delete recipe",
+            isPresented: Binding(
+                get: { deleteFailureMessage != nil },
+                set: { if !$0 { deleteFailureMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteFailureMessage ?? "")
+        }
+    }
+
+    /// Contract 1 (Concern 3.2): after `RecipePublisher.delete` returns,
+    /// evict the coordinate from every repository session, then refresh the
+    /// feed and the authored (Published) session — the recipe disappears
+    /// from the feed, detail, and Published without relaunch.
+    private func performDelete() async {
+        guard let event = viewModel.event, !isDeleting else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            switch try await RecipePublisher.shared.delete(event: event, keypair: keypair) {
+            case .deleted:
+                let repository = RecipeRepository.shared
+                repository.removeRecipe(
+                    coordinate: RecipeRepository.coordinate(event),
+                    asOf: event.createdAt
+                )
+                await feedVM.refresh()
+                repository.refreshAuthoredFeed()
+                dismiss()
+            case .error(let message):
+                deleteFailureMessage = message
+            }
+        } catch {
+            deleteFailureMessage = "Couldn't delete this recipe — \(error.localizedDescription)."
+        }
     }
 
     private var topBar: some View {
@@ -107,6 +164,24 @@ struct RecipeDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit recipe")
                 .accessibilityIdentifier("edit-recipe")
+
+                Menu {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("delete-recipe")
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.wispOnSurface)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(isDeleting)
+                .accessibilityLabel("Recipe actions")
+                .accessibilityIdentifier("recipe-author-overflow")
             }
             if let event = viewModel.event, event.pubkey != keypair.pubkey {
                 Menu {

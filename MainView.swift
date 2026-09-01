@@ -20,12 +20,13 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    // Food-first default (Concern 1.5). `.kitchen` still falls through to
-    // `placeholderTab` until 3.2. `.onlyfood` is the live feed (Concern 3.3).
+    // Food-first default (Concern 1.5). `.kitchen` is the My Kitchen hub
+    // (Concern 3.2). `.onlyfood` is the live feed (Concern 3.3).
     @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
     @State private var recipesPath = NavigationPath()
     @State private var onlyfoodPath = NavigationPath()
+    @State private var kitchenPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
     @State private var searchPath = NavigationPath()
@@ -36,7 +37,7 @@ struct MainView: View {
     @State private var feedThreadChain: [String] = []
     @State private var recipesThreadChain: [String] = []
     @State private var onlyfoodThreadChain: [String] = []
-    @State private var placeholderThreadChain: [String] = []
+    @State private var kitchenThreadChain: [String] = []
     @State private var notificationsThreadChain: [String] = []
     @State private var searchThreadChain: [String] = []
     @State private var recipeFeedVM = RecipeFeedViewModel()
@@ -845,6 +846,46 @@ struct MainView: View {
         }
     }
 
+    /// My Kitchen (Concern 3.2). Switch-mounted like Search/Notifications —
+    /// the Saved and Published repositories are singletons with their own
+    /// one-shot load guards, so a tab re-entry cannot re-issue an identical
+    /// filter (§7.4).
+    private var kitchenTab: some View {
+        NavigationStack(path: $kitchenPath) {
+            MyKitchenView(
+                keypair: keypair,
+                path: $kitchenPath,
+                onOpenDrawer: openDrawer,
+                avatarURL: viewModel.userProfile?.picture
+            )
+            .navigationDestination(for: ProfileRoute.self) { route in
+                ProfileView(
+                    pubkey: route.pubkey,
+                    activeUserPubkey: keypair.pubkey,
+                    onProfileTap: { pk in kitchenPath.append(ProfileRoute(pubkey: pk)) },
+                    onNoteTap: { eid in kitchenPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
+                    onHashtagTap: { _ in },
+                    path: $kitchenPath
+                )
+            }
+            .navigationDestination(for: ThreadRoute.self) { route in
+                ThreadView(
+                    seedEventId: route.eventId,
+                    authorHint: route.authorPubkey,
+                    keypair: keypair,
+                    path: $kitchenPath,
+                    chain: $kitchenThreadChain,
+                    scrollToId: route.scrollToId
+                )
+            }
+            .navigationDestination(for: ArticleRoute.self) { route in
+                ArticleView(route: route, keypair: keypair, path: $kitchenPath)
+            }
+            .recipeNavigation(keypair: keypair, path: $kitchenPath)
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
     private var mainShell: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -968,31 +1009,14 @@ struct MainView: View {
                         .recipeNavigation(keypair: keypair, path: $notificationsPath)
                         .toolbar(.hidden, for: .navigationBar)
                     }
+                case .kitchen:
+                    kitchenTab
+                // 3.2 retired the `.kitchen` placeholder — every tab now
+                // has real content, so the switch is exhaustive without a
+                // placeholder fall-through.
                 case .wallet:
                     NavigationStack {
                         WalletView(store: walletStore)
-                            .toolbar(.hidden, for: .navigationBar)
-                    }
-                default:
-                    NavigationStack(path: $placeholderPath) {
-                        placeholderTab
-                            .navigationDestination(for: ProfileRoute.self) { route in
-                                ProfileView(pubkey: route.pubkey, activeUserPubkey: keypair.pubkey, path: $placeholderPath)
-                            }
-                            .navigationDestination(for: ThreadRoute.self) { route in
-                                ThreadView(
-                                    seedEventId: route.eventId,
-                                    authorHint: route.authorPubkey,
-                                    keypair: keypair,
-                                    path: $placeholderPath,
-                                    chain: $placeholderThreadChain,
-                                    scrollToId: route.scrollToId
-                                )
-                            }
-                            .navigationDestination(for: ArticleRoute.self) { route in
-                                ArticleView(route: route, keypair: keypair, path: $placeholderPath)
-                            }
-                            .recipeNavigation(keypair: keypair, path: $placeholderPath)
                             .toolbar(.hidden, for: .navigationBar)
                     }
                 }
@@ -1534,20 +1558,6 @@ struct MainView: View {
         }
     }
 
-    private var placeholderTab: some View {
-        VStack(spacing: 12) {
-            Image(systemName: selectedTab.icon)
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-            Text(selectedTab.title)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.tertiary)
-            Text("Coming soon")
-                .font(.caption)
-                .foregroundStyle(.quaternary)
-        }
-    }
-
     // MARK: - Bottom Bar
 
     private var bottomBar: some View {
@@ -1599,7 +1609,7 @@ struct MainView: View {
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
         case .messages: break  // MessagesView owns its own NavigationStack
-        case .kitchen: placeholderPath = NavigationPath()
+        case .kitchen: kitchenPath = NavigationPath()
         }
     }
 
