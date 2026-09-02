@@ -2088,7 +2088,7 @@
 			repositoryURL = "https://github.com/breez/breez-sdk-spark-swift";
 			requirement = {
 				kind = exactVersion;
-				version = 0.13.1;
+				version = 0.14.0;
 			};
 		};
 		4CFF610200000000000A0006 /* XCRemoteSwiftPackageReference "giphy-ios-sdk" */ = {
