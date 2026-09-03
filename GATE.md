@@ -46,7 +46,7 @@ git fetch origin
 ```
 Expected: the box's failure set exactly (#4
 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
-`SafetyTests`, issue #57) and +30 new passes: `CheffyTests` (30). The three
+`SafetyTests`, issue #57) and +31 new passes: `CheffyTests` (31). The three
 `CheffyLiveTests` are skipped without the sentinel (they are not in the
 count). A fifth failure is this concern's.
 

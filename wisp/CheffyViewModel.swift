@@ -137,10 +137,15 @@ final class CheffyViewModel {
         dispatch(prompt: promptForApi, mode: mode, history: history, expectRecipe: expectRecipe, keypair: keypair)
     }
 
-    /// Re-send the last turn after an error (drop the error bubble first).
+    /// Re-send the last turn after an error. Only the trailing error bubble
+    /// (the one whose Try again was tapped) is dropped — an error resolves
+    /// the pending bubble in place, so it is always the last message; earlier
+    /// errors stay in the scrollback as context.
     func retry(keypair: Keypair) {
         guard !loading, gate == .open, let last = lastTurn else { return }
-        thread.removeAll { $0.kind == .error }
+        if thread.last?.kind == .error {
+            thread.removeLast()
+        }
         let history = buildHistory(excludeTrailingUser: true)
         let expectRecipe = last.mode == .hungry || Cheffy.looksLikeRecipeRequest(last.prompt)
         dispatch(prompt: last.prompt, mode: last.mode, history: history, expectRecipe: expectRecipe, keypair: keypair)

@@ -277,6 +277,39 @@ struct CheffyTests {
         #expect(vm.thread[1].kind == .text && vm.thread[1].content.hasPrefix("Use a little less"))
     }
 
+    /// Retry drops only the trailing error bubble and re-sends the last turn
+    /// with the earlier thread as history; an older error stays in the
+    /// scrollback.
+    @Test func retry_dropsOnlyTheTrailingError_andResendsTheLastTurn() async throws {
+        var calls = 0
+        let vm = CheffyViewModel(
+            sendTurn: { request, _ in
+                calls += 1
+                if calls <= 2 { throw ZapCookingApiError.transport("offline") }
+                #expect(request.prompt == "b")
+                #expect(request.messages == [CheffyMessage(role: "user", content: "a")])
+                return "answer to b"
+            },
+            readMembership: { _ in MembershipStatus(found: true, isActive: true, owner: true) }
+        )
+        let keypair = Keypair(privkey: String(repeating: "1", count: 64), pubkey: String(repeating: "4", count: 64))
+        await vm.checkGate(keypair: keypair)
+
+        vm.send("a", mode: .chat, keypair: keypair)
+        for _ in 0..<50 where vm.loading { try await Task.sleep(for: .milliseconds(10)) }
+        vm.send("b", mode: .chat, keypair: keypair)
+        for _ in 0..<50 where vm.loading { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(vm.thread.map(\.kind) == [.text, .error, .text, .error])
+
+        vm.retry(keypair: keypair)
+        #expect(vm.thread.count == 4)
+        #expect(vm.thread[1].kind == .error, "the earlier error stays as scrollback context")
+        #expect(vm.thread[3].kind == .pending)
+        for _ in 0..<50 where vm.loading { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(vm.thread.map(\.kind) == [.text, .error, .text, .text])
+        #expect(vm.thread[3].content == "answer to b")
+    }
+
     @Test func send_hungryShowsSurpriseLabel_recipeReplyGetsRecipeKind() async throws {
         let vm = CheffyViewModel(
             sendTurn: { request, _ in
