@@ -1,139 +1,110 @@
-# GATE — concern-c-e/cheffy @ 4220a32
-Concern C-E: Cheffy chat (`POST /api/zappy`, NIP-98, member-gated) — chat +
-"Surprise me", message-only gate, Save → recipe compose hand-off, Recipes-tab
-sparkle → Intelligence menu (Sous Chef → Cheffy), `CheffyIcon`, kill switch.
+# GATE — concern-c-j/dewisp-seed
+Concern C-J: de-Wisp every user-visible surface (commit 1) + food-first
+sign-up seed (commit 2). Own branch off main at cd36144 (after #59/#60/#61).
 Local build only on Seth's MacBook Air; gates run on the MacinCloud box by hand.
 Frozen at "ready for gates"; results go in the PR description.
 
+Why this outranks the parity table: a reviewer opening "Zap Cooking" and reading
+"Wisp" in the Photos permission dialog, the share sheet, or an invoice memo
+reads as a repackaged app. Cheap to fix, expensive to have raised.
+
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build` (iPhone 17 / OS 26.2): green.
-- `build-for-testing` (compiles `wispTests`, runs nothing): green.
-- Warnings in touched files: zero new. `wisp/ZapCookingApi.swift` carries
-  eight pre-existing Swift 6 isolation diagnostics; the same eight appear on a
-  clean `origin/main` build with the file touched (stash + touch + rebuild).
-  `Cheffy*.swift`, `RecipeFeedView.swift`, `MainView.swift`,
-  `FeatureFlags.swift`: none.
-- pbxproj: no diff. New files: `wisp/Cheffy.swift`, `wisp/CheffyIcon.swift`,
-  `wisp/CheffyService.swift`, `wisp/CheffyViewModel.swift`,
-  `wisp/CheffyView.swift`, `wispTests/CheffyTests.swift`,
-  `wispTests/CheffyLiveTests.swift`.
-- No hermetic run on this machine (wave rule).
-
-## Member key (once, reused by Nourish compute later)
-Throwaway keypair minted 2026-09-01 for the Cook+-gated gates. Seth grants it
-an active tier on pantry; the nsec lives ONLY in the git-ignored file below
-(and on Seth's Air at the same path in the `zc-ios-c-d` worktree). Never
-committed, logged, or echoed — the tests read it from the file and never
-print it.
-
-- npub: `npub1jdam6jehx54vw46rkpxeuppmgngrcvenuvelpmp4qjwuj53kcqks59reyl`
-- hex: `937bbd4b37352ac75743b04d9e043b44d03c3333e333f0ec35049dc95236c02d`
-- file on the box: `wispTests/.zc_member_nsec` (mode 600), or env `ZC_MEMBER_NSEC`
-
-Pre-flight — confirm the grant landed before spending a gate on it:
-```sh
-curl -s 'https://zap.cooking/api/membership?pubkeys=937bbd4b37352ac75743b04d9e043b44d03c3333e333f0ec35049dc95236c02d'
-```
-Expected: `{"937b…c02d":{"active":true,"tier":"…"}}`. `"active":false` means
-the grant has not landed; Gates 2 and 4 and the ungated half of Gate 3 will
-skip, not fail.
+- `build` (iPhone 17 / OS 26.2): **green** at commit 2. First attempt hit the
+  stale `breez_sdk_sparkFFI` .pcm (main's #60 bumped the SDK under the cached
+  module); evicting `SwiftExplicitPrecompiledModules/breez_sdk_sparkFFI-*.pcm`
+  and rebuilding is the fix. No project or flag change.
+- Warnings in touched files: zero new. The six that print are all on lines
+  the branch does not touch and whose blame commit is on origin/main:
+  `ShareViewController.swift:92`, `SignUpFlowView.swift:186`,
+  `SignUpViewModel.swift:374,619`, `SparkWallet.swift:182,558`.
+- pbxproj: no diff. New files: `wisp/FoodSeedRepository.swift`,
+  `wispTests/FoodSeedRepositoryTests.swift`.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
 git fetch origin
-~/gate.sh concern-c-e/cheffy
+~/gate.sh concern-c-j/dewisp-seed
 ```
-Expected: the box's failure set exactly (#4
-`FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
-`SafetyTests`, issue #57) and +31 new passes: `CheffyTests` (31). The three
-`CheffyLiveTests` are skipped without the sentinel (they are not in the
-count). A fifth failure is this concern's.
+Expected: main's failure set exactly (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`
+plus the three `SafetyTests`, issue #57) and **+7 new passes**:
+`FoodSeedRepositoryTests` (6), `FoodTopicsTests/allHashtags_isNormalized_dedupedAndCoversEverySection` (1).
+No live sentinel — the curator kind-3 fetch is live and is not exercised by
+the hermetic run.
 
-## Gate 2 + Gate 3 + Gate 4 — live against zap.cooking (no relay writes)
-Chat is read-only against the backend; nothing here publishes an event, so
-§7.13 does not apply. Three tests, one run:
-
-1. `nonMember_isGatedByOwnerCheck_andChatIsBare403` — **Gate 3, gated half.**
-   Ephemeral key, in memory only. Proves the owner check says
-   `owner:true, isActive:false` → screen gate `.notMember`, and that the chat
-   403 carries no `code` → `apiRejected(code:nil)` → the "unavailable"
-   bubble (never `.membersOnly`). Runs without the member key.
-2. `member_roundTripsAMultiTurnConversation` — **Gate 2 + Gate 3, ungated
-   half.** Member key. Owner check `isActive:true` → `.open`; two real turns,
-   the second carrying the first as history. Prints
-   `[CheffyLive] turn N latency=…s` — **record both latencies in the PR**
-   (measured 2026-09-02: 3.5 s / 2.2 s; `computeClient`'s 75 s is margin).
-3. `member_hungryReplyIsAStructuredRecipe_thatPrefillsCompose` — **Gate 4,
-   hermetic half.** Member key. `mode: hungry` returns the strict
-   `# Title / ## Ingredients / ## Directions` format and
-   `RecipeComposeViewModel.prefillFromMarkdown` yields a title, ingredients,
-   and directions. Prints the hungry latency too.
-
+## Gate 2 — zero user-facing "Wisp"; internal identifiers untouched
 ```sh
-cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout concern-c-e/cheffy && git pull --ff-only
-# member key: paste the nsec into the git-ignored file (or export ZC_MEMBER_NSEC)
-umask 077; printf '%s\n' 'nsec1…' > wispTests/.zc_member_nsec
-touch wispTests/.cheffy_live_enable
-# Same invocation as ~/gate.sh (ci_scripts/gate.sh): box runtime is 26.5 on
-# iPhone 17 Pro; no CODE_SIGNING_ALLOWED / ONLY_ACTIVE_ARCH (they invalidate
-# the cached breez_sdk_sparkFFI .pcm on the box).
-xcodebuild test -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -skipPackagePluginValidation \
-  -parallel-testing-enabled NO \
-  -only-testing:wispTests/CheffyLiveTests \
-  2>&1 | tee ~/c-e-live.log | grep -E 'CheffyLive|Test Case|passed|failed|skipped'
-rm -f wispTests/.cheffy_live_enable
-rm -P wispTests/.zc_member_nsec 2>/dev/null || rm -f wispTests/.zc_member_nsec
-git status --short   # must be empty
+# user-facing string literals — must print nothing
+grep -rn '"[^"]*Wisp[^"]*"' --include='*.swift' --include='*.plist' . \
+  | grep -v 'wispTests\|wispUITests\|Notification.Name\|wisp.xcodeproj'
+grep -rn 'Image("WispLogo")' --include='*.swift' . | grep -v Tests
+grep -n 'Wisp' Info.plist ShareExtension/Info.plist
+# internal identifiers — must still be present, unchanged
+grep -rl '"com.wisp.nostr"' --include='*.swift' . | grep -v Tests   # NostrKey, WalletKeychain, KeychainBackupService, AppDataWipe
+grep -n '"wisp-spark-wallet-v1"' SparkWallet.swift
+grep -n '<string>wisp</string>' Info.plist            # wisp://share handoff scheme
 ```
-Expected: 3 passed (3 skipped-with-reason if the member key is absent → only
-test 1 counts; report that as blocked, not passed). Latency lines present.
+Expected: the first three greps are empty; the last two hit. The full
+internal list (target/scheme/module `wisp`, `com.wisp.nostr`,
+`com.wisp.apple-backup`, `wisp_accounts`, `wisp_settings_*`, `wisp.emoji.state.*`,
+`wisp_bk_`, `wisp-google-backup`/`wisp-apple-backup`/`wisp-spark-wallet-v1`
+salts, `Application Support/wisp`, `model-wisp.json`,
+`EntityInfo-wisp.generated.swift`, `wisp_avatars`/`wisp_emojis`,
+`wisp-profile://`/`wisp-note://`/`wisp-hashtag://`/`wisp-group://`/`wisp://share`,
+`Notification.Name` constants, `wisp-apple-*` sub ids, `wisp-out-` temp
+prefix, `wispLinkURL`/`wispMentionPill`, `WispPillLayoutManager`,
+`wisp_sendAction`, `Color.wisp*`, `WispTopHeader`) is enumerated in the PR body.
 
-## Gate 3 — by hand (simulator): message-only, no purchase surface
-Structural check first — nothing in the Cheffy surface links out, prices, or
-sells:
+## Gate 3 — photo-library permission dialog (simulator, by hand, screenshot)
+Fresh install (or Settings ▸ Privacy ▸ Photos ▸ reset), signed in.
+1. Open any post with an image. Tap the image → fullscreen viewer → tap the
+   save icon (`square.and.arrow.down`, bottom bar), or long-press an inline
+   image → **Save to Photos**.
+2. iOS shows the add-only Photos prompt. Title names **"Zap Cooking"**; the
+   body line is exactly
+   `Zap Cooking saves images and videos from posts to your Photos library.`
+3. Screenshot it. Deny once and confirm the in-app alert reads
+   "Allow Zap Cooking to add to Photos in Settings to save images."
+
+## Gate 4 — fresh sign-up seeds food, not bitcoin (simulator, by hand)
+Splash → **Create new account** → profile step → Continue.
+1. Step "Follow cooks & creators", subtitle "Follow at least 5 accounts to
+   fill your feed with food". Section **Meet the creators** / "Chefs and cooks
+   curated by Zap Cooking": a horizontally scrolling row, **Zap Cooking first
+   and pre-selected**, followed by the curator account's follows (cap 24),
+   each labelled "Food creator". If the kind-3 fetch fails the row still shows
+   the Zap Cooking card alone (fallback profile). Section **Active in the
+   kitchen** / "N people posting about food". **No "News sources" section.**
+2. Step "What do you like to cook?" / "Pick a few food topics so your feed is
+   full of the dishes you love." Ten emoji-titled sections from `FoodTopics`
+   (🍽️ Why are you cooking? … 🌐 Beyond food, with its note). No "Popular
+   topics", no trending fetch, no #nostr / #bitcoin / #memes chips outside the
+   opt-in "Beyond food" section. Typing in the search field suggests taxonomy
+   hashtags; a custom word still adds via the + button.
+3. Pick ≥1 topic, Continue. Profile ▸ Hashtag Sets shows an "Interests" set
+   with the normalized hashtags (e.g. Gluten Free → `#glutenfree`).
+4. Intro step body reads "…how you found Zap Cooking is plenty."
+
+## Gate 5 — the eight brand surfaces (simulator, by hand)
+Each shows the Zap Cooking mark (orange disc, white bolt), never the mascot:
+1. Loading screen after launch (96pt).
+2. Drawer footer: "Zap Cooking v1.x" beside a 16pt mark at 30% opacity.
+3. Existing-user onboarding "Welcome back" (import an nsec) (96pt).
+4. Auth header on the Apple sign-in / PIN screens (96pt, shadowed).
+5. Add-account login sheet (drawer ▸ switcher ▸ add) (LoginView).
+6. Settings ▸ Keys ▸ QR: centre badge when the account has no avatar.
+7. Drawer ▸ QR (profile): centre badge, no-avatar account.
+8. Wallet ▸ Receive / lightning-address QR: centre badge, no-avatar account.
+Known cosmetic gap to eyeball, not a stop: the mark's white magnifier ring
+and handle only show on dark grounds; on the white QR centres and the
+light-theme drawer footer it reads as disc + bolt. Seth decides on device
+whether a ring-free variant is worth producing.
+
+## Gate 6 — pbxproj (three-dot)
 ```sh
-grep -n -i 'membership\|http\|subscribe\|upgrade\|\$' wisp/Cheffy.swift wisp/CheffyView.swift wisp/CheffyViewModel.swift | grep -v '///\|//' 
-grep -rn 'FeatureFlags.cheffyEnabled' --include='*.swift' . | grep -v 'CheffyGate\|///\|// '
+git diff origin/main...HEAD --stat -- wisp.xcodeproj
 ```
-Expected: first grep empty; second grep empty (only the seam reads the flag).
-
-Then, on the simulator:
-1. Sign in with an **npub only** (watch-only). Recipes tab → sparkle → menu
-   shows **Sous Chef** and **Cheffy** (ids `sous-chef-entry`, `cheffy-entry`).
-   Tap Cheffy: the gate screen (`cheffy-gated`) — Cheffy icon,
-   "Cheffy is a Pro Kitchen members feature.", "Sign in with a key to cook
-   with Cheffy." No composer, no button, no link.
-2. Sign in with a **non-member key** (any fresh nsec). Tap Cheffy: the same
-   gate screen without the second line. No composer.
-3. Sign in with the **member key**. Tap Cheffy: empty state with the four
-   prompt chips + "Surprise me 🎲" and the composer. Send a question — a
-   pending bubble with a rotating status line (thinking face), then a
-   rendered markdown reply. "Start over" clears the thread.
-
-## Gate 4 — by hand (simulator): save-to-recipes renders
-Member key. Tap "Surprise me 🎲" (or ask for a full recipe). The reply gets a
-**Save to my recipes** button (`cheffy-save-recipe`). Tap it: the existing
-recipe compose form opens full-screen, prefilled — title, ingredients,
-directions (chef notes / times when Cheffy emitted them). Close it without
-publishing (the discard prompt appears if edited) → back on the chat, thread
-intact. Publishing from here is the existing 2.4 `RecipePublisher` path; if
-you do publish, follow §7.13 (delete with the same key afterwards).
-
-## Gate 5 — kill switch (simulator, by hand)
-1. `FeatureFlags.cheffyEnabled = false`. Build, launch. Recipes tab: the
-   sparkle is a plain **Sous Chef** button again (`sous-chef-entry`), no menu,
-   no Cheffy entry anywhere.
-2. Revert. `git diff FeatureFlags.swift` must be empty before Gate 6.
-
-## Gate 6 — pbxproj
-`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty. (Three-dot: main's
-#41 spark fix touched `project.pbxproj` / `Package.resolved` after this branch
-forked, so the two-dot form shows main's change, not ours. `ci_scripts/gate.sh`
-now guards with the three-dot form; copy it over `~/gate.sh`.)
+Expected: empty.
 
 ## Results
 Pending — recorded in the PR description after Seth's run.
