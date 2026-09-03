@@ -32,7 +32,7 @@ final class AppleSignInManager {
             case .cancelled:
                 return "Apple sign-in cancelled."
             case .credentialRevoked:
-                return "Your Apple sign-in for Wisp was revoked. Sign in again."
+                return "Your Apple sign-in for Zap Cooking was revoked. Sign in again."
             case .credentialNotFound:
                 return "Apple sign-in credential not found."
             case .missingUserIdentifier:

@@ -9,8 +9,11 @@ struct EmojiCategory {
 /// Static catalog of unicode emojis for the reaction picker / library.
 /// Direct port of the Android client's `EmojiData.kt`.
 enum EmojiData {
+    /// Mirrors Android `DEFAULT_UNICODE_EMOJIS` (EmojiPicker.kt) and the web
+    /// `QUICK_EMOJIS` set plus food extras, in the same order. Overridden by a
+    /// user's configured quick reactions when set.
     static let defaultQuickReactions: [String] = [
-        "🧡", "👍", "👎", "🤙", "🚀", "🤗", "😂", "😢", "👨‍💻", "👀", "✅", "🤡", "🐸", "💀", "⚡", "🙏", "🍆"
+        "❤️", "🔥", "👍", "🤙", "😋", "🤤", "🤩", "💯", "🙏", "🍳", "🤌", "🧑‍🍳", "😍", "🌶️", "🥗", "🍽️"
     ]
 
     static let categories: [EmojiCategory] = [

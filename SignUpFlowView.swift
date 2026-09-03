@@ -240,8 +240,7 @@ private struct SuggestionsStep: View {
     var onNext: () -> Void
 
     private static let creatorRoles: [String: String] = [
-        "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d": "Creator of Nostr",
-        "e2ccf7cf20403f3f2a4a55b328f0de3be38558a7d5f33632fdaaefc726c1c8eb": "Creator of Wisp"
+        "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d": "Creator of Nostr"
     ]
 
     private var totalSelected: Int { viewModel.selectedFollows.count }
@@ -641,7 +640,7 @@ private struct IntroNoteStep: View {
                             .disabled(viewModel.publishingIntro || viewModel.postCountdown != nil)
                     }
 
-                    Text("Post a short introduction with the #introductions hashtag — a few words about you and how you found wisp is plenty.")
+                    Text("Post a short introduction with the #introductions hashtag — a few words about you and how you found Zap Cooking is plenty.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 

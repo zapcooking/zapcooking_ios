@@ -22,7 +22,7 @@ struct AuthBackupSummary: Identifiable, Equatable {
 struct AuthFlowHeader: View {
     var body: some View {
         VStack(spacing: 0) {
-            Image("WispLogo")
+            Image("ZcLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 96, height: 96)
@@ -131,7 +131,7 @@ struct AuthFlowRestorePinBlock: View {
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
 
-            Text("This is the PIN you set when you first signed in to Wisp with this \(providerName) account.")
+            Text("This is the PIN you set when you first signed in to Zap Cooking with this \(providerName) account.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

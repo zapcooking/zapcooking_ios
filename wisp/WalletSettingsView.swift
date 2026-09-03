@@ -618,7 +618,7 @@ struct WalletSettingsView: View {
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
                 .padding(.top, 1)
-            Text("Wisp never holds user funds. You manage your own wallet and are responsible for securing it properly.")
+            Text("Zap Cooking never holds user funds. You manage your own wallet and are responsible for securing it properly.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

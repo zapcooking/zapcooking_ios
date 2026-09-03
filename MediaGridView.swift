@@ -434,7 +434,7 @@ struct FullScreenMediaPager: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Allow Wisp to add to Photos in Settings to save media.")
+                Text("Allow Zap Cooking to add to Photos in Settings to save media.")
             }
         }
     }

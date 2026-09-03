@@ -9,7 +9,7 @@
 		<string>audio</string>
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Wisp saves images and videos from posts to your Photos library.</string>
+	<string>Zap Cooking saves images and videos from posts to your Photos library.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>lightning</string>

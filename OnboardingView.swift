@@ -64,7 +64,7 @@ private struct WelcomeStep: View {
         VStack(spacing: 16) {
             Spacer()
 
-            Image("WispLogo")
+            Image("ZcLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 96, height: 96)
@@ -105,7 +105,7 @@ private struct OutboxStep: View {
         StepLayout(
             icon: "network",
             title: "Your network, your relays",
-            message: "Wisp discovers which relays your friends actually use, then connects directly to those relays.\n\nThis means faster delivery and fewer missed posts \u{2014} no central server needed.",
+            message: "Zap Cooking discovers which relays your friends actually use, then connects directly to those relays.\n\nThis means faster delivery and fewer missed posts \u{2014} no central server needed.",
             buttonTitle: "Continue",
             action: onNext
         )
@@ -195,7 +195,7 @@ private struct ZapStep: View {
         StepLayout(
             icon: "bolt.fill",
             title: "Zaps",
-            message: "Wisp supports zaps with an embedded Lightning wallet or Nostr Wallet Connect.\n\nYou can set this up anytime from the Wallet screen.",
+            message: "Zap Cooking supports zaps with an embedded Lightning wallet or Nostr Wallet Connect.\n\nYou can set this up anytime from the Wallet screen.",
             buttonTitle: "Continue",
             action: onNext
         )

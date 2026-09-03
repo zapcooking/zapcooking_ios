@@ -18,7 +18,7 @@ struct LoadingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            Image("WispLogo")
+            Image("ZcLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 96, height: 96)

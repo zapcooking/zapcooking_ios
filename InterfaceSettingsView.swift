@@ -143,9 +143,9 @@ struct InterfaceSettingsView: View {
                 }
 
                 section(title: "Posting") {
-                    Toggle("Wisp client tag", isOn: $settings.clientTagEnabled)
+                    Toggle("Zap Cooking client tag", isOn: $settings.clientTagEnabled)
                         .toggleStyle(SwitchToggleStyle(tint: theme.primary))
-                    Text("Adds a [\"client\", \"Wisp\"] tag so others can see you're posting from Wisp.")
+                    Text("Adds a [\"client\", \"Zap Cooking\"] tag so others can see you're posting from Zap Cooking.")
                         .font(.system(size: 12))
                         .foregroundStyle(theme.palette.onSurfaceVariant)
                         .padding(.bottom, 4)
