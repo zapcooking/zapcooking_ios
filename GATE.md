@@ -128,7 +128,9 @@ you do publish, follow §7.13 (delete with the same key afterwards).
 2. Revert. `git diff FeatureFlags.swift` must be empty before Gate 6.
 
 ## Gate 6 — pbxproj
-`git diff origin/main --stat -- wisp.xcodeproj` → empty.
+`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty. (Three-dot: main's
+#41 spark fix touched `project.pbxproj` / `Package.resolved` after this branch
+forked, so the two-dot form shows main's change, not ours.)
 
 ## Results
 Pending — recorded in the PR description after Seth's run.
