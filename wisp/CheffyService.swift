@@ -12,9 +12,12 @@ import Foundation
 /// spec asks for already made. Present-but-invalid → 401.
 ///
 /// Whole-response, no streaming: the server awaits one OpenAI completion
-/// (`max_tokens` 2048) and answers `{ ok: true, output }`. Real answers
-/// take 5–30 s, so the session is pinned to `HttpClientFactory.computeClient`
-/// (75 s) and `CheffyTests.serviceUsesComputeClient` asserts the identity.
+/// (`max_tokens` 2048) and answers `{ ok: true, output }`. Measured from
+/// the gate box against production (2026-09-02): 3.5 s / 2.2 s for chat
+/// turns, 5.9 s for a 1840-char `hungry` recipe. The session is still
+/// pinned to `HttpClientFactory.computeClient` (75 s) as margin for long
+/// prompts + history, not because replies approach the 15 s general
+/// timeout; `CheffyTests.serviceUsesComputeClient` asserts the identity.
 ///
 /// Failures are `{ ok: false, error, code? }` on a non-2xx status. The only
 /// `code` this endpoint emits is `CHEFFY_EXPERIENCE_USED` (web-only preview

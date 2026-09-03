@@ -62,8 +62,8 @@ Chat is read-only against the backend; nothing here publishes an event, so
 2. `member_roundTripsAMultiTurnConversation` — **Gate 2 + Gate 3, ungated
    half.** Member key. Owner check `isActive:true` → `.open`; two real turns,
    the second carrying the first as history. Prints
-   `[CheffyLive] turn N latency=…s` — **record both latencies in the PR**;
-   they are the reason `computeClient` (75 s) exists.
+   `[CheffyLive] turn N latency=…s` — **record both latencies in the PR**
+   (measured 2026-09-02: 3.5 s / 2.2 s; `computeClient`'s 75 s is margin).
 3. `member_hungryReplyIsAStructuredRecipe_thatPrefillsCompose` — **Gate 4,
    hermetic half.** Member key. `mode: hungry` returns the strict
    `# Title / ## Ingredients / ## Directions` format and
@@ -76,13 +76,15 @@ git fetch origin && git checkout concern-c-e/cheffy && git pull --ff-only
 # member key: paste the nsec into the git-ignored file (or export ZC_MEMBER_NSEC)
 umask 077; printf '%s\n' 'nsec1…' > wispTests/.zc_member_nsec
 touch wispTests/.cheffy_live_enable
-xcodebuild -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+# Same invocation as ~/gate.sh (ci_scripts/gate.sh): box runtime is 26.5 on
+# iPhone 17 Pro; no CODE_SIGNING_ALLOWED / ONLY_ACTIVE_ARCH (they invalidate
+# the cached breez_sdk_sparkFFI .pcm on the box).
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -skipPackagePluginValidation \
-  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
   -parallel-testing-enabled NO \
   -only-testing:wispTests/CheffyLiveTests \
-  test 2>&1 | tee /tmp/cheffy-live.log | grep -E 'CheffyLive|Test Case|passed|failed|skipped'
+  2>&1 | tee ~/c-e-live.log | grep -E 'CheffyLive|Test Case|passed|failed|skipped'
 rm -f wispTests/.cheffy_live_enable
 rm -P wispTests/.zc_member_nsec 2>/dev/null || rm -f wispTests/.zc_member_nsec
 git status --short   # must be empty
@@ -130,7 +132,8 @@ you do publish, follow §7.13 (delete with the same key afterwards).
 ## Gate 6 — pbxproj
 `git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty. (Three-dot: main's
 #41 spark fix touched `project.pbxproj` / `Package.resolved` after this branch
-forked, so the two-dot form shows main's change, not ours.)
+forked, so the two-dot form shows main's change, not ours. `ci_scripts/gate.sh`
+now guards with the three-dot form; copy it over `~/gate.sh`.)
 
 ## Results
 Pending — recorded in the PR description after Seth's run.

@@ -63,6 +63,23 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
   CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build
 ```
 
+**Gate box (MacinCloud, Xcode 26.6, iOS 26.5 runtime only).** `~/gate.sh
+<branch>` is `ci_scripts/gate.sh` (versioned; `cp` it over after a change).
+Every GATE.md block for the box must copy its invocation exactly:
+
+```
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests<or /Suite> test
+```
+
+Do **not** add `CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES` on the box: they
+invalidate the cached `breez_sdk_sparkFFI` .pcm and the build fails with a
+stale-module error (C-E, 2026-09-02). `OS=26.2` is the Air form and does not
+exist there. The pbxproj guard is the three-dot `origin/main...HEAD` diff.
+
 `-skipPackagePluginValidation` is required for headless/`xcodebuild` and CI:
 `swift-secp256k1` ships a `SharedSourcesPlugin` that fails SwiftPM plugin
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
@@ -389,10 +406,15 @@ a one-call swap when the server finishes migrating to NIP-98.
   (AllRecipes returned `SOURCE_UNAVAILABLE` on 2026-09-01 while Bon Appétit
   extracted cleanly).
 
-**Timeouts:** every AI endpoint needs a **long-timeout client (~75s)**, not the
-general 15s one. Android learned this the hard way on Nourish (LLM + awaited
-pantry publish) and Cheffy (whole-response, no streaming). Build
-`HttpClientFactory.computeClient` on day one of the API work.
+**Timeouts:** every AI endpoint goes on the **long-timeout client
+(`HttpClientFactory.computeClient`, 75s)**, not the general 15s one. The 75s is
+**margin**, not a measured need: on 2026-09-02 (C-E Gate 2, box → production)
+Cheffy answered turn 1 in 3.5s (500 chars), turn 2 in 2.2s (567 chars), and a
+1840-char structured `hungry` recipe in 5.9s — nothing near 15s. The headroom
+is for a 2000-char prompt with 12 turns of history, `format` mode at its 10k
+char cap, and Nourish (LLM + awaited pantry publish), where Android did see the
+general client time out. Keep 75s — a timeout on a paid feature is worse than
+headroom — but do not cite "routinely exceeds 15s" for Cheffy chat; cite these.
 
 ### NIP-98 (the linchpin — net-new on iOS)
 
