@@ -353,7 +353,7 @@ verified against in the concern's report.
 |---|---|---|
 | `POST /api/extract-recipe/public` (`{url}` only) | **none** | free, per-IP 8/hr · 30/day (`extract-url` scope) |
 | `POST /api/extract-recipe` (`type: url`/`image`/`text`) | ⚠️ **`url` mode: none** — the server gates only `image`/`text` (NIP-98 via `authedPost`); the web souschef page sends `type: url` with no Authorization header at all | `url`: free, same per-IP scope as `/public`; `image`/`text`: members; 401 → sign-in, 403 → members-only |
-| `POST /api/zappy` (Cheffy) | **NIP-98, header optional** (frontend `04cf67cd`, 2026-08-17; body `pubkey` ignored) | any active membership; absent header = anonymous → **bare 403, no `code`** (`apiRejected(code:nil)` — a pantry outage is the same 403); invalid header → 401; whole-response, no streaming; `computeClient` |
+| `POST /api/zappy` (Cheffy) | **NIP-98, header optional** (frontend `04cf67cd`, 2026-08-17; body `pubkey` ignored; re-verified unchanged at `origin/main` 2026-09-02) | any active membership; absent header or verified non-member → **bare 403, no `code`** (`apiRejected(code:nil)`, rendered "not available right now" + retry, never a denial — a pantry outage is the same 403 because `hasActiveMembership` swallows errors as `false`, so the handler's fail-open branch is dead); invalid header → 401; whole-response, no streaming; `computeClient` |
 | `POST /api/zappy/scan` (fridge photo → ingredients) | **NIP-98 required** (401 without) | members + per-IP 8/hr · 30/day (`code: RATE_LIMITED`); not built on iOS (C-E excluded it) |
 | `POST /api/nourish` + `/nourish/scan` | **pubkey-in-body** | members, fail-closed |
 | `GET /api/membership?pubkey=` | none | public batch read |

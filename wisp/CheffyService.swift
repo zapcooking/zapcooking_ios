@@ -21,7 +21,10 @@ import Foundation
 /// path, 429). The members-only 403 carries **no `code`**, so it reaches
 /// callers as `.apiRejected(code: nil, message:)` — never `.membersOnly` —
 /// because a pantry outage renders as the same 403 and must not read as a
-/// definitive denial (build spec 0.7a).
+/// definitive denial (build spec 0.7a). Verified 2026-09-02 against
+/// `origin/main` (handler unchanged since `04cf67cd`): the handler's
+/// "fail open on outage" branch is unreachable because
+/// `hasActiveMembership` catches every error and returns `false`.
 struct CheffyService {
     var client: URLSession = HttpClientFactory.computeClient
 

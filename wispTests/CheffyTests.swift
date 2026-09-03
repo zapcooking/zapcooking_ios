@@ -156,8 +156,10 @@ struct CheffyTests {
         let m = CheffyViewModel.bubble(for: .apiRejected(code: nil, message: "Cheffy is available to Cook+ members."), id: 1)
         #expect(m.kind == .error)
         #expect(m.content == Cheffy.unavailableMessage)
-        #expect(m.statusLine == "Cheffy is available to Cook+ members.")
-        #expect(m.content.contains("may also be briefly offline"))
+        // Client copy only: the server's denial string never reaches the bubble.
+        #expect(m.statusLine == nil)
+        #expect(!m.content.contains("Cook+"))
+        #expect(m.content.contains("right now") && m.content.contains("Try again"))
     }
 
     @Test func bubble_notMemberCodeIsGatedMessageOnly() {

@@ -195,12 +195,14 @@ final class CheffyViewModel {
             // `code: NOT_MEMBER` — not emitted by /api/zappy today, mapped for
             // the day it is. Message only (§4.3).
             return Message(id: id, role: .cheffy, content: Cheffy.membersOnlyMessage, kind: .gated)
-        case .apiRejected(let code, let message) where code == nil:
+        case .apiRejected(let code, _) where code == nil:
             // The bare 403 (and a defensive 200-with-ok:false). Not a flat
-            // denial: a pantry outage is the same 403.
+            // denial: a pantry outage is the same 403. The server's message
+            // ("… available to Cook+ members.") is deliberately not shown —
+            // it reads as the denial this bubble must not be.
             return Message(
                 id: id, role: .cheffy, content: Cheffy.unavailableMessage, kind: .error,
-                expression: .concerned, statusLine: message
+                expression: .concerned
             )
         case .apiRejected(_, let message):
             return Message(

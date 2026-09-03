@@ -133,10 +133,13 @@ nonisolated enum Cheffy {
     static let signInMessage = "Sign in with a key to cook with Cheffy."
 
     /// In-chat line for a bare 403 (no `code`). Deliberately NOT a flat
-    /// denial: the membership lookup runs against pantry and an outage
-    /// renders as the same 403, so the copy names both readings.
+    /// denial: the server's membership lookup (`hasActiveMembership`)
+    /// swallows a pantry outage as "not a member", so the same 403 means
+    /// either reading. Leads with "right now", names both, ends on retry.
+    /// Client copy only — the server's `error` string is never rendered
+    /// here, so a §4.3-sensitive surface can't drift with the web's copy.
     static let unavailableMessage =
-        "Cheffy isn't available for this account right now. Cheffy is a Pro Kitchen members feature, and the kitchen may also be briefly offline."
+        "Cheffy isn't available right now. It may be briefly offline, or this account may not have a Pro Kitchen membership. Try again in a moment."
 
     /// 401 / NIP-98 rejected — a broken or stale signature, not a
     /// membership question.
