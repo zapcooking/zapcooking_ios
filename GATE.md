@@ -1,4 +1,4 @@
-# GATE — concern-c-e/cheffy @ 64c9f2a
+# GATE — concern-c-e/cheffy @ 8443165
 Concern C-E: Cheffy chat (`POST /api/zappy`, NIP-98, member-gated) — chat +
 "Surprise me", message-only gate, Save → recipe compose hand-off, Recipes-tab
 sparkle → Intelligence menu (Sous Chef → Cheffy), `CheffyIcon`, kill switch.
