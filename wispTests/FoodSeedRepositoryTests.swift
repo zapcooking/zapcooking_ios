@@ -74,5 +74,31 @@ struct FoodSeedRepositoryTests {
         #expect(FoodSeedRepository(defaults: defaults).pubkeys.isEmpty)
         defaults.set([alice, bob], forKey: "zc_food_seed_pubkeys")
         #expect(FoodSeedRepository(defaults: defaults).pubkeys == [alice, bob])
+        // A clean cache is left alone.
+        #expect(defaults.stringArray(forKey: "zc_food_seed_pubkeys") == [alice, bob])
+    }
+
+    @Test func cachedSeed_isSanitizedOnRead_andRewritten() {
+        let suite = "FoodSeedRepositoryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "zc_food_seed_pubkeys"
+
+        defaults.set([alice.uppercased(), "junk", bob, bob, curator], forKey: key)
+        let repo = FoodSeedRepository(defaults: defaults)
+        #expect(repo.pubkeys == [alice, bob])
+        #expect(defaults.stringArray(forKey: key) == [alice, bob])
+
+        // Nothing usable → treated as never loaded, and the key is cleared so
+        // `ensureLoaded` refetches instead of trusting an empty-but-present list.
+        defaults.set(["junk", curator], forKey: key)
+        #expect(FoodSeedRepository(defaults: defaults).pubkeys.isEmpty)
+        #expect(defaults.stringArray(forKey: key) == nil)
+    }
+
+    @Test func sanitize_normalizesFiltersAndDedupes() {
+        #expect(FoodSeedRepository.sanitize([alice.uppercased(), "x", curator, alice, bob]) == [alice, bob])
+        #expect(FoodSeedRepository.normalizedPubkey(alice.uppercased()) == alice)
+        #expect(FoodSeedRepository.normalizedPubkey("not-a-pubkey") == nil)
     }
 }

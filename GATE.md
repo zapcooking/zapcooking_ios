@@ -27,8 +27,9 @@ git fetch origin
 ~/gate.sh concern-c-j/dewisp-seed
 ```
 Expected: main's failure set exactly (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`
-plus the three `SafetyTests`, issue #57) and **+7 new passes**:
-`FoodSeedRepositoryTests` (6), `FoodTopicsTests/allHashtags_isNormalized_dedupedAndCoversEverySection` (1).
+plus the three `SafetyTests`, issue #57) and **+9 new passes**:
+`FoodSeedRepositoryTests` (8), `FoodTopicsTests/allHashtags_isNormalized_dedupedAndCoversEverySection` (1).
+(Was +7 at the gate commit; the Copilot review added two cache-sanitizing tests.)
 No live sentinel — the curator kind-3 fetch is live and is not exercised by
 the hermetic run.
 
