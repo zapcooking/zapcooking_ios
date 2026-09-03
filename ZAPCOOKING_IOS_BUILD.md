@@ -80,6 +80,20 @@ invalidate the cached `breez_sdk_sparkFFI` .pcm and the build fails with a
 stale-module error (C-E, 2026-09-02). `OS=26.2` is the Air form and does not
 exist there. The pbxproj guard is the three-dot `origin/main...HEAD` diff.
 
+**Freeze rule (C-J, 2026-09-03).** `GATE.md` must be the **last commit** on
+the branch when the gate runs, and its hash is what the merge check refers
+to. **Review fixes are code and re-open the freeze**: after any commit that
+follows the gate file — Copilot findings included — push a fresh `GATE.md`
+pinning the new HEAD and rerun. `gate.sh` refuses to run when `GATE.md` is
+not the HEAD commit. #47/#48 shipped a crash through exactly that gap.
+
+**Verdict source (C-J, 2026-09-03).** `gate.sh` judges the `.xcresult`
+bundle via `xcresulttool get test-results summary`, not xcodebuild's text.
+The suite is Swift Testing; the `Executed N tests` lines are the empty
+XCTest portion and read 0/0/0 while the real suite runs. A **zero total is
+a failed gate**, and any failure outside the known set (#57) fails it.
+`~/gate.sh --parse <bundle>` re-judges an existing bundle.
+
 `-skipPackagePluginValidation` is required for headless/`xcodebuild` and CI:
 `swift-secp256k1` ships a `SharedSourcesPlugin` that fails SwiftPM plugin
 validation outside Xcode's interactive trust prompt. Xcode GUI builds that
