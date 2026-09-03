@@ -118,7 +118,8 @@ enum HttpClientFactory {
     /// Nourish (LLM + awaited pantry publish) and Cheffy (whole-response, no
     /// streaming) — build this tier on day one of the API work (build spec §2).
     /// Used by `ZapCookingApi` for the AI surfaces; membership reads stay on
-    /// `generalClient`.
+    /// `generalClient`. Measured (C-E, 2026-09-02): Cheffy chat 2–6 s end to
+    /// end, so 75 s is headroom for long prompts / Nourish, not a typical need.
     static let computeClient: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 75

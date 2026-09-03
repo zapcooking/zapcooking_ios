@@ -16,13 +16,18 @@ import Foundation
 ///
 /// **Auth model** (verified against `ZapCookingApi.kt`):
 /// - NIP-98 (kind 27235) for `/api/membership/check-status`,
-///   `/api/extract-recipe`, and the Note Review endpoints.
-/// - pubkey-in-body for `/api/zappy`, `/api/nourish` (Phase 2 AI endpoints —
-///   identity in the body, a one-call swap when the server finishes its
-///   NIP-98 migration).
+///   `/api/extract-recipe`, the Note Review endpoints, and — since frontend
+///   `04cf67cd` (2026-08-17) — `/api/zappy` (Cheffy, header optional
+///   server-side, body pubkey ignored) and `/api/zappy/scan` (required).
+/// - pubkey-in-body for `/api/nourish` only (the last body-identity AI
+///   endpoint; a one-call swap when the server migrates it).
 /// - none for `/api/membership` (public batch) and `/api/extract-recipe/public`.
 ///
-/// Request models are kept auth-agnostic so the pubkey-in-body endpoints can
+/// ⚠️ The build doc's endpoint table has been wrong about auth shape twice
+/// (Sous Chef URL import, then Cheffy). Verify against the web handler
+/// (`zapcooking/frontend` `src/routes/api/**/+server.ts`), not the table.
+///
+/// Request models are kept auth-agnostic so a body-identity endpoint can
 /// adopt NIP-98 with a single-call change, not a rewrite.
 nonisolated enum ZapCookingApi {
     static let baseURL = URL(string: "https://zap.cooking")!
@@ -92,7 +97,7 @@ nonisolated enum ZapCookingApi {
     /// both a real 401 and the check-status 200-degrade trigger the retry on
     /// the same terms. A rejection of a freshly signed header is returned
     /// as-is: re-signing cannot fix it.
-    private static func authedPost(
+    static func authedPost(
         signer: Nip98Signing,
         path: String,
         body: String,
@@ -163,6 +168,12 @@ nonisolated enum ZapCookingApi {
         return try await send(request, client: client)
     }
 
+    /// Stable `.transport` payload for a timed-out request, so callers on
+    /// the compute client can key a "taking too long" line on it instead
+    /// of a locale-dependent `URLError` description (the
+    /// `SousChefImportService` pattern, lifted into the shared spine).
+    static let timedOutTransportMessage = "The request timed out."
+
     private static func send(
         _ request: URLRequest, client: URLSession
     ) async throws -> (HTTPURLResponse, Data) {
@@ -174,6 +185,8 @@ nonisolated enum ZapCookingApi {
             return (http, data)
         } catch let error as ZapCookingApiError {
             throw error
+        } catch let error as URLError where error.code == .timedOut {
+            throw ZapCookingApiError.transport(Self.timedOutTransportMessage)
         } catch {
             throw ZapCookingApiError.transport(error.localizedDescription)
         }

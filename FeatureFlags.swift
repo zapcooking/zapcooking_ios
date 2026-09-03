@@ -48,6 +48,13 @@ enum FeatureFlags {
     /// (`POST /api/nourish`) is deferred (build-doc item 15).
     static let nourishEnabled: Bool = true
 
+    /// Cheffy chat (Concern C-E) — member-gated `POST /api/zappy` behind
+    /// NIP-98. Operational kill switch, not a compliance one: the gate
+    /// itself is server-side and renders message-only (§4.3). When `false`,
+    /// the Recipes-tab sparkle-menu entry disappears (`CheffyGate.entryVisible`)
+    /// and no Cheffy surface is reachable.
+    static let cheffyEnabled: Bool = true
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the
