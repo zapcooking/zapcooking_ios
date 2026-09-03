@@ -19,7 +19,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func setUpUI() {
-        statusLabel.text = "Sharing to Wisp…"
+        statusLabel.text = "Sharing to Zap Cooking…"
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.textColor = .label
         statusLabel.textAlignment = .center
@@ -78,7 +78,7 @@ final class ShareViewController: UIViewController {
         }
 
         guard stagedAny else {
-            statusLabel.text = "Wisp doesn't support this content."
+            statusLabel.text = "Zap Cooking doesn't support this content."
             spinner.stopAnimating()
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             extensionContext?.completeRequest(returningItems: nil)

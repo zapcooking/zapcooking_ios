@@ -27,7 +27,7 @@ struct RelayAuthApprovalSheet: View {
                 .lineLimit(2)
                 .truncationMode(.middle)
 
-            Text("This relay asks Wisp to prove your identity (NIP-42). Approving signs a one-time event with your key. You can revoke this any time in Relay settings.")
+            Text("This relay asks Zap Cooking to prove your identity (NIP-42). Approving signs a one-time event with your key. You can revoke this any time in Relay settings.")
                 .font(.system(size: 13))
                 .foregroundStyle(theme.palette.onSurfaceVariant)
 

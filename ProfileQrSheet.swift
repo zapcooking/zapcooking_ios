@@ -202,7 +202,7 @@ struct ProfileQrSheet: View {
         .padding(.horizontal, 20)
     }
 
-    /// QR with a center-overlaid avatar (or Wisp logo as fallback). Uses error correction
+    /// QR with a center-overlaid avatar (or Zap Cooking logo as fallback). Uses error correction
     /// level "H" so the symbol still scans through the occlusion.
     private func qrWithCenterAvatar(payload: String) -> some View {
         ZStack {
@@ -214,7 +214,7 @@ struct ProfileQrSheet: View {
                     CachedAvatarView(url: avatarUrl, size: 40)
                         .clipShape(Circle())
                 } else {
-                    Image("WispLogo")
+                    Image("ZcLogo")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 36, height: 36)

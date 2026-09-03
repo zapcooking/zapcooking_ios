@@ -27,12 +27,15 @@ final class OnboardingViewModel {
 
     private static let indexerRelays = RelayDefaults.indexers
 
+    /// Mirrors Android `onboarding_*` waiting copy (strings.xml:538-545).
     static let statusMessages = [
         "Mapping your social graph\u{2026}",
         "Finding your friends\u{2019} relays\u{2026}",
         "Connecting to your network\u{2026}",
-        "Locating gm notes\u{2026}",
-        "Lower your time preference\u{2026}",
+        "Time to make the donuts\u{2026}",
+        "Grinding the coffee\u{2026}",
+        "Firing up the grill\u{2026}",
+        "A watched pot never boils\u{2026}",
         "Almost there\u{2026}"
     ]
 

@@ -7,7 +7,7 @@ private let signupLog = Logger(subsystem: "wisp", category: "signup-wallet")
 /// Orchestrates the brand-new-user sign-up flow:
 ///
 ///   1. profile (avatar + bio) while RelayProber discovers good relays
-///   2. follow some suggested accounts (creators / active now / news)
+///   2. follow some suggested accounts (curated creators / active in the kitchen)
 ///   3. pick hashtags as an "Interests" set
 ///   4. compose an introduction note
 ///
@@ -43,13 +43,12 @@ final class SignUpViewModel {
     }
 
     enum SuggestionSection: String, CaseIterable, Identifiable {
-        case creators, activeNow, news
+        case creators, activeNow
         var id: String { rawValue }
         var title: String {
             switch self {
             case .creators:  "Creators"
-            case .activeNow: "Active right now"
-            case .news:      "News"
+            case .activeNow: "Active in the kitchen"
             }
         }
     }
@@ -91,8 +90,9 @@ final class SignUpViewModel {
 
     var creators: Suggestions = Suggestions()
     var activeNow: Suggestions = Suggestions()
-    var news: Suggestions = Suggestions()
-    var selectedFollows: Set<String> = []
+    /// Zap Cooking (the curator) is pre-selected so a new user follows it by
+    /// default — Android `loadSuggestions` (`_selectedPubkeys = setOf(ZC_PUBKEY)`).
+    var selectedFollows: Set<String> = [ZapCookingCurator.pubkey]
     private var suggestionsLoaded = false
 
     // MARK: - Topics step state (was "hashtags")
@@ -102,10 +102,10 @@ final class SignUpViewModel {
         didSet { applyTopicQuery() }
     }
     var topicSuggestions: [String] = []
-    var popularTopics: [String] = []
-    var loadingPopular: Bool = true
-    @ObservationIgnored private var allTopics: [String] = []
-    @ObservationIgnored private var topicsLoaded = false
+    /// Search backing for the topic field: the static `FoodTopics` taxonomy,
+    /// the same list the section chips render. No relay fetch (mirrors
+    /// Android `TopicOnboardingViewModel`).
+    @ObservationIgnored private let allTopics: [String] = FoodTopics.allHashtags
 
     // MARK: - Intro note state
 
@@ -116,33 +116,18 @@ final class SignUpViewModel {
 
     // MARK: - Constants
 
-    private static let creatorPubkeys = [
-        "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",  // fiatjaf
-        "e2ccf7cf20403f3f2a4a55b328f0de3be38558a7d5f33632fdaaefc726c1c8eb"   // utxo
-    ]
-
-    private static let activeRelays = [
-        "wss://premium.primal.net",
-        "wss://nostr.wine",
-        "wss://pyramid.fiatjaf.com"
-    ]
-
-    private static let newsRelay = "wss://news.utxo.one"
-
-    private static let topicsTrendingRelay = "wss://feeds.nostrarchives.com/hashtags/trending"
-    private static let topicsAllRelay = "wss://feeds.nostrarchives.com/hashtags/all"
+    /// Cap on curated creators shown so "Meet the creators" stays browsable
+    /// (Android `MAX_CREATORS`).
+    private static let maxCreators = 24
+    /// Cap on "Active in the kitchen" food posters shown (Android `MAX_ACTIVE`).
+    private static let maxActive = 20
 
     private static let indexerRelays = RelayDefaults.onboarding
+    private static let onlyFoodRelays = FoodSeedRepository.onlyFoodRelays
 
     /// Shared with the login-time auto-seed in `RelaySettingsRepository` so new accounts and
     /// existing accounts that lack a kind-10050 converge on the same DM inbox relay.
     private static let wispDmRelay = RelaySettingsRepository.defaultDmRelay
-
-    static let popularHashtags = [
-        "nostr", "bitcoin", "lightning", "art", "photography",
-        "music", "tech", "news", "podcasting", "gm",
-        "introductions", "memes"
-    ]
 
     // MARK: - Init
 
@@ -439,58 +424,53 @@ final class SignUpViewModel {
         suggestionsLoaded = true
         Task { await loadCreators() }
         Task { await loadActiveNow() }
-        Task { await loadNews() }
     }
 
+    /// "Meet the creators": the curator account's follow list (the OnlyFood
+    /// food seed, `FoodSeedRepository`), Zap Cooking itself always included
+    /// and listed first. Mirrors Android `OnboardingViewModel.loadCreators`.
     private func loadCreators() async {
+        await FoodSeedRepository.shared.ensureLoaded()
+        let pubkeys = FoodSeedRepository.creatorOrder(
+            seed: FoodSeedRepository.shared.pubkeys, cap: Self.maxCreators
+        )
         let events = await RelayPool.query(
-            relays: Self.activeRelays,
-            filter: NostrFilter(kinds: [0], authors: Self.creatorPubkeys),
+            relays: (Self.onlyFoodRelays + Self.indexerRelays).uniquedPreservingOrder(),
+            filter: NostrFilter(kinds: [0], authors: pubkeys),
             timeout: 8
         )
-        let profiles = latestKind0Profiles(events)
-        creators = Suggestions(profiles: profiles, loading: false)
+        var byPubkey: [String: ProfileData] = [:]
+        for profile in latestKind0Profiles(events) { byPubkey[profile.pubkey] = profile }
+        // Keep a Zap Cooking card even if its kind-0 didn't load, so the
+        // pre-selected follow stays visible and toggleable.
+        if byPubkey[ZapCookingCurator.pubkey] == nil {
+            byPubkey[ZapCookingCurator.pubkey] = FoodSeedRepository.curatorFallbackProfile
+        }
+        creators = Suggestions(profiles: pubkeys.compactMap { byPubkey[$0] }, loading: false)
     }
 
+    /// "Active in the kitchen": recent authors of posts carrying a food
+    /// hashtag on the OnlyFood relays — the OnlyFood feed's query shape. No
+    /// `since` floor: the food stream is lower volume, so the newest window
+    /// is taken to avoid an empty section (Android `loadActiveNow`).
     private func loadActiveNow() async {
-        let since = Int(Date().timeIntervalSince1970) - 20 * 60
         let events = await RelayPool.query(
-            relays: Self.activeRelays,
-            filter: NostrFilter(kinds: [1], limit: 200, since: since),
+            relays: Self.onlyFoodRelays,
+            filter: NostrFilter(kinds: [1], tTags: FoodHashtags.all, limit: 200),
             timeout: 8
         )
-        let unique = Array(Set(events.map(\.pubkey))).shuffled().prefix(20).map { $0 }
+        let authors = Set(events.map(\.pubkey)).subtracting([ZapCookingCurator.pubkey])
+        let unique = Array(authors).shuffled().prefix(Self.maxActive).map { $0 }
         guard !unique.isEmpty else {
             activeNow = Suggestions(profiles: [], loading: false)
             return
         }
         let profileEvents = await RelayPool.query(
-            relays: Self.activeRelays,
+            relays: (Self.onlyFoodRelays + Self.indexerRelays).uniquedPreservingOrder(),
             filter: NostrFilter(kinds: [0], authors: unique),
             timeout: 8
         )
-        let profiles = latestKind0Profiles(profileEvents)
-        activeNow = Suggestions(profiles: profiles, loading: false)
-    }
-
-    private func loadNews() async {
-        let events = await RelayPool.query(
-            relays: [Self.newsRelay],
-            filter: NostrFilter(kinds: [1], limit: 100),
-            timeout: 8
-        )
-        let unique = Array(Set(events.map(\.pubkey)))
-        guard !unique.isEmpty else {
-            news = Suggestions(profiles: [], loading: false)
-            return
-        }
-        let profileEvents = await RelayPool.query(
-            relays: [Self.newsRelay] + Self.activeRelays,
-            filter: NostrFilter(kinds: [0], authors: unique),
-            timeout: 8
-        )
-        let profiles = latestKind0Profiles(profileEvents)
-        news = Suggestions(profiles: profiles, loading: false)
+        activeNow = Suggestions(profiles: latestKind0Profiles(profileEvents), loading: false)
     }
 
     private func latestKind0Profiles(_ events: [NostrEvent]) -> [ProfileData] {
@@ -519,7 +499,6 @@ final class SignUpViewModel {
             switch section {
             case .creators:  creators.profiles
             case .activeNow: activeNow.profiles
-            case .news:      news.profiles
             }
         }()
         let pubkeys = Set(profiles.map(\.pubkey))
@@ -679,50 +658,6 @@ final class SignUpViewModel {
             initialHashtags: Array(selectedHashtags),
             keypair: keypair
         )
-    }
-
-    /// Fetch trending + all kind-30015 interest sets from the
-    /// `feeds.nostrarchives.com` topic feeds. Trending populates the popular
-    /// chip list; "all" backs the search-suggestions filter.
-    func loadTopics() {
-        guard !topicsLoaded else { return }
-        topicsLoaded = true
-        Task { await fetchTrendingTopics() }
-        Task { await fetchAllTopics() }
-    }
-
-    private func fetchTrendingTopics() async {
-        let events = await RelayPool.query(
-            relays: [Self.topicsTrendingRelay],
-            filter: NostrFilter(kinds: [30015], dTags: ["trending"], limit: 1),
-            timeout: 8
-        )
-        let topics = extractTopics(from: events)
-        popularTopics = topics
-        loadingPopular = false
-    }
-
-    private func fetchAllTopics() async {
-        let events = await RelayPool.query(
-            relays: [Self.topicsAllRelay],
-            filter: NostrFilter(kinds: [30015], dTags: ["all"], limit: 1),
-            timeout: 8
-        )
-        let topics = extractTopics(from: events)
-        allTopics = topics
-        applyTopicQuery()
-    }
-
-    private func extractTopics(from events: [NostrEvent]) -> [String] {
-        let latest = events.max(by: { $0.createdAt < $1.createdAt })
-        guard let event = latest else { return [] }
-        var seen = Set<String>()
-        var out: [String] = []
-        for tag in event.tags where tag.count >= 2 && tag[0] == "t" {
-            guard let n = Nip51Hashtags.normalize(tag[1]) else { continue }
-            if seen.insert(n).inserted { out.append(n) }
-        }
-        return out
     }
 
     private func applyTopicQuery() {

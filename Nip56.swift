@@ -49,7 +49,7 @@ nonisolated enum Nip56 {
     /// (extra `p` tags) so ops can find them via `kinds:[1984] #p:<admin>`.
     static let pantryModAdmins: [String] = [
         "a723805cda67251191c8786f4da58f797e6977582301354ba8e91bcb0342dc9c",
-        "319ad3e790634dbe86f14db9c2995b26ee3c6228be55f89c4c7fea9acc01d50a",
+        ZapCookingCurator.pubkey,
     ]
 
     /// NIP-56 standard report types (3rd element of a typed report `p`/`e` tag).

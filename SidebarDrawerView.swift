@@ -61,7 +61,7 @@ struct SidebarDrawerView: View {
     }
     private var versionString: String {
         let v = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0"
-        return "wisp v\(v)"
+        return "Zap Cooking v\(v)"
     }
     private var accounts: [String] {
         var list = NostrKey.accounts()
@@ -404,7 +404,7 @@ struct SidebarDrawerView: View {
 
     private var versionFooter: some View {
         HStack(spacing: 6) {
-            Image("WispLogo")
+            Image("ZcLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 16, height: 16)

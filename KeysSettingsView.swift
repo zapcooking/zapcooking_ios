@@ -258,7 +258,7 @@ struct KeysSettingsView: View {
                         CachedAvatarView(url: url, size: 44)
                             .clipShape(Circle())
                     } else {
-                        Image("WispLogo")
+                        Image("ZcLogo")
                             .resizable()
                             .scaledToFit()
                             .frame(width: 40, height: 40)

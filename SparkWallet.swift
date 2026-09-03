@@ -472,7 +472,7 @@ final class SparkWallet: Wallet {
             let response = try await sdk.receivePayment(
                 request: ReceivePaymentRequest(
                     paymentMethod: ReceivePaymentMethod.bolt11Invoice(
-                        description: description.isEmpty ? "Wisp wallet" : description,
+                        description: description.isEmpty ? "Zap Cooking wallet" : description,
                         amountSats: amountSats,
                         expirySecs: UInt32(min(expirySecs, Int64(UInt32.max))),
                         paymentHash: nil,

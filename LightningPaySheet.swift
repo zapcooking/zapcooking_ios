@@ -88,7 +88,7 @@ struct LightningPaySheet: View {
         }
     }
 
-    /// QR of the lightning address with a center-overlaid avatar (or Wisp logo
+    /// QR of the lightning address with a center-overlaid avatar (or Zap Cooking logo
     /// fallback). Error-correction "H" keeps it scannable through the occlusion.
     private func qrWithCenterAvatar(payload: String) -> some View {
         ZStack {
@@ -100,7 +100,7 @@ struct LightningPaySheet: View {
                     CachedAvatarView(url: avatarUrl, size: 40)
                         .clipShape(Circle())
                 } else {
-                    Image("WispLogo")
+                    Image("ZcLogo")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 36, height: 36)

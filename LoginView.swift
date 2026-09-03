@@ -20,7 +20,7 @@ struct LoginView: View {
                 // during sheet presentation, jumping every form element.
                 Spacer().frame(maxHeight: 60)
 
-                Image("WispLogo")
+                Image("ZcLogo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 72, height: 72)

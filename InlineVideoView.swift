@@ -418,7 +418,7 @@ struct InlineVideoView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Allow Wisp to add to Photos in Settings to save videos.")
+            Text("Allow Zap Cooking to add to Photos in Settings to save videos.")
         }
         .fullScreenCover(isPresented: $showFullScreen, onDismiss: {
             // Resume the inline player on dismiss only when autoplay is on,
