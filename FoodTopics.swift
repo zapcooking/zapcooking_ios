@@ -98,4 +98,19 @@ nonisolated enum FoodTopics {
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "-", with: "")
     }
+
+    /// Every section's tags as normalized hashtags, deduplicated in taxonomy
+    /// order (a few labels recur across sections, e.g. "Pasta", "Breakfast").
+    /// Backs the sign-up topic search field (Concern C-J).
+    static let allHashtags: [String] = {
+        var seen = Set<String>()
+        var out: [String] = []
+        for section in sections {
+            for tag in section.tags {
+                let hashtag = toHashtag(tag)
+                if seen.insert(hashtag).inserted { out.append(hashtag) }
+            }
+        }
+        return out
+    }()
 }

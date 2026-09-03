@@ -548,7 +548,8 @@ Ranked. The cut line is after P1.
 11. Nourish **read** (Explore + recipe-detail card; pantry public filter;
     issue #6 does not block)
 12. Cook mode + timers
-13. Food-first onboarding (topics, creator starter pack, save-a-recipe)
+13. Food-first onboarding (topics, creator starter pack, save-a-recipe) —
+    topics + creators landed in Concern C-J; save-a-recipe still open
 
 ### P2 — Fast follow after approval
 14. Cheffy chat (+ save-to-recipes hand-off)
@@ -1264,9 +1265,16 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   error (no EOSE) are distinct UI states; a timeout is no longer a stuck
   spinner. Hermetic test `toggle_globalFollowingGlobal_doesNotRequeryGlobal`
   is the proof that the second Global render issues no REQ.
-- 3.4 Food-first onboarding: curated creator starter pack (**Seth owes the
-  list** — Android's is still the inherited generic set), food-framed copy,
-  topic picker, save-a-recipe first-run step.
+- 3.4 Food-first onboarding (**Concern C-J**): topic picker is the static
+  `FoodTopics` taxonomy (sections + chips, mirrors Android); "Meet the
+  creators" is the **Zap Cooking curator account's kind-3 follow list**
+  (`ZapCookingCurator.pubkey` = `319ad3e7…`, read live and cached by
+  `FoodSeedRepository`, curator pre-selected and first) — the same source
+  Android reads, so the creator starter pack is an **operational task**
+  (follow food creators from that account), not a list to hand-write.
+  "Active in the kitchen" is recent food-tagged posters on the OnlyFood
+  relays; the generic "News sources" section is gone. Still open:
+  save-a-recipe first-run step.
 - 3.5 Nourish **read** (Concern C-F): `NourishParser` + pinned pantry
   `RelayPool.queryReportingAuth` (`NourishFilter.publicCorpus`: authors=service,
   kinds=[30078], limit=200) + Nourish Explore (My Kitchen CTA) +
@@ -1653,8 +1661,11 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
    one string — not a pure deletion; private zaps and private reactions ride
    the same list, and the "Broadcast DM Relays" button becomes a fourth publish
    path the moment the seed is gone).
-7. **Creator starter pack** — the curated food-creator list is still owed on
-   *both* platforms
+7. ~~**Creator starter pack** — the curated food-creator list is still owed on
+   *both* platforms~~ **Resolved (C-J):** there is no list to write. Both
+   platforms read the curator account's kind-3 follow list live
+   (`319ad3e7…`). Keeping the pack current means following food creators
+   from that account — ops, not a release asset.
 8. **Privacy policy correction** — the two false retention claims block the
    App Privacy label (§4.4). Web-repo work that gates iOS submission.
 9. **Timeline** — is there a target submission date, and does it sit before or

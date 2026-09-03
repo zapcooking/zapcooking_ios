@@ -57,7 +57,6 @@ struct SignUpFlowView: View {
         withAnimation { step += 1 }
         switch step {
         case 1: viewModel.loadSuggestions()
-        case 2: viewModel.loadTopics()
         default: break
         }
     }
@@ -239,10 +238,6 @@ private struct SuggestionsStep: View {
     @Bindable var viewModel: SignUpViewModel
     var onNext: () -> Void
 
-    private static let creatorRoles: [String: String] = [
-        "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d": "Creator of Nostr"
-    ]
-
     private var totalSelected: Int { viewModel.selectedFollows.count }
 
     var body: some View {
@@ -252,7 +247,7 @@ private struct SuggestionsStep: View {
                     Spacer().frame(height: 24)
 
                     HStack {
-                        Text("Find people to follow")
+                        Text("Follow cooks & creators")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(Color.wispOnSurface)
                         Spacer()
@@ -263,13 +258,12 @@ private struct SuggestionsStep: View {
                         #endif
                     }
 
-                    Text("Follow at least 5 accounts to build your feed")
+                    Text("Follow at least 5 accounts to fill your feed with food")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
                     creatorsSection
                     activeNowSection
-                    newsSection
 
                     Spacer().frame(height: 16)
                 }
@@ -303,21 +297,28 @@ private struct SuggestionsStep: View {
             Text("Meet the creators")
                 .font(.headline)
                 .foregroundStyle(Color.wispOnSurface)
+            Text("Chefs and cooks curated by Zap Cooking")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if viewModel.creators.loading {
                 loadingRow(height: 80)
             } else if viewModel.creators.profiles.isEmpty {
-                emptyRow("No creators right now")
+                emptyRow("Couldn't load creators right now")
             } else {
-                HStack(spacing: 12) {
-                    ForEach(viewModel.creators.profiles, id: \.pubkey) { profile in
-                        CreatorCard(
-                            profile: profile,
-                            role: Self.creatorRoles[profile.pubkey] ?? "",
-                            selected: viewModel.selectedFollows.contains(profile.pubkey),
-                            onToggle: { viewModel.togglePubkey(profile.pubkey) }
-                        )
+                // Up to 24 cards (curator first) — horizontal, like Android.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(viewModel.creators.profiles, id: \.pubkey) { profile in
+                            CreatorCard(
+                                profile: profile,
+                                role: "Food creator",
+                                selected: viewModel.selectedFollows.contains(profile.pubkey),
+                                onToggle: { viewModel.togglePubkey(profile.pubkey) }
+                            )
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -331,11 +332,11 @@ private struct SuggestionsStep: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Active right now")
+                    Text("Active in the kitchen")
                         .font(.headline)
                         .foregroundStyle(Color.wispOnSurface)
                     if !profiles.isEmpty {
-                        Text("\(profiles.count) people posting right now")
+                        Text("\(profiles.count) people posting about food")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -363,46 +364,13 @@ private struct SuggestionsStep: View {
             if viewModel.activeNow.loading {
                 loadingRow(height: 60)
             } else if profiles.isEmpty {
-                emptyRow("No active users found")
+                emptyRow("No active cooks found right now")
             } else {
                 StackedAvatars(
                     profiles: profiles,
                     selected: viewModel.selectedFollows,
                     onToggle: { viewModel.togglePubkey($0) }
                 )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var newsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("News sources")
-                .font(.headline)
-                .foregroundStyle(Color.wispOnSurface)
-            Text("Pick the news sources you want to follow")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer().frame(height: 4)
-
-            if viewModel.news.loading {
-                loadingRow(height: 60)
-            } else if viewModel.news.profiles.isEmpty {
-                emptyRow("No news sources found")
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(viewModel.news.profiles, id: \.pubkey) { profile in
-                            NewsCard(
-                                profile: profile,
-                                selected: viewModel.selectedFollows.contains(profile.pubkey),
-                                onToggle: { viewModel.togglePubkey(profile.pubkey) }
-                            )
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
             }
         }
     }
@@ -438,7 +406,7 @@ private struct TopicsStep: View {
                     Spacer().frame(height: 24)
 
                     HStack {
-                        Text("Follow topics")
+                        Text("What do you like to cook?")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(Color.wispOnSurface)
                         Spacer()
@@ -447,7 +415,7 @@ private struct TopicsStep: View {
                             .foregroundStyle(Color.wispPrimary)
                     }
 
-                    Text("Pick a few hashtags so your feed has more to show")
+                    Text("Pick a few food topics so your feed is full of the dishes you love.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -461,7 +429,7 @@ private struct TopicsStep: View {
                         selectedSection
                     }
 
-                    popularSection
+                    foodSections
 
                     Spacer().frame(height: 24)
                 }
@@ -583,31 +551,29 @@ private struct TopicsStep: View {
         }
     }
 
+    /// The `FoodTopics` taxonomy as emoji-titled sections of chips — the same
+    /// picker Android renders (`OnboardingTopicsScreen`). Labels display as
+    /// written ("Gluten Free"); selection is tracked by normalized hashtag.
     @ViewBuilder
-    private var popularSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Popular topics")
-                .font(.headline)
-                .foregroundStyle(Color.wispOnSurface)
-
-            if viewModel.loadingPopular {
-                HStack {
-                    ProgressView().controlSize(.small)
+    private var foodSections: some View {
+        ForEach(FoodTopics.sections, id: \.title) { section in
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(section.emoji)  \(section.title)")
+                    .font(.headline)
+                    .foregroundStyle(Color.wispOnSurface)
+                if let note = section.note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 120)
-            } else if viewModel.popularTopics.isEmpty {
-                Text("Couldn't load trending topics — you can still search above.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
                 FlowLayout {
-                    ForEach(viewModel.popularTopics.prefix(40), id: \.self) { topic in
+                    ForEach(section.tags, id: \.self) { tag in
+                        let hashtag = FoodTopics.toHashtag(tag)
                         OnboardingFilterChip(
-                            label: "#\(topic)",
-                            selected: viewModel.selectedHashtags.contains(topic),
+                            label: tag,
+                            selected: viewModel.selectedHashtags.contains(hashtag),
                             leadingCheck: false,
-                            action: { viewModel.toggleHashtag(topic) }
+                            action: { viewModel.toggleHashtag(hashtag) }
                         )
                     }
                 }
