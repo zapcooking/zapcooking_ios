@@ -157,6 +157,7 @@ struct ArticleView: View {
             ArticleInlineText(
                 text: viewModel.title ?? "Untitled",
                 emojiMap: emojiMap,
+                profiles: viewModel.profiles,
                 font: scaledUIFont(28, .semibold),
                 color: UIColor(Color.wispOnSurface)
             )
@@ -233,6 +234,7 @@ struct ArticleView: View {
             ArticleInlineText(
                 text: text,
                 emojiMap: emojiMap,
+                profiles: viewModel.profiles,
                 font: headingUIFont(level),
                 color: UIColor(Color.wispOnSurface)
             )
@@ -243,6 +245,7 @@ struct ArticleView: View {
             ArticleInlineText(
                 text: text,
                 emojiMap: emojiMap,
+                profiles: viewModel.profiles,
                 font: scaledUIFont(15, .regular),
                 color: UIColor(Color.wispOnSurface)
             )
@@ -304,6 +307,7 @@ struct ArticleView: View {
                 ArticleInlineText(
                     text: text,
                     emojiMap: emojiMap,
+                    profiles: viewModel.profiles,
                     font: scaledUIFont(15, .regular),
                     color: UIColor(Color.wispOnSurfaceVariant),
                     italic: true
@@ -614,6 +618,10 @@ struct ArticleActionBar: View {
 private struct ArticleInlineText: View {
     let text: String
     let emojiMap: [String: String]
+    /// Passed in rather than read from the repository inside the formatter so
+    /// the representable re-renders when a mentioned profile arrives — the
+    /// same reason `emojiVersion` exists.
+    var profiles: [String: ProfileData] = [:]
     let font: UIFont
     let color: UIColor
     var italic: Bool = false
@@ -624,6 +632,7 @@ private struct ArticleInlineText: View {
         ArticleInlineTextRepresentable(
             text: text,
             emojiMap: emojiMap,
+            profiles: profiles,
             font: italic ? font.withTraits(.traitItalic) : font,
             color: color,
             linkColor: UIColor(Color.zapLink),
@@ -636,6 +645,7 @@ private struct ArticleInlineText: View {
 private struct ArticleInlineTextRepresentable: UIViewRepresentable {
     let text: String
     let emojiMap: [String: String]
+    let profiles: [String: ProfileData]
     let font: UIFont
     let color: UIColor
     let linkColor: UIColor
@@ -706,6 +716,7 @@ private struct ArticleInlineTextRepresentable: UIViewRepresentable {
         uiView.attributedText = ArticleInlineFormatter.build(
             text: text,
             emojiMap: emojiMap,
+            profiles: profiles,
             font: font,
             color: color,
             linkColor: linkColor,
@@ -734,6 +745,7 @@ private enum ArticleInlineFormatter {
     static func build(
         text: String,
         emojiMap: [String: String],
+        profiles: [String: ProfileData],
         font: UIFont,
         color: UIColor,
         linkColor: UIColor,
@@ -745,6 +757,7 @@ private enum ArticleInlineFormatter {
             case .text(let t):
                 appendFormatted(
                     t, to: result,
+                    profiles: profiles,
                     font: font, color: color,
                     linkColor: linkColor, codeBackground: codeBackground
                 )
@@ -816,6 +829,7 @@ private enum ArticleInlineFormatter {
     private static func appendFormatted(
         _ text: String,
         to out: NSMutableAttributedString,
+        profiles: [String: ProfileData],
         font: UIFont,
         color: UIColor,
         linkColor: UIColor,
@@ -963,10 +977,27 @@ private enum ArticleInlineFormatter {
                     var attrs = baseAttrs
                     attrs[.foregroundColor] = linkColor
                     let entity = ns.substring(with: m.range)
-                    out.append(NSAttributedString(
-                        string: MarkdownBlocks.shortenNostrEntity(entity),
-                        attributes: attrs
-                    ))
+                    // A mention of a person reads as their name. The old
+                    // behavior truncated the bech32 to "@nprofile1q…" for
+                    // every mention in every article, because this renderer
+                    // works on raw markdown and never decoded the entity or
+                    // looked up a profile the way note content does.
+                    if let pubkey = MarkdownBlocks.profilePubkey(from: entity) {
+                        let resolved = profiles[pubkey] ?? ProfileRepository.shared.get(pubkey)
+                        // A short npub, not an ellipsis or hex, when the
+                        // profile hasn't loaded: a stable identifier the
+                        // reader can match against other surfaces.
+                        // Trailing whitespace saved into a display name would
+                        // collide with the space after the mention.
+                        let name = (resolved?.displayString ?? Nip19.shortNpub(hex: pubkey))
+                            .replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+                        out.append(NSAttributedString(string: "@\(name)", attributes: attrs))
+                    } else {
+                        out.append(NSAttributedString(
+                            string: MarkdownBlocks.shortenNostrEntity(entity),
+                            attributes: attrs
+                        ))
+                    }
                     i = m.range.location + m.range.length
                 } else {
                     appendChar()
