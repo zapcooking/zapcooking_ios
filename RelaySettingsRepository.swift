@@ -104,6 +104,12 @@ final class RelaySettingsRepository {
         }
 
         await ensureDmRelayList(keypair: keypair)
+
+        // Issue #1 Part B: once per account per version of the decommissioned
+        // set, republish the kind-10002 without confirmed-dead relays. Runs
+        // after the merge above so it acts on the freshest list we know of;
+        // does its own connectivity-gated fetch before touching anything.
+        await RelayListRepair.shared.runIfNeeded(keypair: keypair)
     }
 
     /// After `bootstrap` (a thorough fetch of the user's own lists), guarantee the account has
@@ -237,6 +243,21 @@ final class RelaySettingsRepository {
     }
 
     func broadcastGeneral(keypair: Keypair) { publishGeneral(keypair: keypair) }
+
+    /// Relays this account's list metadata is published to: top write relays
+    /// plus the indexer fallback set. Exposed for `RelayListRepair`, which
+    /// must fetch from and publish to exactly the same targets.
+    func publishTargets(pubkey: String) -> [String] {
+        Array(Set(topWriteRelays(pubkey: pubkey) + Self.indexerRelays))
+    }
+
+    /// Adopt a kind-10002 that `RelayListRepair` just published, so in-memory
+    /// state, UserDefaults, and `RelayListRepository` match what is live.
+    /// The event is strictly newer than `generalUpdatedAt`, so the ingest
+    /// timestamp guard admits it.
+    func ingestRepublishedRelayList(_ event: NostrEvent) {
+        ingestGeneralEvent(event, persist: true)
+    }
 
     // MARK: - DM relays (kind 10050)
 
