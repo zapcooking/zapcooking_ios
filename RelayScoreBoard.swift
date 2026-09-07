@@ -5,7 +5,12 @@ nonisolated final class RelayScoreBoard {
     private(set) var authorRelays: [String: Set<String>] = [:]
     private(set) var scoredRelays: [(url: String, count: Int)] = []
 
-    func build(follows: [String], writeRelaysByAuthor: [String: [String]], redundancy: Int = 3) {
+    func build(
+        follows: [String],
+        writeRelaysByAuthor: [String: [String]],
+        redundancy: Int = 3,
+        decommissioned: Set<String> = RelayDefaults.decommissioned
+    ) {
         var newRA: [String: Set<String>] = [:]
         var newAR: [String: Set<String>] = [:]
 
@@ -20,6 +25,7 @@ nonisolated final class RelayScoreBoard {
             var valid: [String] = []
             for url in relays {
                 guard let canon = RelayUrlValidator.canonicalize(url),
+                      !RelayDecommission.isDecommissioned(canon, in: decommissioned),
                       seen.insert(canon).inserted else { continue }
                 valid.append(canon)
             }
@@ -57,7 +63,8 @@ nonisolated final class RelayScoreBoard {
             guard parts.count == 2 else { continue }
             // Canonicalize on load: handles persisted variants (case, trailing slash, .onion, IPs)
             // from older builds. Multiple variants of the same relay merge their author sets.
-            guard let url = RelayUrlValidator.canonicalize(String(parts[0])) else { continue }
+            guard let url = RelayUrlValidator.canonicalize(String(parts[0])),
+                  !RelayDecommission.isDecommissioned(url) else { continue }
             let authors = Set(parts[1].split(separator: ",").map(String.init))
             board.relayAuthors[url, default: []].formUnion(authors)
             for author in authors { board.authorRelays[author, default: []].insert(url) }

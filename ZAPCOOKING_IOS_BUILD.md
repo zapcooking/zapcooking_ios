@@ -287,6 +287,29 @@ xcodebuild -project wisp.xcodeproj -scheme wisp \
 rm -f wispTests/.nip56_live_enable
 ```
 
+**Live kind-10002 repair** (opt-in; Concern 1 / issue #1 Part B). Uses an
+ephemeral keypair — never a real nsec. Seeds a kind-10002 on
+`RelayDefaults.defaults` that carries a fake "decommissioned" host
+(`wss://decommissioned-probe.invalid`, injected through
+`RelayListRepair.Environment`; the production set stays empty) between real
+user relays with `read` / `write` markers and a foreign `client` tag; runs the
+repair; asserts the served list is the original minus that one `r` tag,
+byte-for-byte, strictly newer; runs the repair twice more (marker → no-op,
+marker cleared → clean, no republish); then kind-5 deletes **both** events
+(`e` ×2 + `k`) and re-queries until gone. Key is held until cleanup confirms.
+
+```
+touch wispTests/.relay_repair_live_enable
+xcodebuild -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/RelayListRepairLiveTests \
+  test
+rm -f wispTests/.relay_repair_live_enable
+```
+
 ---
 
 ## 1. The audit — inherited free vs net-new
@@ -532,11 +555,35 @@ the members relay is correct; replacing the aggregators breaks recipe loading.
 Treat `articles` as a **union** — coverage is uneven (`nostr.wine` has returned
 0 on live probes).
 
-`relay.damus.io` is **decommissioned** — delete, don't replace. Sole-relay at
-exactly one site (`SearchViewModel.engagementFallbackRelays`), resolved by
-collapsing onto `RelayDefaults.fallbacks`. Every other site is co-listed.
-`notify.damus.io` does not appear in this codebase — that host is Android-only
-(`RelayPool.kt:502`). No preservation needed.
+⚠️ **Corrected (Concern 1 / issue #1, Sep 7) — `relay.damus.io` is NOT
+decommissioned.** Earlier revisions of this note and of Concern 0.2 asserted
+the relay "shut down end of July 2026". A live probe on **2026-09-07 17:07
+UTC** from a real websocket client (websocat) completed the handshake,
+answered `["REQ",…,{"kinds":[1],"limit":3}]` with events whose `created_at`
+were within 5 s of wall-clock, and sent EOSE; NIP-11 reports
+`strfry 1.1.0-1-g691a533f11eb`. The evidence behind the shutdown claim was an
+HTTP/1.1 upgrade attempt with hand-rolled headers, which Cloudflare answers
+with **503** — an artifact of that probe shape, not of the relay. PR #2
+stripped a working relay from 35 files on that basis, and Android #205 did the
+same. This is the ninth correction to this document and the first that
+originated from Seth's own claim rather than from the inherited Android doc.
+The removal stands as shipped; whether damus goes back into the default sets
+is §9 open question 10, not part of Concern 1. The rest of the paragraph is
+kept as the record of what was done: sole-relay at exactly one site
+(`SearchViewModel.engagementFallbackRelays`), resolved by collapsing onto
+`RelayDefaults.fallbacks`; every other site was co-listed. `notify.damus.io`
+does not appear in this codebase — that host is Android-only
+(`RelayPool.kt:502`).
+
+**Decommissioned relays are a probe question, not a list question.**
+`RelayDefaults.decommissioned` (Concern 1) exists for relays we would
+otherwise re-sign out of a user's existing kind-10002 and **ships empty**; an
+entry needs a confirmed shutdown (host no longer resolves, or an operator
+announcement) with the probe date in a comment. A 503 on an HTTP upgrade is
+not evidence. For *origination* — the sign-up fallback path — the fallback
+set is run through the same kind-20242 write probe RelayProber uses and only
+passers are published (`RelayProber.probedFallback`), so no constant is ever
+signed into a public relay list unprobed.
 
 ---
 
@@ -726,20 +773,24 @@ tests `cooking.zap.app.Tests` / `cooking.zap.app.UITests`; App Group
 Xcode scheme/product/`wisp/` folder names left alone — renaming buys nothing
 with no installed base to migrate.
 
-**Concern 0.2 — Kill the dead relay.** Remove `wss://relay.damus.io` from all
-35 Swift production files. Mechanical deletion, no replacement at co-listed
-sites. Sole-relay at exactly one site
-(`SearchViewModel.engagementFallbackRelays`), resolved by collapsing onto
-`RelayDefaults.fallbacks`. Every other site is co-listed.
-`notify.damus.io` does not appear in this codebase — that host is Android-only
-(`RelayPool.kt:502`). No preservation needed.
+**Concern 0.2 — Kill the dead relay.** *Shipped as PR #2 (Aug 5).* ⚠️
+**Rationale corrected Sep 7 (Concern 1): the relay was not dead.** See the §2
+Relays note for the probe (2026-09-07 17:07 UTC, websocat, fresh events +
+EOSE, strfry 1.1.0); the "shut down end of July" claim rested on a Cloudflare
+503 to a hand-rolled HTTP/1.1 upgrade. The removal itself stands — the
+default sets work without it — and whether to restore it is §9 question 10.
+What was done: removed `wss://relay.damus.io` from 35 Swift production files,
+mechanical deletion, no replacement at co-listed sites; sole-relay at exactly
+one site (`SearchViewModel.engagementFallbackRelays`), resolved by collapsing
+onto `RelayDefaults.fallbacks`. `notify.damus.io` does not appear in this
+codebase — that host is Android-only (`RelayPool.kt:502`).
 Grep gate (production Swift only; test fixtures may keep the hostname):
 `grep -rn 'relay\.damus\.io' --include=*.swift . | grep -v '^\./wispTests/'`
-must return nothing. Also audit for a **persisted-prefs prune** — if any user's
-stored relay list can contain damus, it needs a load-time filter, because
-Android found onboarding had permanently written a dead relay into some
-accounts' prefs. On iOS the blast radius is higher: the dead relay can be
-signed into a published kind-10002. Filed separately; do not inherit the bug.
+must return nothing. The **persisted-prefs prune** this paragraph asked for is
+**Concern 1 / issue #1**: `RelayDefaults.decommissioned` (empty) applied at
+every ingest point, the sign-up fallback set probed before publish, and a
+once-per-account republish (`RelayListRepair`) that prunes the fetched
+event's tags rather than the parsed list so markers and order survive.
 
 **Concern 0.3 — Relay sovereignty.** Off Wisp infra entirely:
 `Nip29.defaultGroupRelay` → `wss://pantry.zap.cooking`; `RelayProber` /
@@ -1684,3 +1735,9 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
    App Privacy label (§4.4). Web-repo work that gates iOS submission.
 9. **Timeline** — is there a target submission date, and does it sit before or
    after the Android mid-August Play push?
+10. **Restore `relay.damus.io` to the default sets?** Concern 0.2 removed it
+   from 35 files on a shutdown claim the 2026-09-07 probe disproved (§2
+   Relays note). The removal narrowed `fallbacks`, `onboarding`, and the
+   discovery pool for no reason, and Android (#205/#206) did the same. Not
+   part of Concern 1; recorded here, not acted on. If restored, restore on
+   both platforms in the same week so the role sets stay in lockstep.

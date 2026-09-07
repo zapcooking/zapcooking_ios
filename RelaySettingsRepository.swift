@@ -19,6 +19,12 @@ import Observation
 ///
 /// Kind 10002 events (general list) are also fed into `RelayListRepository` so the
 /// existing inbox-relay lookups (threads, replies, extended network) stay coherent.
+///
+/// Every list that can be re-signed from here is pruned against
+/// `RelayDefaults.decommissioned` on ingest and on hydration (issue #1), so a
+/// confirmed-dead relay that arrived from another client or an older build is
+/// never carried into a publish. `addGeneralRelay` / `addDmRelay` are the
+/// user's own typed intent and are deliberately not pruned.
 @Observable
 @MainActor
 final class RelaySettingsRepository {
@@ -98,6 +104,12 @@ final class RelaySettingsRepository {
         }
 
         await ensureDmRelayList(keypair: keypair)
+
+        // Issue #1 Part B: once per account per version of the decommissioned
+        // set, republish the kind-10002 without confirmed-dead relays. Runs
+        // after the merge above so it acts on the freshest list we know of;
+        // does its own connectivity-gated fetch before touching anything.
+        await RelayListRepair.shared.runIfNeeded(keypair: keypair)
     }
 
     /// After `bootstrap` (a thorough fetch of the user's own lists), guarantee the account has
@@ -232,6 +244,21 @@ final class RelaySettingsRepository {
 
     func broadcastGeneral(keypair: Keypair) { publishGeneral(keypair: keypair) }
 
+    /// Relays this account's list metadata is published to: top write relays
+    /// plus the indexer fallback set. Exposed for `RelayListRepair`, which
+    /// must fetch from and publish to exactly the same targets.
+    func publishTargets(pubkey: String) -> [String] {
+        Array(Set(topWriteRelays(pubkey: pubkey) + Self.indexerRelays))
+    }
+
+    /// Adopt a kind-10002 that `RelayListRepair` just published, so in-memory
+    /// state, UserDefaults, and `RelayListRepository` match what is live.
+    /// The event is strictly newer than `generalUpdatedAt`, so the ingest
+    /// timestamp guard admits it.
+    func ingestRepublishedRelayList(_ event: NostrEvent) {
+        ingestGeneralEvent(event, persist: true)
+    }
+
     // MARK: - DM relays (kind 10050)
 
     func addDmRelay(_ url: String, keypair: Keypair) {
@@ -297,7 +324,7 @@ final class RelaySettingsRepository {
     private func ingestGeneralEvent(_ event: NostrEvent, persist: Bool) {
         guard event.kind == Nip51Lists.kindRelayList else { return }
         if event.createdAt <= generalUpdatedAt { return }
-        let parsed = Nip51Lists.parseGeneralRelayList(event)
+        let parsed = RelayDecommission.prune(Nip51Lists.parseGeneralRelayList(event))
         let prevAuth = Dictionary(uniqueKeysWithValues: generalRelays.map { ($0.url, $0.auth) })
         generalRelays = parsed.map { r in
             var copy = r
@@ -313,7 +340,7 @@ final class RelaySettingsRepository {
     private func ingestDmEvent(_ event: NostrEvent, persist: Bool) {
         guard event.kind == Nip51Lists.kindDmRelays else { return }
         if event.createdAt <= dmUpdatedAt { return }
-        dmRelays = Nip51Lists.parseRelaySetList(event)
+        dmRelays = RelayDecommission.prune(urls: Nip51Lists.parseRelaySetList(event))
         dmUpdatedAt = event.createdAt
         if persist { saveDm(pubkey: event.pubkey) }
     }
@@ -340,11 +367,11 @@ final class RelaySettingsRepository {
         let d = UserDefaults.standard
         if let data = d.data(forKey: generalKey(pubkey)),
            let decoded = try? JSONDecoder().decode([GeneralRelay].self, from: data) {
-            generalRelays = decoded
+            generalRelays = RelayDecommission.prune(decoded)
         } else { generalRelays = [] }
         generalUpdatedAt = d.integer(forKey: generalTsKey(pubkey))
 
-        dmRelays = d.stringArray(forKey: dmKey(pubkey)) ?? []
+        dmRelays = RelayDecommission.prune(urls: d.stringArray(forKey: dmKey(pubkey)) ?? [])
         dmUpdatedAt = d.integer(forKey: dmTsKey(pubkey))
 
         searchRelays = d.stringArray(forKey: searchKey(pubkey)) ?? []

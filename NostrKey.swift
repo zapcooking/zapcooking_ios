@@ -121,6 +121,7 @@ enum NostrKey {
             "follow_pubkeys_\(pubkey)",
             "follow_pubkeys_ts_\(pubkey)",
             "relay_scoreboard_v1_\(pubkey)",
+            "relay_list_repair_done_\(pubkey)",
             "latest_feed_ts_\(pubkey)",
             // Safety: mute lists, blocked users, muted threads, mute event timestamp
             "muted_words_\(pubkey)",

@@ -109,8 +109,10 @@ final class RelayListRepository {
     // MARK: - Ingest
 
     /// Update the cache from a kind:10002 event. Newer `createdAt` wins.
+    /// Confirmed-decommissioned relays are dropped at this point (issue #1)
+    /// so neither routing nor a later republish can pick them up.
     @discardableResult
-    func ingest(_ event: NostrEvent) -> Bool {
+    func ingest(_ event: NostrEvent, decommissioned: Set<String> = RelayDefaults.decommissioned) -> Bool {
         guard event.kind == 10002 else { return false }
         if let existing = cache[event.pubkey], event.createdAt <= existing.updatedAt { return false }
 
@@ -118,7 +120,8 @@ final class RelayListRepository {
         var write: [String] = []
         for tag in event.tags {
             guard tag.count >= 2, tag[0] == "r" else { continue }
-            guard let url = RelayUrlValidator.canonicalize(tag[1]) else { continue }
+            guard let url = RelayUrlValidator.canonicalize(tag[1]),
+                  !RelayDecommission.isDecommissioned(url, in: decommissioned) else { continue }
             if tag.count == 2 {
                 read.append(url); write.append(url)
             } else {
@@ -175,7 +178,7 @@ final class RelayListRepository {
     func ingestDm(_ event: NostrEvent) -> Bool {
         guard event.kind == Nip51Lists.kindDmRelays else { return false }
         if let existing = dmCache[event.pubkey], event.createdAt <= existing.updatedAt { return false }
-        let relays = Nip51Lists.parseRelaySetList(event)
+        let relays = RelayDecommission.prune(urls: Nip51Lists.parseRelaySetList(event))
         let entry = DmEntry(relays: relays, updatedAt: event.createdAt)
         dmCache[event.pubkey] = entry
         saveDmToDefaults(event.pubkey, entry)
@@ -216,8 +219,9 @@ final class RelayListRepository {
 
     private func loadFromDefaults(_ pubkey: String) -> Entry? {
         guard let dict = UserDefaults.standard.dictionary(forKey: "relaylist_\(pubkey)") else { return nil }
-        let read = dict["r"] as? [String] ?? []
-        let write = dict["w"] as? [String] ?? []
+        // Prune on read too: an entry persisted by an older build predates the set.
+        let read = RelayDecommission.prune(urls: dict["r"] as? [String] ?? [])
+        let write = RelayDecommission.prune(urls: dict["w"] as? [String] ?? [])
         let updatedAt = dict["t"] as? Int ?? 0
         guard !read.isEmpty || !write.isEmpty else { return nil }
         return Entry(read: read, write: write, updatedAt: updatedAt)
@@ -233,7 +237,7 @@ final class RelayListRepository {
 
     private func loadDmFromDefaults(_ pubkey: String) -> DmEntry? {
         guard let dict = UserDefaults.standard.dictionary(forKey: "peer_dm_relays_\(pubkey)") else { return nil }
-        let relays = dict["relays"] as? [String] ?? []
+        let relays = RelayDecommission.prune(urls: dict["relays"] as? [String] ?? [])
         let updatedAt = dict["t"] as? Int ?? 0
         return DmEntry(relays: relays, updatedAt: updatedAt)
     }

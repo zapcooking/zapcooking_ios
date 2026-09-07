@@ -10,8 +10,16 @@ import Foundation
 ///      and waiting for its `OK`. Record per-relay latency.
 ///   5. Return the 8 lowest-latency passers as `[GeneralRelay]` (read+write).
 ///
-/// Falls back to a small default set on any failure path so the sign-up flow
-/// always lands in a usable state.
+/// On any failure path the fallback set is **probed the same way** and only
+/// the passers are returned (`probedFallback`). The fallback constants are
+/// never published unprobed: a relay that dies later would otherwise be signed
+/// into every failed-discovery sign-up's public kind-10002 (issue #1). If
+/// nothing passes, the result is empty and `SignUpViewModel` publishes no
+/// relay list at all rather than an unverified one.
+///
+/// `RelayDefaults.decommissioned` is applied to the harvest tally and to the
+/// fallback set before probing, so a confirmed-dead relay that still answers
+/// `OK` (a zombie) cannot be selected either.
 enum RelayProber {
 
     enum Phase: Equatable {
@@ -45,10 +53,17 @@ enum RelayProber {
 
     static func discoverAndSelect(
         keypair: Keypair,
+        decommissioned: Set<String> = RelayDefaults.decommissioned,
         onPhase: @escaping @Sendable (Phase) -> Void,
         onProbing: @escaping @Sendable (String) -> Void = { _ in }
     ) async -> [GeneralRelay] {
         onPhase(.connecting)
+        let fallback = { @Sendable () async -> [GeneralRelay] in
+            await probedFallback(decommissioned: decommissioned) { url in
+                onProbing(url)
+                return await probe(url: url, keypair: keypair)?.passed ?? false
+            }
+        }
 
         let harvested = await RelayPool.query(
             relays: bootstrapRelays,
@@ -58,21 +73,15 @@ enum RelayProber {
 
         guard !harvested.isEmpty else {
             onPhase(.failed)
-            return fallbackRelays
+            return await fallback()
         }
 
         onPhase(.discovering)
-        let tally = tallyRelayUrls(harvested)
-        guard !tally.isEmpty else {
-            onPhase(.failed)
-            return fallbackRelays
-        }
-
         onPhase(.selecting)
-        let candidates = filterMiddleTier(tally)
+        let candidates = candidates(from: harvested, decommissioned: decommissioned)
         guard !candidates.isEmpty else {
             onPhase(.failed)
-            return fallbackRelays
+            return await fallback()
         }
 
         onPhase(.testing)
@@ -81,11 +90,46 @@ enum RelayProber {
 
         guard !passed.isEmpty else {
             onPhase(.failed)
-            return fallbackRelays
+            return await fallback()
         }
 
         onPhase(.done)
         return passed.prefix(targetCount).map { GeneralRelay(url: $0.url, read: true, write: true) }
+    }
+
+    /// Harvest → tally → middle tier → decommission prune. Everything before
+    /// the network probe, in one pure step so the prune on community-sourced
+    /// URLs is testable without sockets.
+    static func candidates(
+        from events: [NostrEvent],
+        decommissioned: Set<String> = RelayDefaults.decommissioned
+    ) -> [String] {
+        let tally = tallyRelayUrls(events)
+        guard !tally.isEmpty else { return [] }
+        return RelayDecommission.prune(urls: filterMiddleTier(tally), decommissioned: decommissioned)
+    }
+
+    /// The failure-path replacement for returning `fallbackRelays` verbatim:
+    /// drop confirmed-decommissioned entries, then run the same write probe
+    /// over what is left and keep only the relays that answered `OK`.
+    /// Probe-driven, so it never rots the way a list does. `probe` is
+    /// injectable for tests; production passes `probe(url:keypair:)`.
+    static func probedFallback(
+        decommissioned: Set<String> = RelayDefaults.decommissioned,
+        probe: @escaping @Sendable (String) async -> Bool
+    ) async -> [GeneralRelay] {
+        let candidates = RelayDecommission.prune(fallbackRelays, decommissioned: decommissioned)
+        guard !candidates.isEmpty else { return [] }
+        let passed: Set<String> = await withTaskGroup(of: String?.self) { group in
+            for relay in candidates {
+                group.addTask { await probe(relay.url) ? relay.url : nil }
+            }
+            var ok = Set<String>()
+            for await url in group { if let url { ok.insert(url) } }
+            return ok
+        }
+        // Preserve the constant's order so the published list is stable.
+        return candidates.filter { passed.contains($0.url) }
     }
 
     // MARK: - Internals
