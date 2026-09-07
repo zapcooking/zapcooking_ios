@@ -19,6 +19,12 @@ import Observation
 ///
 /// Kind 10002 events (general list) are also fed into `RelayListRepository` so the
 /// existing inbox-relay lookups (threads, replies, extended network) stay coherent.
+///
+/// Every list that can be re-signed from here is pruned against
+/// `RelayDefaults.decommissioned` on ingest and on hydration (issue #1), so a
+/// confirmed-dead relay that arrived from another client or an older build is
+/// never carried into a publish. `addGeneralRelay` / `addDmRelay` are the
+/// user's own typed intent and are deliberately not pruned.
 @Observable
 @MainActor
 final class RelaySettingsRepository {
@@ -297,7 +303,7 @@ final class RelaySettingsRepository {
     private func ingestGeneralEvent(_ event: NostrEvent, persist: Bool) {
         guard event.kind == Nip51Lists.kindRelayList else { return }
         if event.createdAt <= generalUpdatedAt { return }
-        let parsed = Nip51Lists.parseGeneralRelayList(event)
+        let parsed = RelayDecommission.prune(Nip51Lists.parseGeneralRelayList(event))
         let prevAuth = Dictionary(uniqueKeysWithValues: generalRelays.map { ($0.url, $0.auth) })
         generalRelays = parsed.map { r in
             var copy = r
@@ -313,7 +319,7 @@ final class RelaySettingsRepository {
     private func ingestDmEvent(_ event: NostrEvent, persist: Bool) {
         guard event.kind == Nip51Lists.kindDmRelays else { return }
         if event.createdAt <= dmUpdatedAt { return }
-        dmRelays = Nip51Lists.parseRelaySetList(event)
+        dmRelays = RelayDecommission.prune(urls: Nip51Lists.parseRelaySetList(event))
         dmUpdatedAt = event.createdAt
         if persist { saveDm(pubkey: event.pubkey) }
     }
@@ -340,11 +346,11 @@ final class RelaySettingsRepository {
         let d = UserDefaults.standard
         if let data = d.data(forKey: generalKey(pubkey)),
            let decoded = try? JSONDecoder().decode([GeneralRelay].self, from: data) {
-            generalRelays = decoded
+            generalRelays = RelayDecommission.prune(decoded)
         } else { generalRelays = [] }
         generalUpdatedAt = d.integer(forKey: generalTsKey(pubkey))
 
-        dmRelays = d.stringArray(forKey: dmKey(pubkey)) ?? []
+        dmRelays = RelayDecommission.prune(urls: d.stringArray(forKey: dmKey(pubkey)) ?? [])
         dmUpdatedAt = d.integer(forKey: dmTsKey(pubkey))
 
         searchRelays = d.stringArray(forKey: searchKey(pubkey)) ?? []

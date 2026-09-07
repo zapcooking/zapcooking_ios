@@ -377,10 +377,16 @@ final class SignUpViewModel {
         }
     }
 
+    /// Nil when discovery *and* the probed fallback both came back empty: we
+    /// publish no kind-10002 rather than an unverified one (issue #1). The
+    /// account still routes through `RelaySettingsRepository.topWriteRelays`'
+    /// local defaults, and the user can add relays in Settings.
     private func signRelayListEvent() -> NostrEvent? {
         guard let privkey = Hex.decode(keypair.privkey) else { return nil }
+        let relays = RelayDecommission.prune(discoveredRelays)
+        guard !relays.isEmpty else { return nil }
         let now = NostrClock.now()
-        let tags = Nip51Lists.buildGeneralRelayTags(discoveredRelays)
+        let tags = Nip51Lists.buildGeneralRelayTags(relays)
         return try? NostrEvent.sign(
             privkey32: privkey,
             pubkey: keypair.pubkey,
