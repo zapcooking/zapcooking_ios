@@ -219,7 +219,11 @@ final class OnlyFoodFeedViewModel {
             state.endReached = true
             return
         }
-        guard let oldest = oldestPageableCreatedAt(state.seen.values, sortKey: state.sortTime) else { return }
+        guard let oldest = oldestPageableCreatedAt(
+            state.seen.values,
+            sortKey: state.sortTime,
+            isReachable: state.isHashtagReachable
+        ) else { return }
         let bounds = pageBoundsBehind(oldest)
         submit(load: .page, since: bounds.since, until: bounds.until)
     }
@@ -464,11 +468,13 @@ final class OnlyFoodFeedViewModel {
         }
         state.placedIds.subtract(eventIds)
         // A hidden reposter's attribution goes too; the entry stays if it
-        // has other reposters or arrived on its own.
+        // has other reposters or arrived on its own. Built as a new
+        // dictionary and assigned once — no mutation of the collection
+        // being walked.
         if !pubkeys.isEmpty {
-            for (id, authors) in state.repostAuthors {
+            state.repostAuthors = state.repostAuthors.compactMapValues { authors in
                 let kept = authors.filter { !pubkeys.contains($0) }
-                if kept.isEmpty { state.repostAuthors.removeValue(forKey: id) } else { state.repostAuthors[id] = kept }
+                return kept.isEmpty ? nil : kept
             }
         }
         emitNotes()
@@ -546,6 +552,13 @@ nonisolated final class OnlyFoodCacheState: @unchecked Sendable {
 
     func sortTime(_ event: NostrEvent) -> Int {
         sortTimes[event.id] ?? event.createdAt
+    }
+
+    /// An entry the relay `#t` query can reach: it carries a food tag itself,
+    /// or it came in through a (food-tagged) repost. Only these move the
+    /// paging cursor.
+    func isHashtagReachable(_ event: NostrEvent) -> Bool {
+        FoodHashtags.hasFoodTag(event) || repostAuthors[event.id] != nil
     }
 
     func unsettle() {
@@ -718,12 +731,15 @@ nonisolated func pageEndReached(_ receivedNew: Int) -> Bool {
 }
 
 /// Oldest hashtag-reachable entry by its sort time. Keyword-only firehose
-/// candidates (no food `#t`) must not move this cursor; a reposted inner note
-/// counts at the REPOST's time, not its own (which could be years older and
-/// would make the next page skip everything in between).
+/// candidates (not reachable) must not move this cursor; a reposted inner
+/// note is reachable through its repost and counts at the REPOST's time, not
+/// its own (which could be years older and would make the next page skip
+/// everything in between). `isReachable` defaults to the event's own food
+/// tag; the VM widens it to repost-inserted entries.
 nonisolated func oldestPageableCreatedAt(
     _ seen: some Collection<NostrEvent>,
-    sortKey: (NostrEvent) -> Int = { $0.createdAt }
+    sortKey: (NostrEvent) -> Int = { $0.createdAt },
+    isReachable: (NostrEvent) -> Bool = { FoodHashtags.hasFoodTag($0) }
 ) -> Int? {
-    seen.lazy.filter { FoodHashtags.hasFoodTag($0) }.map(sortKey).min()
+    seen.lazy.filter(isReachable).map(sortKey).min()
 }

@@ -224,6 +224,55 @@ struct OnlyFoodIngestParityTests {
         #expect(vm.repostAuthors(for: "inner") == [bob])
     }
 
+    /// Copilot review on #70: an inner note that carries no food tag of its
+    /// own (the repost did) must still move the paging cursor, at the
+    /// repost's time — otherwise a feed made of such entries can't page.
+    @Test func paging_cursorCountsRepostInsertedInner_evenWithoutItsOwnFoodTag() async {
+        var requests: [OnlyFoodQueryRequest] = []
+        let untagged = note(id: "inner", author: alice, createdAt: 50, tags: [])
+        let rp = repost(id: "r1", reposter: carol, of: untagged, createdAt: 300)
+        let vm = vm { req in
+            requests.append(req)
+            return requests.count == 1 ? self.loaded([rp]) : self.loaded([])
+        }
+        await vm.startAndWait()
+        #expect(vm.notes.map(\.id) == ["inner"])
+
+        vm.loadMore()
+        await vm.inFlight?.value
+        #expect(requests.count == 2, "paging issued")
+        #expect(requests[1].filter.until == 299, "cursor is the REPOST's time, not the inner note's 50")
+    }
+
+    @Test func hiddenReposter_losesAttribution_entryKeptWhileOtherReposterRemains() async {
+        let inner = note(id: "inner", author: alice, createdAt: 50)
+        let byBob = repost(id: "r1", reposter: bob, of: inner, createdAt: 300)
+        let byCarol = repost(id: "r2", reposter: carol, of: inner, createdAt: 400)
+        let vm = vm { _ in self.loaded([byBob, byCarol]) }
+        await vm.startAndWait()
+        #expect(vm.repostAuthors(for: "inner") == [bob, carol])
+
+        NotificationCenter.default.post(
+            name: .contentHidden, object: nil,
+            userInfo: [ContentHideKey.pubkeys: [bob], ContentHideKey.eventIds: [String]()]
+        )
+        for _ in 0..<50 where vm.repostAuthors(for: "inner").count == 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.repostAuthors(for: "inner") == [carol])
+        #expect(vm.notes.map(\.id) == ["inner"], "entry stays: another reposter remains")
+
+        NotificationCenter.default.post(
+            name: .contentHidden, object: nil,
+            userInfo: [ContentHideKey.pubkeys: [carol], ContentHideKey.eventIds: [String]()]
+        )
+        for _ in 0..<50 where !vm.repostAuthors(for: "inner").isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.repostAuthors(for: "inner").isEmpty)
+        #expect(vm.notes.map(\.id) == ["inner"], "the inner author is not hidden; the note itself stays")
+    }
+
     // MARK: - §3.2 polls
 
     @Test func poll_isAccepted_andStructuralCapApplies() async {
