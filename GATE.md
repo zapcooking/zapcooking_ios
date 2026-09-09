@@ -4,23 +4,29 @@ landing / persistence, still routed to the old OnlyFood tab. Own branch off
 main at 9a65c67. Local build only on Seth's MacBook Air; gates run on the
 MacinCloud box by hand.
 
-**Frozen at this commit.** App code is frozen at **640006b**; this GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **4f3d68c** (640006b plus the
+review-fix commit: `didStart` latch, prune moved into the shared setup block,
+`StartupServices` seam, `FeedStartTests`); this GATE.md is the only commit
+after it and is the HEAD commit — `gate.sh` refuses to run otherwise. The
+previous GATE.md (01ae895) is superseded; a further review fix re-opens the
+freeze again: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 640006b.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 4f3d68c.
 - Warnings in touched files: **zero new**. The five `FeedViewModel.swift`
-  warnings in the log (`:382`, `:640`, `:709`, `:1021`×2 — `SafetyFilter.shared`
+  warnings in the log (`:438`, `:692`, `:761`, `:1073`×2 — `SafetyFilter.shared`
   from a detached closure, `flushPendingInserts` await) blame to
   04c150e0 / e317ca21 / 52ce4838 / b7ddc4af on main, shifted by this
-  branch's insertions. `MainView.swift`, `RelaySetRepository.swift`,
-  `wisp/FeedKindStore.swift`, `wispTests/FeedKindStoreTests.swift`: none.
+  branch's insertions. (A sixth, `.live` in a default argument, appeared in
+  the first review-fix build and was fixed before commit.) `MainView.swift`,
+  `RelaySetRepository.swift`, `wisp/FeedKindStore.swift`,
+  `wispTests/FeedKindStoreTests.swift`, `wispTests/FeedStartTests.swift`: none.
 - Targeted serial run, 2026-09-09, `test-without-building`
-  `-only-testing:wispTests/FeedKindStoreTests`: **10 tests in 1 suite passed**
-  (79 s, all new).
-- pbxproj: no diff (three-dot). New files, both self-registering:
-  `wisp/FeedKindStore.swift`, `wispTests/FeedKindStoreTests.swift`.
+  `-only-testing:wispTests/FeedKindStoreTests -only-testing:wispTests/FeedStartTests`:
+  **13 tests in 2 suites passed** (32 s; 10 + 3, all new).
+- pbxproj: no diff (three-dot). New files, all self-registering:
+  `wisp/FeedKindStore.swift`, `wispTests/FeedKindStoreTests.swift`,
+  `wispTests/FeedStartTests.swift`.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
@@ -34,19 +40,27 @@ N tests ran on unified-feed/1-feedkind-onlyfood @ <this commit>`, with the four
 known failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus
 the three `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **764** `@Test` declarations (`git grep -cE
+**Count.** This branch has **767** `@Test` declarations (`git grep -cE
 '^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 754; the delta is the
-**+10** new `FeedKindStoreTests`. If the parsed total is 754 the run was on a
-stale tree — the script's branch assertion is a hard stop.
+**+13** new tests (`FeedKindStoreTests` 10, `FeedStartTests` 3). If the parsed
+total is 754 or 764 the run was on a stale tree — the script's branch
+assertion is a hard stop.
 
 ## Gate 2 — unit coverage (subset of Gate 1; name-check the bundle)
 ```sh
 ~/gate.sh --parse "$(ls -td ~/Library/Developer/Xcode/DerivedData/wisp-*/Logs/Test/*.xcresult | head -1)" \
-  | grep -E 'FeedKindStoreTests'
+  | grep -E 'FeedKindStoreTests|FeedStartTests'
 ```
-Required cases, each present and passing (§10, PR 1 row: "cold start with no
-saved key lands on OnlyFood **and** leaves `last_feed_type_<pubkey>` unset; an
-explicit pick writes it"):
+Required cases, each present and passing. Review gate (start() idempotence
+on the OnlyFood landing; prune runs there):
+- `onlyFoodLanding_startTwice_runsSharedSetupOnce` — sweep source registered
+  once, one metrics stream (no orphaned `metricsTask`), relay-set bootstrap
+  once, live discovery once, prune once; `stop()` unregisters that source
+- `onlyFoodLanding_runsEventStorePrune_protectingOwnPubkey`
+- `onlyFoodLanding_doesNotStartFollowsOrRelayWork`
+
+§10, PR 1 row ("cold start with no saved key lands on OnlyFood **and** leaves
+`last_feed_type_<pubkey>` unset; an explicit pick writes it"):
 - `coldStart_noSavedKey_landsOnOnlyFood_andDoesNotWrite`,
   `viewModel_coldStart_landsOnOnlyFood_andLeavesKeyUnset`
 - `explicitPick_writesKey_andRoundTrips`, `explicitOnlyFood_isDistinctFromNeverChose`,
