@@ -4,9 +4,12 @@ Unified feed, PR 4 of 7 (§9): OnlyFood ingest parity with Android — relay set
 off main at 7bf3e9f (the PR 3 merge). Local build only on Seth's MacBook Air;
 gates run on the MacinCloud box by hand. This GATE.md replaces PR 3's.
 
-**Frozen at this commit.** App code is frozen at **cc3dcc9**; this GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **f2cf3f5** (cc3dcc9 plus the
+Copilot review fixes: paging cursor counts repost-inserted inner notes;
+`dropHidden` rebuilds the attribution dictionary). This GATE.md is the only
+commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
+Previous GATE.md commits (d9ff69f, 42ad918) are superseded; a further review
+fix re-opens the freeze again: push a fresh GATE.md last.
 
 **This PR changes what every user sees on the default feed.** Expected
 visible difference: more posts (three relays instead of one), reposts and
@@ -14,7 +17,7 @@ polls now appear, a faster first paint after a cold start. See the PR body
 for the one UI gap (reposts render without a "reposted by" line).
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at cc3dcc9.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at f2cf3f5.
 - Warnings in touched files: **zero new**. `OnlyFoodFeedViewModel.swift`,
   `MainView.swift`, `wisp/FeedTabRouting.swift`, both test files: none.
   `OnlyFoodFilter.swift` shows eight (`SafetyFilter.shared` / `.snapshot`
@@ -26,10 +29,10 @@ for the one UI gap (reposts render without a "reposted by" line).
 - Targeted serial run, 2026-09-09, `test-without-building` over
   `OnlyFoodIngestParityTests OnlyFoodFeedViewModelTests OnlyFoodOwnPublishTests
   OnlyFoodHelpersTests OnlyFoodFilterTests FeedTabRoutingTests FeedKindStoreTests`:
-  **73 tests in 7 suites passed** (OnlyFoodIngestParityTests 16, OnlyFoodFeedViewModelTests 13,
+  **75 tests in 7 suites passed** (OnlyFoodIngestParityTests 18, OnlyFoodFeedViewModelTests 13,
   OnlyFoodOwnPublishTests 8, OnlyFoodHelpersTests 11, OnlyFoodFilterTests 6,
   FeedTabRoutingTests 8, FeedKindStoreTests 11; the new suite and one new
-  routing case are the +17 over main).
+  routing case are the +19 over main).
 - pbxproj: no diff (three-dot). New file `wispTests/OnlyFoodIngestParityTests.swift`
   is self-registering.
 
@@ -45,9 +48,9 @@ N tests ran on unified-feed/4-ingest-parity @ <this commit>`, with the four
 known failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus
 the three `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **788** `@Test` declarations (`git grep -cE
+**Count.** This branch has **790** `@Test` declarations (`git grep -cE
 '^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 771; the delta is
-**+17** (`OnlyFoodIngestParityTests` 16, `FeedTabRoutingTests` +1). If
+**+19** (`OnlyFoodIngestParityTests` 18, `FeedTabRoutingTests` +1). If
 the parsed total is 771 the run was on a stale tree — the script's branch
 assertion is a hard stop.
 
@@ -75,6 +78,8 @@ Required cases, each present and passing (§10 rows for this PR):
   `resume_beforeStart_orDuringInitialLoad_isANoOp`,
   `FeedTabRoutingTests/resumeHook_onlyResumesOnlyFood_andOnlyAfterStart`
 - cache paint replays attribution: `cachePaint_replaysRepostAttribution_fromOuterEvent`
+- review fixes: `paging_cursorCountsRepostInsertedInner_evenWithoutItsOwnFoodTag`,
+  `hiddenReposter_losesAttribution_entryKeptWhileOtherReposterRemains`
 - all pre-existing OnlyFood gates: every case in `OnlyFoodFeedViewModelTests`,
   `OnlyFoodOwnPublishTests`, `OnlyFoodHelpersTests`, `OnlyFoodFilterTests`
 
