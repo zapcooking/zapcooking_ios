@@ -22,6 +22,12 @@ enum FeedKindStore {
 
     /// On-disk names. Raw values are the persisted form — never renumber or
     /// rename; add new cases at the end.
+    ///
+    /// The names mirror Android `FeedType` (`ONLY_FOOD`, `FOLLOWS`,
+    /// `EXTENDED_FOLLOWS`, `RELAY`) with one deliberate exception: iOS keeps
+    /// a relay *set* as its own kind and stores it as `RELAY_SET`, whereas
+    /// Android folds a set into `RELAY` and uses `LIST` for people lists. A
+    /// future shared-format effort must map `RELAY_SET`, not rename it.
     enum StoredType: String {
         case onlyFood = "ONLY_FOOD"
         case follows = "FOLLOWS"

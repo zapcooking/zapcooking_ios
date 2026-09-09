@@ -139,6 +139,13 @@ final class FeedViewModel {
 
     @ObservationIgnored private var seenIds = Set<String>()
     @ObservationIgnored private var metricsTask: Task<Void, Never>?
+    /// Latched by the first `start()` for the VM's lifetime. `.task` re-fires
+    /// on tab re-appear and scene reactivation; on the default OnlyFood
+    /// landing `events` never fills, so the `events.isEmpty` guard alone no
+    /// longer stops re-entry from re-running the shared setup block. Not reset
+    /// by `stop()` — same lifetime as main's latch, which held via a populated
+    /// Follows list.
+    @ObservationIgnored private(set) var didStart = false
     @ObservationIgnored private var liveSubscription: RelaySubscription?
     @ObservationIgnored private var liveConsumer: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
@@ -209,8 +216,42 @@ final class FeedViewModel {
         }
     }
 
-    init(keypair: Keypair) {
+    /// Collaborators of `start()`'s one-time setup block. Injectable so the
+    /// idempotence gate (`FeedStartTests`) can count calls without opening a
+    /// socket; production uses `.live`. Every closure is main-actor, so the
+    /// struct carries no Sendable obligations.
+    struct StartupServices {
+        var liveMetrics: @MainActor () -> AsyncStream<Int>
+        var startLiveDiscovery: @MainActor (_ pubkey: String) -> Void
+        var registerSweepSource: @MainActor (_ source: @escaping @MainActor () -> [NostrEvent]) -> UUID
+        var unregisterSweepSource: @MainActor (UUID) -> Void
+        var bootstrapRelaySets: @MainActor (Keypair) async -> Void
+        var pruneEventStore: @MainActor (_ protectedPubkey: String) async -> Void
+        var queryIndexers: @MainActor (NostrFilter) async -> [NostrEvent]
+
+        static var live: StartupServices {
+            StartupServices(
+                liveMetrics: { FeedViewModel.liveMetricsStream() },
+                startLiveDiscovery: { FeedViewModel.startLiveDiscovery(pubkey: $0) },
+                registerSweepSource: { MissingProfileWatcher.shared.registerSource($0) },
+                unregisterSweepSource: { MissingProfileWatcher.shared.unregisterSource($0) },
+                bootstrapRelaySets: { await RelaySetRepository.shared.bootstrap(keypair: $0) },
+                pruneEventStore: { await EventStore.shared.prune(protectedPubkey: $0) },
+                queryIndexers: {
+                    await RelayPool.query(relays: FeedViewModel.indexerRelays, filter: $0, waitForAllRelays: true)
+                }
+            )
+        }
+    }
+
+    @ObservationIgnored private let services: StartupServices
+
+    /// `services` defaults to `.live`; the default is resolved here rather
+    /// than in the parameter list because default arguments evaluate in a
+    /// nonisolated context and `live` is main-actor.
+    init(keypair: Keypair, services: StartupServices? = nil) {
         self.keypair = keypair
+        self.services = services ?? .live
         // Resolve the landing kind exactly once, before any subscription and
         // before the first frame reads the pill label, so the app never boots
         // one feed and swaps (§2.4). Applying the default does not persist.
@@ -331,18 +372,33 @@ final class FeedViewModel {
     }
 
     func start() async {
-        guard !isLoading, events.isEmpty else { return }
+        guard !didStart, !isLoading, events.isEmpty else { return }
+        didStart = true
         isLoading = true
 
         reloadFollowsCache()
 
-        metricsTask = Task { await fetchOnlineCount() }
+        // Everything in this block runs once per VM (see `didStart`).
+        metricsTask?.cancel()
+        metricsTask = Task { [weak self] in
+            guard let stream = self?.services.liveMetrics() else { return }
+            for await count in stream {
+                guard let self else { return }
+                self.globalOnlineCount = count
+            }
+        }
         startPruneTask()
         startLiveDiscovery()
         subscribeToProfileUpdates()
         registerSweepSource()
         let kp = keypair
-        Task { await RelaySetRepository.shared.bootstrap(keypair: kp) }
+        let services = self.services
+        Task { await services.bootstrapRelaySets(kp) }
+        // Event-store prune is unconditional housekeeping. It used to sit at
+        // the end of the Follows-only tail below, which the default OnlyFood
+        // landing never reaches.
+        let pubkey = keypair.pubkey
+        Task { await services.pruneEventStore(pubkey) }
 
         // The landing kind was fixed in `init`. Only Follows runs the outbox
         // seed + fan-out below; a restored relay-backed kind opens its live
@@ -419,10 +475,6 @@ final class FeedViewModel {
         if let newest = events.first {
             UserDefaults.standard.set(newest.createdAt, forKey: "latest_feed_ts_\(keypair.pubkey)")
         }
-
-        // 5. Prune old data periodically
-        let pubkey = keypair.pubkey
-        Task { await eventStore.prune(protectedPubkey: pubkey) }
     }
 
     func refresh() async {
@@ -463,7 +515,7 @@ final class FeedViewModel {
         profileUpdatesTask?.cancel()
         profileUpdatesTask = nil
         if let id = sweepSourceId {
-            MissingProfileWatcher.shared.unregisterSource(id)
+            services.unregisterSweepSource(id)
             sweepSourceId = nil
         }
         cancelLiveSubscription()
@@ -547,7 +599,7 @@ final class FeedViewModel {
     /// time rather than ingest).
     private func registerSweepSource() {
         if sweepSourceId != nil { return }
-        sweepSourceId = MissingProfileWatcher.shared.registerSource { [weak self] in
+        sweepSourceId = services.registerSweepSource { [weak self] in
             self?.events ?? []
         }
     }
@@ -1082,7 +1134,13 @@ final class FeedViewModel {
     /// Kick off NIP-53 live activity + chat discovery. Uses the user's NIP-65 read relays
     /// when available, falling back to the top relays from the score board for new users.
     private func startLiveDiscovery() {
-        let pubkey = keypair.pubkey
+        services.startLiveDiscovery(keypair.pubkey)
+    }
+
+    /// Production live-stream discovery: resolve the user's read relays, then
+    /// hand them to the coordinator (which self-guards while a discovery
+    /// subscription is open).
+    static func startLiveDiscovery(pubkey: String) {
         Task {
             var relays = await RelayListRepository.shared.getReadRelays(pubkey)
             if relays.isEmpty,
@@ -1146,10 +1204,8 @@ final class FeedViewModel {
         // Fetch from relays for freshness. `waitForAllRelays` so a fast empty
         // relay doesn't cancel a slower one holding the newest kind-0 — same
         // reason `ProfileRepository.runFetch` waits for all of them.
-        let results = await RelayPool.query(
-            relays: Self.indexerRelays,
-            filter: NostrFilter(kinds: [0], authors: [pubkey], limit: 5),
-            waitForAllRelays: true
+        let results = await services.queryIndexers(
+            NostrFilter(kinds: [0], authors: [pubkey], limit: 5)
         )
         if let best = results.filter({ $0.kind == 0 }).max(by: { $0.createdAt < $1.createdAt }),
            let updated = profileRepo.updateFromEvent(best) {
@@ -1165,10 +1221,8 @@ final class FeedViewModel {
         // `reconcile` adopts the relay copy only when its `created_at` is
         // newer than the set we already hold, so it can't clobber a fresher
         // local edit.
-        let contactResults = await RelayPool.query(
-            relays: Self.indexerRelays,
-            filter: NostrFilter(kinds: [3], authors: [pubkey], limit: 1),
-            waitForAllRelays: true
+        let contactResults = await services.queryIndexers(
+            NostrFilter(kinds: [3], authors: [pubkey], limit: 1)
         )
         if let bestContacts = contactResults.filter({ $0.kind == 3 }).max(by: { $0.createdAt < $1.createdAt }) {
             let followPubkeys = bestContacts.tags.compactMap { tag -> String? in
@@ -1335,27 +1389,38 @@ final class FeedViewModel {
         connectedRelayCount = top.count
     }
 
-    private func fetchOnlineCount() async {
-        guard let url = URL(string: "wss://api.nostrarchives.com/v1/ws/live-metrics") else { return }
-        let session = URLSession(configuration: .default)
-        let ws = session.webSocketTask(with: url)
-        ws.resume()
-
-        while !Task.isCancelled {
-            do {
-                let msg = try await ws.receive()
-                if case .string(let text) = msg,
-                   let data = text.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let count = obj["online"] as? Int {
-                    self.globalOnlineCount = count
-                }
-            } catch {
-                break
+    /// Global online count from nostrarchives' live-metrics socket, one value
+    /// per server frame. Ends when the socket errors; cancelling the consuming
+    /// task terminates the stream, which cancels the producer and closes the
+    /// socket. Same parsing as the former in-VM `fetchOnlineCount()`.
+    nonisolated static func liveMetricsStream() -> AsyncStream<Int> {
+        AsyncStream { continuation in
+            guard let url = URL(string: "wss://api.nostrarchives.com/v1/ws/live-metrics") else {
+                continuation.finish()
+                return
             }
+            let session = URLSession(configuration: .default)
+            let ws = session.webSocketTask(with: url)
+            ws.resume()
+            let producer = Task {
+                while !Task.isCancelled {
+                    do {
+                        let msg = try await ws.receive()
+                        if case .string(let text) = msg,
+                           let data = text.data(using: .utf8),
+                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let count = obj["online"] as? Int {
+                            continuation.yield(count)
+                        }
+                    } catch {
+                        break
+                    }
+                }
+                ws.cancel(with: .normalClosure, reason: nil)
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in producer.cancel() }
         }
-
-        ws.cancel(with: .normalClosure, reason: nil)
     }
 }
 
