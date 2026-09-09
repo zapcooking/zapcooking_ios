@@ -4,6 +4,11 @@ import os
 import SwiftUI
 
 enum FeedKind: Equatable, Hashable {
+    /// The `#foodstr` discovery feed — first in the picker and the default
+    /// landing feed (unified-feed §2.2). Not served by `FeedViewModel`: the
+    /// list comes from `OnlyFoodFeedViewModel`; this VM only carries the
+    /// selection so the picker, pill label and persistence read one type.
+    case onlyFood
     case follows
     case relay(url: String)
     case relaySet(RelaySet)
@@ -11,6 +16,8 @@ enum FeedKind: Equatable, Hashable {
 
     var displayName: String {
         switch self {
+        case .onlyFood:
+            return "OnlyFood"
         case .follows:
             return "Follows"
         case .relay(let url):
@@ -204,6 +211,13 @@ final class FeedViewModel {
 
     init(keypair: Keypair) {
         self.keypair = keypair
+        // Resolve the landing kind exactly once, before any subscription and
+        // before the first frame reads the pill label, so the app never boots
+        // one feed and swaps (§2.4). Applying the default does not persist.
+        RelaySetRepository.shared.hydrateFromDefaultsIfNeeded(pubkey: keypair.pubkey)
+        currentKind = FeedKindStore.resolveInitial(pubkey: keypair.pubkey) { dTag in
+            RelaySetRepository.shared.relaySet(dTag: dTag)
+        }
         observeBlocks()
         observeOwnPublishes()
     }
@@ -330,6 +344,24 @@ final class FeedViewModel {
         let kp = keypair
         Task { await RelaySetRepository.shared.bootstrap(keypair: kp) }
 
+        // The landing kind was fixed in `init`. Only Follows runs the outbox
+        // seed + fan-out below; a restored relay-backed kind opens its live
+        // subscription directly, and OnlyFood is rendered by its own view
+        // model, so this VM has nothing to load for it.
+        switch currentKind {
+        case .follows:
+            break
+        case .onlyFood:
+            await loadUserProfile()
+            isLoading = false
+            return
+        case .relay, .relaySet, .extendedNetwork:
+            isLoading = false
+            subscribeCurrentRelayKind()
+            await loadUserProfile()
+            return
+        }
+
         // 1. Seed from local storage for instant display.
         //    Filter + sort run off the MainActor so the first frame isn't blocked.
         //    Private rumors (gift-wrapped kind-1 from PrivateInteractionStore) are
@@ -394,6 +426,9 @@ final class FeedViewModel {
     }
 
     func refresh() async {
+        // Pull-to-refresh on OnlyFood belongs to `OnlyFoodFeedViewModel`; the
+        // Follows fan-out below must never run against that selection.
+        guard currentKind != .onlyFood else { return }
         reloadFollowsCache()
         // Pull-to-refresh is the completeness safety valve: re-pull engagement
         // without a `since` floor so a reaction that landed on a relay outside
@@ -522,7 +557,57 @@ final class FeedViewModel {
     func selectFollows() {
         guard currentKind != .follows else { return }
         currentKind = .follows
+        FeedKindStore.persist(.follows, pubkey: keypair.pubkey)
         reseedFollowsFeed()
+    }
+
+    /// Select the `#foodstr` feed. This VM does not serve it — `MainView`
+    /// renders `OnlyFoodFeedViewModel` for this kind — so the only work here
+    /// is to drop the live subscription, clear the list, and persist the
+    /// explicit pick.
+    func selectOnlyFood() {
+        guard currentKind != .onlyFood else { return }
+        cancelLiveSubscription()
+        currentKind = .onlyFood
+        resetForKindSwitch()
+        relayFeedStatus = .idle
+        FeedKindStore.persist(.onlyFood, pubkey: keypair.pubkey)
+    }
+
+    /// Shared list reset for every kind switch.
+    private func resetForKindSwitch() {
+        events = []
+        seenIds = []
+        oldestLoadedTimestamp = nil
+        followsDiskExhausted = false
+    }
+
+    /// Open the live subscription for the current relay-backed kind. Shared
+    /// by the explicit selectors and the cold-start landing path in `start()`.
+    private func subscribeCurrentRelayKind() {
+        switch currentKind {
+        case .follows, .onlyFood:
+            return
+        case .relay(let url):
+            relayFeedStatus = .connecting
+            startSubscription(relays: [url])
+        case .relaySet(let set):
+            guard !set.relays.isEmpty else {
+                relayFeedStatus = .noEvents
+                return
+            }
+            relayFeedStatus = .connecting
+            startSubscription(relays: set.relays)
+        case .extendedNetwork:
+            guard let cache = SocialGraphCache.load(pubkey: keypair.pubkey),
+                  !cache.relayUrls.isEmpty else {
+                relayFeedStatus = .noEvents
+                return
+            }
+            relayFeedStatus = .connecting
+            let relays = Array(cache.relayUrls.prefix(SocialGraphRepository.Constants.extendedFeedRelayCap))
+            startSubscription(relays: relays)
+        }
     }
 
     /// Reset the Follows feed and rebuild it from the local cache, then
@@ -573,29 +658,17 @@ final class FeedViewModel {
         guard let normalized = Nip51Lists.normalize(url) else { return }
         cancelLiveSubscription()
         currentKind = .relay(url: normalized)
-        events = []
-        seenIds = []
-        oldestLoadedTimestamp = nil
-        followsDiskExhausted = false
-        relayFeedStatus = .connecting
-        UserDefaults.standard.set(normalized, forKey: "last_relay_url_\(keypair.pubkey)")
-        startSubscription(relays: [normalized])
+        resetForKindSwitch()
+        FeedKindStore.persist(currentKind, pubkey: keypair.pubkey)
+        subscribeCurrentRelayKind()
     }
 
     func selectRelaySet(_ set: RelaySet) {
         cancelLiveSubscription()
         currentKind = .relaySet(set)
-        events = []
-        seenIds = []
-        oldestLoadedTimestamp = nil
-        followsDiskExhausted = false
-        guard !set.relays.isEmpty else {
-            relayFeedStatus = .noEvents
-            return
-        }
-        relayFeedStatus = .connecting
-        UserDefaults.standard.set(set.dTag, forKey: "last_relay_set_\(keypair.pubkey)")
-        startSubscription(relays: set.relays)
+        resetForKindSwitch()
+        FeedKindStore.persist(currentKind, pubkey: keypair.pubkey)
+        subscribeCurrentRelayKind()
     }
 
     /// Subscribes the feed to the cached extended-network relay set produced by
@@ -605,18 +678,9 @@ final class FeedViewModel {
     func selectExtendedNetwork() {
         cancelLiveSubscription()
         currentKind = .extendedNetwork
-        events = []
-        seenIds = []
-        oldestLoadedTimestamp = nil
-        followsDiskExhausted = false
-        guard let cache = SocialGraphCache.load(pubkey: keypair.pubkey),
-              !cache.relayUrls.isEmpty else {
-            relayFeedStatus = .noEvents
-            return
-        }
-        relayFeedStatus = .connecting
-        let relays = Array(cache.relayUrls.prefix(SocialGraphRepository.Constants.extendedFeedRelayCap))
-        startSubscription(relays: relays)
+        resetForKindSwitch()
+        FeedKindStore.persist(.extendedNetwork, pubkey: keypair.pubkey)
+        subscribeCurrentRelayKind()
     }
 
     private func cancelLiveSubscription() {
@@ -916,6 +980,8 @@ final class FeedViewModel {
             loadOlderFromDisk()
         case .relay, .relaySet, .extendedNetwork:
             loadMore()
+        case .onlyFood:
+            break  // paged by OnlyFoodFeedViewModel
         }
     }
 
@@ -977,7 +1043,7 @@ final class FeedViewModel {
         guard loadMoreTask == nil else { return }
         let relays: [String]
         switch currentKind {
-        case .follows: return
+        case .follows, .onlyFood: return
         case .relay(let url): relays = [url]
         case .relaySet(let set): relays = set.relays
         case .extendedNetwork:
