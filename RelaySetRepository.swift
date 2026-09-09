@@ -95,6 +95,17 @@ final class RelaySetRepository {
         relaySets.first { $0.dTag == dTag }
     }
 
+    /// Synchronous UserDefaults hydration for `pubkey`, for callers that need
+    /// the local relay sets before `bootstrap(keypair:)` has had a turn — the
+    /// feed's cold-start landing resolution (`FeedKindStore.resolveInitial`)
+    /// runs in `FeedViewModel.init`, ahead of the relay merge. Idempotent;
+    /// `bootstrap` skips its own load once this has run for the same pubkey.
+    func hydrateFromDefaultsIfNeeded(pubkey: String) {
+        guard loadedFor != pubkey else { return }
+        loadFromDefaults(pubkey: pubkey)
+        loadedFor = pubkey
+    }
+
     @discardableResult
     func createRelaySet(name: String, relays: [String], keypair: Keypair) -> RelaySet? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

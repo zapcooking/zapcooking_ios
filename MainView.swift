@@ -665,17 +665,11 @@ struct MainView: View {
             // ProfileView. Inside the NavigationStack so it auto-disappears
             // when the user pushes a destination, and content scrolls under
             // it instead of starting below an opaque bar.
+            // One flat alpha layer over the status-bar strip and the bar
+            // together (Android wraps the whole top app bar in a 0.85-alpha
+            // Box); a gradient reads as a seam between the two.
             .safeAreaInset(edge: .top, spacing: 0) {
-                topBar.background(
-                    LinearGradient(
-                        colors: [
-                            Color.wispBackground.opacity(0.92),
-                            Color.wispBackground.opacity(0.65)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                topBar.background(Color.wispBackground.opacity(0.85))
             }
             .navigationDestination(for: ProfileRoute.self) { route in
                 ProfileView(
@@ -1137,7 +1131,11 @@ struct MainView: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             profileAvatar
-            contentFilterButton
+            // Neither the content filter nor the relay-count pill applies to
+            // the hashtag-backed OnlyFood feed.
+            if viewModel.currentKind != .onlyFood {
+                contentFilterButton
+            }
 
             Spacer()
 
@@ -1155,25 +1153,27 @@ struct MainView: View {
                     .buttonStyle(.plain)
                 }
 
-                Menu {
-                    if viewModel.connectedRelays.isEmpty {
-                        Text("Not connected")
-                    } else {
-                        ForEach(viewModel.connectedRelays, id: \.url) { relay in
-                            let host = URL(string: relay.url)?.host ?? relay.url
-                            Button {
-                                viewModel.selectRelay(url: relay.url)
-                            } label: {
-                                Text("\(host) (\(relay.authorCount))")
+                if viewModel.currentKind != .onlyFood {
+                    Menu {
+                        if viewModel.connectedRelays.isEmpty {
+                            Text("Not connected")
+                        } else {
+                            ForEach(viewModel.connectedRelays, id: \.url) { relay in
+                                let host = URL(string: relay.url)?.host ?? relay.url
+                                Button {
+                                    viewModel.selectRelay(url: relay.url)
+                                } label: {
+                                    Text("\(host) (\(relay.authorCount))")
+                                }
                             }
                         }
+                    } label: {
+                        statusPill(
+                            icon: "network",
+                            value: "\(viewModel.connectedRelayCount)",
+                            color: viewModel.connectedRelayCount > 0 ? .wispRepostColor : .red
+                        )
                     }
-                } label: {
-                    statusPill(
-                        icon: "network",
-                        value: "\(viewModel.connectedRelayCount)",
-                        color: viewModel.connectedRelayCount > 0 ? .wispRepostColor : .red
-                    )
                 }
             }
         }
@@ -1217,23 +1217,24 @@ struct MainView: View {
         .accessibilityLabel("Content filter — \(viewModel.contentFilter.rawValue)")
     }
 
+    /// Feed picker. OnlyFood leads, then a divider, then the rest in
+    /// Android's order (unified-feed §2.3). Until the OnlyFood list renders
+    /// inside this tab (PR 2), picking it persists the choice and routes to
+    /// the existing OnlyFood tab.
     private var feedPicker: some View {
         Menu {
+            Button {
+                openOnlyFood()
+            } label: {
+                Label("OnlyFood", systemImage: viewModel.currentKind == .onlyFood ? "checkmark" : "leaf")
+            }
+
+            Divider()
+
             Button {
                 viewModel.selectFollows()
             } label: {
                 Label("Follows", systemImage: viewModel.currentKind == .follows ? "checkmark" : "person.2")
-            }
-            Button {
-                showRelayPicker = true
-            } label: {
-                let active: Bool = {
-                    switch viewModel.currentKind {
-                    case .follows, .extendedNetwork: return false
-                    case .relay, .relaySet: return true
-                    }
-                }()
-                Label("Relay", systemImage: active ? "checkmark" : "antenna.radiowaves.left.and.right")
             }
 
             Button {
@@ -1248,6 +1249,24 @@ struct MainView: View {
             }
 
             Button {
+                feedPath.append(TrendingFeedRoute())
+            } label: {
+                Label("Trending", systemImage: "flame")
+            }
+
+            Button {
+                showRelayPicker = true
+            } label: {
+                let active: Bool = {
+                    switch viewModel.currentKind {
+                    case .onlyFood, .follows, .extendedNetwork: return false
+                    case .relay, .relaySet: return true
+                    }
+                }()
+                Label("Relay", systemImage: active ? "checkmark" : "antenna.radiowaves.left.and.right")
+            }
+
+            Button {
                 showHashtagSets = true
             } label: {
                 Label("Hashtags", systemImage: "number")
@@ -1258,18 +1277,15 @@ struct MainView: View {
             } label: {
                 Label("Lists", systemImage: "list.bullet")
             }
-
-            Button {
-                feedPath.append(TrendingFeedRoute())
-            } label: {
-                Label("Trending", systemImage: "flame")
-            }
         } label: {
             HStack(spacing: 4) {
+                // Tail truncation at 140pt, as Android (`widthIn(max = 140.dp)`
+                // + Ellipsis); `.middle` mangled relay hostnames.
                 Text(viewModel.currentKind.displayName)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 140)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
@@ -1305,6 +1321,7 @@ struct MainView: View {
             return viewModel.contentFilter.emptyStateCaption
         }
         switch viewModel.currentKind {
+        case .onlyFood: return "OnlyFood"
         case .follows: return "No posts yet"
         case .relay: return "Connecting…"
         case .relaySet: return "Connecting…"
@@ -1317,6 +1334,9 @@ struct MainView: View {
 
     private var emptyStateSubtitle: String {
         switch viewModel.currentKind {
+        case .onlyFood:
+            // Interim (PR 1): the list still lives in the OnlyFood tab.
+            return "Food posts are in the OnlyFood tab for now."
         case .follows:
             return "Follow some people to see their posts here"
         case .relay(let url):
@@ -1333,27 +1353,42 @@ struct MainView: View {
 
     @ViewBuilder
     private var emptyStateExtraAction: some View {
-        if case .extendedNetwork = viewModel.currentKind,
-           SocialGraphCache.load(pubkey: keypair.pubkey) == nil {
-            Button {
-                showSocialGraph = true
-            } label: {
-                Text("Compute Now")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(Color.wispPrimary, in: RoundedRectangle(cornerRadius: 12))
-                    .foregroundStyle(.white)
-            }
-            .padding(.top, 8)
+        switch viewModel.currentKind {
+        case .onlyFood:
+            emptyStateActionButton("Open OnlyFood") { openOnlyFood() }
+        case .extendedNetwork where SocialGraphCache.load(pubkey: keypair.pubkey) == nil:
+            emptyStateActionButton("Compute Now") { showSocialGraph = true }
+        case .follows, .relay, .relaySet, .extendedNetwork:
+            EmptyView()
         }
+    }
+
+    private func emptyStateActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(Color.wispPrimary, in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(.white)
+        }
+        .padding(.top, 8)
+    }
+
+    /// Select OnlyFood in the feed VM (persisting the explicit pick) and show
+    /// its list. Until PR 2 renders that list inside this tab, "show" means
+    /// switching to the existing OnlyFood tab.
+    private func openOnlyFood() {
+        viewModel.selectOnlyFood()
+        selectedTab = .onlyfood
     }
 
     @ViewBuilder
     private var relayFeedStatusBanner: some View {
-        if case .follows = viewModel.currentKind {
+        switch viewModel.currentKind {
+        case .follows, .onlyFood:
             EmptyView()
-        } else {
+        case .relay, .relaySet, .extendedNetwork:
             switch viewModel.relayFeedStatus {
             case .idle, .streaming:
                 EmptyView()
@@ -1423,17 +1458,20 @@ struct MainView: View {
                         // Self-contained so live-chat `streams` mutations
                         // don't re-evaluate this feed body (and every
                         // PostCardView in it) — see `FeedLiveNowSection`.
-                        FeedLiveNowSection(
-                            profiles: viewModel.profiles,
-                            onSelect: { stream in
-                                feedPath.append(LiveStreamRoute(
-                                    aTagValue: stream.aTagValue,
-                                    hostPubkey: stream.activity.hostPubkey,
-                                    dTag: stream.activity.dTag,
-                                    relayHints: stream.activity.relayHints
-                                ))
-                            }
-                        )
+                        // Not shown on OnlyFood (§2.3).
+                        if viewModel.currentKind != .onlyFood {
+                            FeedLiveNowSection(
+                                profiles: viewModel.profiles,
+                                onSelect: { stream in
+                                    feedPath.append(LiveStreamRoute(
+                                        aTagValue: stream.aTagValue,
+                                        hostPubkey: stream.activity.hostPubkey,
+                                        dTag: stream.activity.dTag,
+                                        relayHints: stream.activity.relayHints
+                                    ))
+                                }
+                            )
+                        }
                         // Iterating events directly with `id: \.id` keeps row
                         // identity stable when the array shifts (new posts
                         // prepended). The previous `Array(events.enumerated())`
