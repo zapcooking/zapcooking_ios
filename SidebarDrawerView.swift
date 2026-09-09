@@ -326,9 +326,6 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "person", label: "My Profile") {
                 onOpenProfile()
             }
-            DrawerRow(icon: "house", label: "Feeds") {
-                onSelectTab(.home)
-            }
             DrawerRow(icon: "magnifyingglass", label: "Search") {
                 onSelectTab(.search)
             }

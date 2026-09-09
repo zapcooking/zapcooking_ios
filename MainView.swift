@@ -21,11 +21,11 @@ struct MainView: View {
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
     // Food-first default (Concern 1.5). `.kitchen` is the My Kitchen hub
-    // (Concern 3.2). `.onlyfood` is the live feed (Concern 3.3).
+    // (Concern 3.2). `.feed` is the one feed surface (unified feed PR 2): it
+    // renders the OnlyFood list or the general feed by `viewModel.currentKind`.
     @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
     @State private var recipesPath = NavigationPath()
-    @State private var onlyfoodPath = NavigationPath()
     @State private var kitchenPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
@@ -36,7 +36,6 @@ struct MainView: View {
     /// ThreadView's `.task` (append) + `.onDisappear` (remove-tail).
     @State private var feedThreadChain: [String] = []
     @State private var recipesThreadChain: [String] = []
-    @State private var onlyfoodThreadChain: [String] = []
     @State private var kitchenThreadChain: [String] = []
     @State private var notificationsThreadChain: [String] = []
     @State private var searchThreadChain: [String] = []
@@ -93,7 +92,7 @@ struct MainView: View {
     /// `.sheet(item:)`, separate from `showCompose`, so SwiftUI mounts a
     /// fresh `ComposeView` carrying the hand-off's attachments.
     @State private var pendingShare: PendingShareItem?
-    /// Bumped from `popToRoot(.home)` so the feed `ScrollViewReader` can scroll
+    /// Bumped from `popToRoot(.feed)` so the feed `ScrollViewReader` can scroll
     /// to the top anchor. Tap-on-active-tab clears the nav stack first; on a
     /// subsequent tap (when the stack is already empty) it animates to the top.
     @State private var feedScrollToTopTrigger: Int = 0
@@ -181,7 +180,7 @@ struct MainView: View {
                     closeDrawer()
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(280))
-                        selectedTab = .home
+                        selectedTab = .feed
                         feedPath.append(ProfileRoute(pubkey: keypair.pubkey))
                     }
                 },
@@ -189,7 +188,7 @@ struct MainView: View {
                     closeDrawer()
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(280))
-                        selectedTab = .home
+                        selectedTab = .feed
                         feedPath.append(ProfileRoute(pubkey: scannedPubkey))
                     }
                 },
@@ -432,7 +431,7 @@ struct MainView: View {
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(350))
                             feedPath.append(PeopleListFeedRoute(dTag: list.dTag))
-                            selectedTab = .home
+                            selectedTab = .feed
                         }
                     },
                     onViewNoteFeed: { list in
@@ -440,7 +439,7 @@ struct MainView: View {
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(350))
                             feedPath.append(NoteListFeedRoute(dTag: list.dTag))
-                            selectedTab = .home
+                            selectedTab = .feed
                         }
                     }
                 )
@@ -453,7 +452,7 @@ struct MainView: View {
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(350))
                                 feedPath.append(PeopleListFeedRoute(dTag: list.dTag))
-                                selectedTab = .home
+                                selectedTab = .feed
                             }
                         }
                     )
@@ -467,7 +466,7 @@ struct MainView: View {
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(350))
                                 feedPath.append(NoteListFeedRoute(dTag: list.dTag))
-                                selectedTab = .home
+                                selectedTab = .feed
                             }
                         }
                     )
@@ -483,7 +482,7 @@ struct MainView: View {
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(350))
                             feedPath.append(HashtagFeedRoute(setDTag: set.dTag))
-                            selectedTab = .home
+                            selectedTab = .feed
                         }
                     }
                 )
@@ -606,7 +605,7 @@ struct MainView: View {
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(350))
                     feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: authorPubkey))
-                    selectedTab = .home
+                    selectedTab = .feed
                 }
             })
         }
@@ -620,7 +619,7 @@ struct MainView: View {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(350))
                         feedPath.append(ProfileRoute(pubkey: pubkey))
-                        selectedTab = .home
+                        selectedTab = .feed
                     }
                 }
             )
@@ -630,7 +629,7 @@ struct MainView: View {
             guard let request else { return }
             switch request {
             case .liveStream(let route):
-                selectedTab = .home
+                selectedTab = .feed
                 feedPath.append(route)
             case .fullscreenVideo(let url, let atSeconds):
                 pipRestoreVideo = PiPVideoRestoreItem(url: url, startSeconds: atSeconds)
@@ -648,12 +647,23 @@ struct MainView: View {
     /// never torn down on a tab switch. SwiftUI preserves the scroll position of
     /// views it doesn't destroy, so the user returns to exactly where they were
     /// — with zero scroll tracking and nothing added to the scroll hot path.
-    private var homeTab: some View {
+    private var feedTab: some View {
         NavigationStack(path: $feedPath) {
             ZStack(alignment: .bottomTrailing) {
                 feedContent
+                // Compose FAB (§8): on OnlyFood, the visible, removable
+                // `#foodstr` seed through the app-level `ComposePresenter`
+                // (Concern C-H); every other kind opens the plain composer.
+                // Same drawer / watch-only gating as before.
                 if !drawerOpen && !isWatchOnly {
-                    ComposeFAB { showCompose = true }
+                    ComposeFAB {
+                        if let prefill = FeedTabRouting.composePrefill(for: viewModel.currentKind) {
+                            composePresenter.openNewNote(initialText: prefill)
+                        } else {
+                            showCompose = true
+                        }
+                    }
+                        .accessibilityIdentifier(viewModel.currentKind == .onlyFood ? "new-food-post" : "new-post")
                         .padding(.trailing, 18)
                         .padding(.bottom, 32 + (audioPlayer.currentTrack != nil ? MiniAudioPlayerView.collapsedHeight : 0))
                         .opacity(feedFabOpacity)
@@ -731,6 +741,16 @@ struct MainView: View {
                         feedPath.append(HashtagFeedRoute(tag: tag))
                     }
                 )
+            }
+            // OnlyFood's one-shot start lives on the feed tab's appear path
+            // (it used to be OnlyFoodFeedView's `.task`), gated on the kind.
+            // `start()` is latched, so tab re-appears and kind switches never
+            // re-issue the REQ (§7.4); no prewarming for other kinds.
+            .onAppear {
+                FeedTabRouting.ensureOnlyFoodStarted(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
+            }
+            .onChange(of: viewModel.currentKind) { _, kind in
+                FeedTabRouting.ensureOnlyFoodStarted(kind: kind, onlyFood: onlyfoodFeedVM)
             }
             .navigationDestination(for: TrendingFeedRoute.self) { _ in
                 TrendingFeedView(
@@ -831,68 +851,6 @@ struct MainView: View {
         }
     }
 
-    private var onlyfoodTab: some View {
-        NavigationStack(path: $onlyfoodPath) {
-            ZStack(alignment: .bottomTrailing) {
-                OnlyFoodFeedView(
-                    keypair: keypair,
-                    path: $onlyfoodPath,
-                    onOpenDrawer: openDrawer,
-                    avatarURL: viewModel.userProfile?.picture,
-                    viewModel: onlyfoodFeedVM
-                )
-                // Concern C-H: kind-1 composer on OnlyFood. Same placement and
-                // drawer / watch-only gating as `RecipeComposeFAB` on Recipes.
-                // Opens through the app-level `ComposePresenter` (stable root
-                // sheet, never a tab-local one) with the visible, removable
-                // `#foodstr` seed — see `OnlyFoodCompose`.
-                if !drawerOpen && !isWatchOnly {
-                    ComposeFAB { composePresenter.openNewNote(initialText: OnlyFoodCompose.prefill) }
-                        .accessibilityIdentifier("new-food-post")
-                        .padding(.trailing, 18)
-                        .padding(.bottom, 32 + (audioPlayer.currentTrack != nil ? MiniAudioPlayerView.collapsedHeight : 0))
-                        .animation(.smooth(duration: 0.22), value: audioPlayer.currentTrack != nil)
-                }
-            }
-            .navigationDestination(for: ProfileRoute.self) { route in
-                ProfileView(
-                    pubkey: route.pubkey,
-                    activeUserPubkey: keypair.pubkey,
-                    onProfileTap: { pk in onlyfoodPath.append(ProfileRoute(pubkey: pk)) },
-                    onNoteTap: { eid in onlyfoodPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
-                    onHashtagTap: { tag in onlyfoodPath.append(HashtagFeedRoute(tag: tag)) },
-                    path: $onlyfoodPath
-                )
-            }
-            .navigationDestination(for: ThreadRoute.self) { route in
-                ThreadView(
-                    seedEventId: route.eventId,
-                    authorHint: route.authorPubkey,
-                    keypair: keypair,
-                    path: $onlyfoodPath,
-                    chain: $onlyfoodThreadChain,
-                    scrollToId: route.scrollToId
-                )
-            }
-            .navigationDestination(for: ArticleRoute.self) { route in
-                ArticleView(route: route, keypair: keypair, path: $onlyfoodPath)
-            }
-            .navigationDestination(for: HashtagFeedRoute.self) { route in
-                if let tag = route.tag {
-                    HashtagFeedView(
-                        keypair: keypair,
-                        source: .single(tag),
-                        onProfileTap: { pk in onlyfoodPath.append(ProfileRoute(pubkey: pk)) },
-                        onNoteTap: { eid in onlyfoodPath.append(ThreadRoute(eventId: eid, authorPubkey: "")) },
-                        onHashtagTap: { newTag in onlyfoodPath.append(HashtagFeedRoute(tag: newTag)) }
-                    )
-                }
-            }
-            .recipeNavigation(keypair: keypair, path: $onlyfoodPath)
-            .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-
     /// My Kitchen (Concern 3.2). Switch-mounted like Search/Notifications —
     /// the Saved and Published repositories are singletons with their own
     /// one-shot load guards, so a tab re-entry cannot re-issue an identical
@@ -936,13 +894,14 @@ struct MainView: View {
     private var mainShell: some View {
         VStack(spacing: 0) {
             ZStack {
-                // Home is kept mounted (hidden) rather than switched away, so
-                // its feed ScrollView survives tab changes and SwiftUI restores
-                // the scroll position for free. See `homeTab`.
-                homeTab
-                    .opacity(selectedTab == .home ? 1 : 0)
-                    .allowsHitTesting(selectedTab == .home)
-                    .accessibilityHidden(selectedTab != .home)
+                // The feed is kept mounted (hidden) rather than switched away,
+                // so its ScrollViews survive tab changes and SwiftUI restores
+                // the scroll position for free, and so the OnlyFood VM's
+                // per-mode cache survives too (§7.4). See `feedTab`.
+                feedTab
+                    .opacity(selectedTab == .feed ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .feed)
+                    .accessibilityHidden(selectedTab != .feed)
 
                 // Recipes is the launch tab. Kept mounted so the cache-seeded
                 // grid and its ScrollView survive tab changes — the same
@@ -953,16 +912,8 @@ struct MainView: View {
                     .allowsHitTesting(selectedTab == .recipes)
                     .accessibilityHidden(selectedTab != .recipes)
 
-                // OnlyFood stays mounted so a Global ↔ Following toggle cannot
-                // re-issue `.task` and so the per-mode cache survives tab
-                // changes (§7.4).
-                onlyfoodTab
-                    .opacity(selectedTab == .onlyfood ? 1 : 0)
-                    .allowsHitTesting(selectedTab == .onlyfood)
-                    .accessibilityHidden(selectedTab != .onlyfood)
-
                 switch selectedTab {
-                case .home, .recipes, .onlyfood:
+                case .feed, .recipes:
                     EmptyView()
                 case .messages:
                     MessagesView(viewModel: messagesVM, groupListVM: groupListVM)
@@ -1218,13 +1169,11 @@ struct MainView: View {
     }
 
     /// Feed picker. OnlyFood leads, then a divider, then the rest in
-    /// Android's order (unified-feed §2.3). Until the OnlyFood list renders
-    /// inside this tab (PR 2), picking it persists the choice and routes to
-    /// the existing OnlyFood tab.
+    /// Android's order (unified-feed §2.3).
     private var feedPicker: some View {
         Menu {
             Button {
-                openOnlyFood()
+                viewModel.selectOnlyFood()
             } label: {
                 Label("OnlyFood", systemImage: viewModel.currentKind == .onlyFood ? "checkmark" : "leaf")
             }
@@ -1321,7 +1270,7 @@ struct MainView: View {
             return viewModel.contentFilter.emptyStateCaption
         }
         switch viewModel.currentKind {
-        case .onlyFood: return "OnlyFood"
+        case .onlyFood: return "No food posts yet"  // unreachable: OnlyFood renders `onlyFoodBody`
         case .follows: return "No posts yet"
         case .relay: return "Connecting…"
         case .relaySet: return "Connecting…"
@@ -1335,8 +1284,7 @@ struct MainView: View {
     private var emptyStateSubtitle: String {
         switch viewModel.currentKind {
         case .onlyFood:
-            // Interim (PR 1): the list still lives in the OnlyFood tab.
-            return "Food posts are in the OnlyFood tab for now."
+            return "Pull down to refresh."  // unreachable: OnlyFood renders `onlyFoodBody`
         case .follows:
             return "Follow some people to see their posts here"
         case .relay(let url):
@@ -1354,11 +1302,9 @@ struct MainView: View {
     @ViewBuilder
     private var emptyStateExtraAction: some View {
         switch viewModel.currentKind {
-        case .onlyFood:
-            emptyStateActionButton("Open OnlyFood") { openOnlyFood() }
         case .extendedNetwork where SocialGraphCache.load(pubkey: keypair.pubkey) == nil:
             emptyStateActionButton("Compute Now") { showSocialGraph = true }
-        case .follows, .relay, .relaySet, .extendedNetwork:
+        case .onlyFood, .follows, .relay, .relaySet, .extendedNetwork:
             EmptyView()
         }
     }
@@ -1373,14 +1319,6 @@ struct MainView: View {
                 .foregroundStyle(.white)
         }
         .padding(.top, 8)
-    }
-
-    /// Select OnlyFood in the feed VM (persisting the explicit pick) and show
-    /// its list. Until PR 2 renders that list inside this tab, "show" means
-    /// switching to the existing OnlyFood tab.
-    private func openOnlyFood() {
-        viewModel.selectOnlyFood()
-        selectedTab = .onlyfood
     }
 
     @ViewBuilder
@@ -1415,10 +1353,191 @@ struct MainView: View {
         .background(Color.wispSurfaceVariant.opacity(0.4))
     }
 
+    /// One surface, two bodies (unified feed PR 2). OnlyFood renders
+    /// `OnlyFoodFeedViewModel`'s list; every other kind renders the general
+    /// feed. Affordances stay with their body: the relay-status banner, the
+    /// live-now strip, the new-posts pill and the content filter belong to
+    /// the general feed; OnlyFood has its own loading / empty / relay-miss
+    /// states. Both share the top bar, the picker and `feedPath`.
+    @ViewBuilder
     private var feedContent: some View {
-        VStack(spacing: 0) {
-            relayFeedStatusBanner
-            feedBody
+        switch FeedTabRouting.body(for: viewModel.currentKind) {
+        case .onlyFood:
+            onlyFoodBody
+        case .general:
+            VStack(spacing: 0) {
+                relayFeedStatusBanner
+                feedBody
+            }
+        }
+    }
+
+    // MARK: - OnlyFood body (moved from the deleted OnlyFoodFeedView)
+
+    /// Global mode only: the Global / Following segmented control lived in
+    /// the deleted screen's header, so Following is unreachable here. Its VM
+    /// state and `onlyFoodEmptyFollowsState` are left for PR 3 to delete.
+    @ViewBuilder
+    private var onlyFoodBody: some View {
+        if onlyfoodFeedVM.emptyFollows {
+            onlyFoodEmptyFollowsState
+        } else if onlyfoodFeedVM.isAwaitingFirstPaint {
+            onlyFoodLoadingState
+        } else if onlyfoodFeedVM.isLoadFailed {
+            onlyFoodErrorState
+        } else if onlyfoodFeedVM.isEmpty {
+            onlyFoodEmptyState
+        } else {
+            onlyFoodList
+        }
+    }
+
+    private var onlyFoodLoadingState: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Loading food posts\u{2026}")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Fetching food posts")
+    }
+
+    /// Following with an empty follow list. Unreachable while the merged
+    /// feed is Global-only; kept verbatim for PR 3's deletion.
+    private var onlyFoodEmptyFollowsState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Text("🍳")
+                .font(.system(size: 40))
+            Text("You're not following anyone yet")
+                .font(AppFont.bodyLarge)
+                .foregroundStyle(Color.wispOnSurface)
+                .multilineTextAlignment(.center)
+            Text("Switch to Global to see food posts from the network.")
+                .font(.subheadline)
+                .foregroundStyle(Color.wispOnSurfaceVariant)
+                .multilineTextAlignment(.center)
+            Button("View Global") {
+                onlyfoodFeedVM.setMode(.global)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+    }
+
+    /// Genuine empty: EOSE arrived and nothing was accepted.
+    private var onlyFoodEmptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Text("🍳")
+                .font(.system(size: 40))
+            Text("No food posts yet")
+                .font(AppFont.bodyLarge)
+                .foregroundStyle(Color.wispOnSurfaceVariant)
+            Text("Pull down to refresh.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+        .accessibilityLabel("No food posts yet")
+    }
+
+    /// Relay miss (timeout / dropped send / connect fail). Must not reuse
+    /// the genuine-empty copy — a down search relay is not "no food posts."
+    private var onlyFoodErrorState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Text("Couldn't reach the food feed")
+                .font(AppFont.bodyLarge)
+                .foregroundStyle(Color.wispOnSurface)
+                .multilineTextAlignment(.center)
+            Text("Pull down to retry.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+        .accessibilityLabel("Couldn't reach the food feed")
+    }
+
+    private var onlyFoodList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Same anchor as the general feed so a feed-tab re-tap
+                    // scrolls this list to the top too.
+                    Color.clear.frame(height: 0).id("feedTop")
+                    ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
+                        FeedEventNavigationLink(event: event) {
+                            PostCardView(
+                                event: event,
+                                profile: onlyfoodFeedVM.profiles[event.pubkey],
+                                profiles: onlyfoodFeedVM.profiles,
+                                engagement: nil,
+                                onProfileTap: { pubkey in
+                                    feedPath.append(ProfileRoute(pubkey: pubkey))
+                                },
+                                onNoteTap: { eventId in
+                                    feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: event.pubkey))
+                                },
+                                onHashtagTap: { tag in
+                                    feedPath.append(HashtagFeedRoute(tag: tag))
+                                }
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear {
+                            engagementRepo.markVisible(event: event)
+                            MediaLookaheadPrefetcher.shared.noteAppeared(
+                                eventId: event.id,
+                                in: onlyfoodFeedVM.notes,
+                                profiles: onlyfoodFeedVM.profiles
+                            )
+                            onlyfoodFeedVM.loadMoreIfNeeded(
+                                currentIndex: index,
+                                total: onlyfoodFeedVM.notes.count
+                            )
+                        }
+                        .onDisappear {
+                            engagementRepo.markInvisible(event: event)
+                        }
+                        Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
+                    }
+                    if onlyfoodFeedVM.isPaging {
+                        ProgressView()
+                            .padding(16)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+            .onScrollPhaseChange { _, newPhase in
+                switch newPhase {
+                case .tracking, .interacting:
+                    feedFabOpacity = 0.35
+                case .decelerating, .animating:
+                    feedFabOpacity = 0.75
+                case .idle:
+                    feedFabOpacity = 1.0
+                @unknown default:
+                    feedFabOpacity = 1.0
+                }
+            }
+            .onChange(of: feedScrollToTopTrigger) { _, _ in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo("feedTop", anchor: .top)
+                }
+            }
         }
     }
 
@@ -1691,11 +1810,13 @@ struct MainView: View {
     /// first and the scroll-to-top runs against the now-visible feed.
     private func popToRoot(_ tab: BottomTab) {
         switch tab {
-        case .home:
-            feedPath = NavigationPath()
-            feedScrollToTopTrigger &+= 1
+        case .feed:
+            FeedTabRouting.popFeedToRoot(
+                kind: viewModel.currentKind,
+                path: &feedPath,
+                scrollToTopTrigger: &feedScrollToTopTrigger
+            )
         case .recipes: recipesPath = NavigationPath()
-        case .onlyfood: onlyfoodPath = NavigationPath()
         case .wallet: placeholderPath = NavigationPath()
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
@@ -1752,31 +1873,31 @@ enum BottomTab: String, CaseIterable {
     // Bottom-bar tabs (food-first layout, build spec §5 Gate 0-E — Spec
     // proposal, locked 2026-08-11).
     case recipes
-    case onlyfood
+    /// The one feed surface (unified feed PR 2): OnlyFood or the general
+    /// feed by `FeedViewModel.currentKind`. Keeps the former OnlyFood slot
+    /// and icon; the bar reshape is PR 6.
+    case feed
     case search
     case kitchen
     case notifications
 
     // Drawer-only destinations — NOT rendered in the bottom bar. `wallet`
     // and `messages` were demoted out of the tab bar (food-first, and to
-    // reduce zap surface area for App Store review); `home` is the general
-    // Nostr feed, kept mounted and reachable one tap away in the drawer.
-    case home
+    // reduce zap surface area for App Store review).
     case wallet
     case messages
 
     /// The five cases rendered in the bottom bar, in display order.
     /// Drawer-only destinations are intentionally excluded.
-    static let bottomBarCases: [BottomTab] = [.recipes, .onlyfood, .search, .kitchen, .notifications]
+    static let bottomBarCases: [BottomTab] = [.recipes, .feed, .search, .kitchen, .notifications]
 
     var icon: String {
         switch self {
         case .recipes: "book"
-        case .onlyfood: "leaf"
+        case .feed: "leaf"
         case .search: "magnifyingglass"
         case .kitchen: "fork.knife"
         case .notifications: "bell"
-        case .home: "house"
         case .wallet: "creditcard"
         case .messages: "bubble.left.and.bubble.right"
         }
@@ -1785,11 +1906,10 @@ enum BottomTab: String, CaseIterable {
     var selectedIcon: String {
         switch self {
         case .recipes: "book.fill"
-        case .onlyfood: "leaf.fill"
+        case .feed: "leaf.fill"
         case .search: "magnifyingglass"
         case .kitchen: "fork.knife"
         case .notifications: "bell.fill"
-        case .home: "house.fill"
         case .wallet: "creditcard.fill"
         case .messages: "bubble.left.and.bubble.right.fill"
         }
@@ -1799,11 +1919,10 @@ enum BottomTab: String, CaseIterable {
     var title: String {
         switch self {
         case .recipes: "Recipes"
-        case .onlyfood: "Only Food"
+        case .feed: "Feed"
         case .search: "Search"
         case .kitchen: "My Kitchen"
         case .notifications: "Notifications"
-        case .home: "Feed"
         case .wallet: "Wallet"
         case .messages: "Messages"
         }
