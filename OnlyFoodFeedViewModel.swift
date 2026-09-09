@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// One-shot OnlyFood relay query. Injected so hermetic tests can assert
-/// §7.4 (toggle does not re-query) without opening a socket.
+/// §7.4 (a second `start()` does not re-query) without opening a socket.
 struct OnlyFoodQueryRequest {
     var relays: [String]
     var filter: NostrFilter
@@ -19,28 +19,24 @@ struct OnlyFoodQueryResult: Sendable {
 }
 
 /// OnlyFood 🍳 — a kind-1 social food feed over the expanded ``FoodHashtags``
-/// set (Concern 3.3). Modes: Global and Following. Filtering is mute-only in
-/// v1 (§7.3) — this type never calls `SpamScorer`.
+/// set (Concern 3.3), rendered inside the unified feed tab. Filtering is
+/// mute-only in v1 (§7.3) — this type never calls `SpamScorer`.
 ///
-/// **Per-mode cache — DON'T re-query on toggle (§7.4).** Search relays
-/// rate-limit repeated queries per connection: the first identical query
-/// returns ~99 events, a repeat ~12s later returns 0. Each mode is queried
-/// **once** and cached; toggling ``setMode`` swaps the visible list with
-/// **no relay query**. A mode that legitimately returns 0 still gets
-/// `loaded = true`. Pull-to-refresh is the only re-query path.
+/// **Queried once per session — DON'T re-query on re-entry (§7.4).** Search
+/// relays rate-limit repeated queries per connection: the first identical
+/// query returns ~99 events, a repeat ~12s later returns 0. The feed is
+/// queried **once** and cached; a second ``start()`` (tab re-appear, feed-kind
+/// switch away and back) is a no-op with **no relay query**. A load that
+/// legitimately returns 0 still gets `loaded = true`. Pull-to-refresh is the
+/// only re-query path.
 ///
 /// **§7.2 / §7.5:** subscription IDs come from a process-wide atomic
 /// sequence; teardown CLOSEs only the subIds actually opened, on the relays
-/// they were opened on. Load / mode-toggle / pagination serialize through
-/// one ``submit`` that cancels the previous job before the next REQ.
+/// they were opened on. Load / refresh / pagination serialize through one
+/// ``submit`` that cancels the previous job before the next REQ.
 @Observable
 @MainActor
 final class OnlyFoodFeedViewModel {
-
-    enum Mode: String, CaseIterable, Hashable {
-        case global
-        case following
-    }
 
     enum Load: Equatable {
         case initial
@@ -59,19 +55,16 @@ final class OnlyFoodFeedViewModel {
     /// a separate protocol file skipped in 3.3. Single-relay here is parity,
     /// not a gap versus that hashtag path.
     static let searchRelay = SearchViewModel.defaultSearchRelay
-    static let authorChunk = 500
     static let maxRetainedEvents = 3000
     static let queryTimeout: TimeInterval = 10
 
     var notes: [NostrEvent] = []
     var profiles: [String: ProfileData] = [:]
-    var mode: Mode = .global
     var isLoading = false
     var isPaging = false
     var isRefreshing = false
-    var emptyFollows = false
     var wotDropped = 0
-    /// True when the last initial/refresh query of the visible mode finished
+    /// True when the last initial/refresh query finished
     /// without a genuine EOSE (timeout, dropped send, connect miss) and nothing
     /// is on screen. Distinct from ``isEmpty`` (EOSE arrived, zero accepted).
     var loadFailed = false
@@ -84,20 +77,15 @@ final class OnlyFoodFeedViewModel {
     let pubkey: String
 
     @ObservationIgnored private var started = false
-    @ObservationIgnored private let states: [Mode: ModeState] = [
-        .global: ModeState(),
-        .following: ModeState(),
-    ]
+    @ObservationIgnored private let state = ModeState()
     @ObservationIgnored private(set) var inFlight: Task<Void, Never>?
     @ObservationIgnored private var submitGeneration = 0
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
-    @ObservationIgnored private var followsObserver: NSObjectProtocol?
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
 
     @ObservationIgnored private let filter: OnlyFoodFilter
-    @ObservationIgnored private let follows: () -> [String]
     @ObservationIgnored private let query: (OnlyFoodQueryRequest) async -> OnlyFoodQueryResult
     @ObservationIgnored private let seedCache: () async -> [NostrEvent]
     @ObservationIgnored private let persist: ([NostrEvent]) -> Void
@@ -111,7 +99,6 @@ final class OnlyFoodFeedViewModel {
     init(
         pubkey: String,
         filter: OnlyFoodFilter? = nil,
-        follows: (() -> [String])? = nil,
         query: ((OnlyFoodQueryRequest) async -> OnlyFoodQueryResult)? = nil,
         seedCache: (() async -> [NostrEvent])? = nil,
         persist: (([NostrEvent]) -> Void)? = nil,
@@ -119,7 +106,6 @@ final class OnlyFoodFeedViewModel {
     ) {
         self.pubkey = pubkey
         self.filter = filter ?? OnlyFoodFilter.live()
-        self.follows = follows ?? { FollowsCache.shared.follows(for: pubkey) }
         self.query = query ?? OnlyFoodRelay.query
         self.seedCache = seedCache ?? {
             let cached = await EventStore.shared.seedCache()
@@ -134,9 +120,6 @@ final class OnlyFoodFeedViewModel {
 
     deinit {
         profileUpdatesTask?.cancel()
-        if let followsObserver {
-            NotificationCenter.default.removeObserver(followsObserver)
-        }
         if let hideObserver {
             NotificationCenter.default.removeObserver(hideObserver)
         }
@@ -148,39 +131,33 @@ final class OnlyFoodFeedViewModel {
         }
     }
 
-    /// True once the current mode has completed a query, whatever the event
-    /// count. A legitimately empty mode must not look like "never loaded."
-    var hasLoaded: Bool { stateOf(mode).loaded }
+    /// True once the feed has completed a query, whatever the event count.
+    /// A legitimately empty feed must not look like "never loaded."
+    var hasLoaded: Bool { state.loaded }
 
     /// Still fetching the first window, and nothing is on screen yet.
-    var isAwaitingFirstPaint: Bool { notes.isEmpty && !hasLoaded && !emptyFollows && !loadFailed }
+    var isAwaitingFirstPaint: Bool { notes.isEmpty && !hasLoaded && !loadFailed }
 
-    /// A completed load that found nothing. Distinct from empty-follows
-    /// and from a relay miss (``isLoadFailed``).
-    var isEmpty: Bool { notes.isEmpty && hasLoaded && !emptyFollows }
+    /// A completed load that found nothing. Distinct from a relay miss
+    /// (``isLoadFailed``).
+    var isEmpty: Bool { notes.isEmpty && hasLoaded }
 
     /// The search relay never answered. Distinct from genuine empty (EOSE,
     /// zero accepted) so the UI can say "couldn't reach" instead of
     /// "no food posts yet."
-    var isLoadFailed: Bool { notes.isEmpty && loadFailed && !hasLoaded && !emptyFollows }
+    var isLoadFailed: Bool { notes.isEmpty && loadFailed && !hasLoaded }
 
-    func isLoaded(_ mode: Mode) -> Bool { stateOf(mode).loaded }
-
-    func cachedCount(_ mode: Mode) -> Int { stateOf(mode).seen.count }
-
-    /// One-shot. SwiftUI re-runs `.task` on state changes; a second call is
-    /// a no-op so an identical filter never re-hits the same connection (§7.4).
+    /// One-shot. The feed tab calls this on appear and on every feed-kind
+    /// change; a second call is a no-op so an identical filter never re-hits
+    /// the same connection (§7.4).
     func start() {
         guard !started else { return }
         started = true
         ensureProfileUpdatesSubscription()
-        observeFollowsChanges()
         observeContentHidden()
         observeOwnPublishes()
-        let mode = self.mode
-        let st = stateOf(mode)
-        if !st.loaded {
-            submit(mode: mode, state: st, load: .initial, since: nil, until: nil)
+        if !state.loaded {
+            submit(load: .initial, since: nil, until: nil)
         }
     }
 
@@ -189,34 +166,10 @@ final class OnlyFoodFeedViewModel {
         await inFlight?.value
     }
 
-    /// Instant cache swap. Queries the target mode only if it's never loaded.
-    /// Following's empty-follows latch is dropped first if the user has since
-    /// followed someone — otherwise that latch would hide the first real REQ.
-    func setMode(_ mode: Mode) {
-        guard self.mode != mode else { return }
-        if mode == .following { dropEmptyFollowsLatchIfFollowsArrived() }
-        self.mode = mode
-        let st = stateOf(mode)
-        emitCurrentMode()
-        emptyFollows = st.emptyFollows
-        isPaging = false
-        isRefreshing = false
-        if st.loaded {
-            isLoading = false
-            loadFailed = false
-        }
-        if !st.loaded {
-            submit(mode: mode, state: st, load: .initial, since: nil, until: nil)
-        }
-    }
-
-    /// The ONLY path that re-queries a loaded mode. Merges newest into cache.
+    /// The ONLY path that re-queries a loaded feed. Merges newest into cache.
     func refresh() {
-        if mode == .following { dropEmptyFollowsLatchIfFollowsArrived() }
-        let mode = self.mode
-        let st = stateOf(mode)
-        st.endReached = false
-        submit(mode: mode, state: st, load: .refresh, since: nil, until: nil)
+        state.endReached = false
+        submit(load: .refresh, since: nil, until: nil)
     }
 
     func refreshAndWait() async {
@@ -225,16 +178,14 @@ final class OnlyFoodFeedViewModel {
     }
 
     func loadMore() {
-        let mode = self.mode
-        let st = stateOf(mode)
-        if isLoading || isPaging || isRefreshing || st.endReached { return }
-        if st.seen.count >= Self.maxRetainedEvents {
-            st.endReached = true
+        if isLoading || isPaging || isRefreshing || state.endReached { return }
+        if state.seen.count >= Self.maxRetainedEvents {
+            state.endReached = true
             return
         }
-        guard let oldest = oldestPageableCreatedAt(st.seen.values) else { return }
+        guard let oldest = oldestPageableCreatedAt(state.seen.values) else { return }
         let bounds = pageBoundsBehind(oldest)
-        submit(mode: mode, state: st, load: .page, since: bounds.since, until: bounds.until)
+        submit(load: .page, since: bounds.since, until: bounds.until)
     }
 
     func loadMoreIfNeeded(currentIndex: Int, total: Int) {
@@ -244,91 +195,41 @@ final class OnlyFoodFeedViewModel {
 
     // MARK: - Submit
 
-    /// Single serialized entry point. Captures `mode`/`state` at call-time so
-    /// a mid-flight toggle cannot mis-route results. Cancels the previous job
-    /// before the next REQ (§7.5).
-    ///
-    /// Empty Following is handled **synchronously**: no spinner, no REQ, and
-    /// `loaded = true` so a later toggle does not re-enter this path.
-    private func submit(mode: Mode, state: ModeState, load: Load, since: Int?, until: Int?) {
-        let followList = (mode == .following) ? follows() : nil
-        if let followList, followList.isEmpty {
-            inFlight?.cancel()
-            inFlight = nil
-            state.loaded = true
-            state.emptyFollows = true
-            if self.mode == mode {
-                emptyFollows = true
-                loadFailed = false
-                clearIndicators()
-                emitCurrentMode()
-            }
-            return
-        }
-
+    /// Single serialized entry point. Cancels the previous job before the
+    /// next REQ (§7.5).
+    private func submit(load: Load, since: Int?, until: Int?) {
         inFlight?.cancel()
         submitGeneration += 1
         let generation = submitGeneration
-        state.emptyFollows = false
-        if self.mode == mode {
-            emptyFollows = false
-            if load == .initial || load == .refresh { loadFailed = false }
-            switch load {
-            case .initial: isLoading = true
-            case .page: isPaging = true
-            case .refresh: isRefreshing = true
-            }
+        if load == .initial || load == .refresh { loadFailed = false }
+        switch load {
+        case .initial: isLoading = true
+        case .page: isPaging = true
+        case .refresh: isRefreshing = true
         }
+        let state = self.state
         inFlight = Task { @MainActor in
             if load == .initial || load == .refresh { state.unsettle() }
             if load == .refresh { self.wotDropped = 0 }
-            if load == .initial, mode == .global {
-                await self.paintGlobalFromCache(state)
+            if load == .initial {
+                await self.paintFromCache(state)
             }
 
-            let followsSet = followList.map { Set($0) }
-            var received = 0
-            var connected = false
-            var anySent = false
-            var eoseFired = false
-            var accepted: [NostrEvent] = []
-
-            if let followList {
-                let chunks = chunked(followList, into: Self.authorChunk)
-                let base = Self.nextSubId()
-                for (i, chunk) in chunks.enumerated() {
-                    if Task.isCancelled { break }
-                    var filter = Self.baseFilter(since: since, until: until)
-                    filter.authors = chunk
-                    let subId = "\(base)-\(i)"
-                    let result = await self.issue(relays: [Self.searchRelay], filter: filter, subId: subId)
-                    connected = connected || result.connected
-                    anySent = anySent || result.anySent
-                    eoseFired = eoseFired || result.eoseFired
-                    let newly = self.ingestBatch(result.events, into: state, follows: followsSet)
-                    received += newly.count
-                    accepted.append(contentsOf: newly)
-                }
-            } else {
-                let filter = Self.baseFilter(since: since, until: until)
-                let subId = Self.nextSubId()
-                let result = await self.issue(relays: [Self.searchRelay], filter: filter, subId: subId)
-                connected = result.connected
-                anySent = result.anySent
-                eoseFired = result.eoseFired
-                let newly = self.ingestBatch(result.events, into: state, follows: nil)
-                received = newly.count
-                accepted = newly
-            }
+            let filter = Self.baseFilter(since: since, until: until)
+            let subId = Self.nextSubId()
+            let result = await self.issue(relays: [Self.searchRelay], filter: filter, subId: subId)
+            let accepted = self.ingestBatch(result.events, into: state)
 
             guard !Task.isCancelled, generation == self.submitGeneration else { return }
 
-            let latched = shouldLatchLoaded(connected: connected, anySent: anySent, eoseFired: eoseFired)
+            let latched = shouldLatchLoaded(
+                connected: result.connected, anySent: result.anySent, eoseFired: result.eoseFired
+            )
             if latched {
                 state.loaded = true
-                if load == .page, pageEndReached(received) { state.endReached = true }
+                if load == .page, pageEndReached(accepted.count) { state.endReached = true }
             }
-            if eoseFired, load == .initial || load == .refresh {
+            if result.eoseFired, load == .initial || load == .refresh {
                 _ = mergeFeedOrder(
                     ordered: &state.ordered,
                     placedIds: &state.placedIds,
@@ -337,21 +238,19 @@ final class OnlyFoodFeedViewModel {
                 )
                 state.settled = true
             }
-            if self.mode == mode {
-                self.emitCurrentMode()
-                if latched {
-                    self.loadFailed = false
-                } else if (load == .initial || load == .refresh), self.notes.isEmpty {
-                    self.loadFailed = true
-                }
-                self.clearIndicators()
+            self.emitNotes()
+            if latched {
+                self.loadFailed = false
+            } else if (load == .initial || load == .refresh), self.notes.isEmpty {
+                self.loadFailed = true
             }
+            self.clearIndicators()
             self.persist(accepted)
             self.observeProfiles(in: Array(state.seen.values))
         }
     }
 
-    private func paintGlobalFromCache(_ state: ModeState) async {
+    private func paintFromCache(_ state: ModeState) async {
         guard state.seen.isEmpty else { return }
         let cached = await seedCache()
         var added = false
@@ -359,15 +258,15 @@ final class OnlyFoodFeedViewModel {
             if ingestEvent(
                 event,
                 seen: &state.seen,
-                accept: { self.accept($0, follows: nil) },
+                accept: { self.accept($0) },
                 onAccepted: { _ in },
                 signalFlush: {}
             ) {
                 added = true
             }
         }
-        if added, mode == .global {
-            emitCurrentMode()
+        if added {
+            emitNotes()
             observeProfiles(in: Array(state.seen.values))
         }
     }
@@ -389,17 +288,13 @@ final class OnlyFoodFeedViewModel {
 
     // MARK: - Ingest / emit
 
-    private func ingestBatch(
-        _ events: [NostrEvent],
-        into state: ModeState,
-        follows: Set<String>?
-    ) -> [NostrEvent] {
+    private func ingestBatch(_ events: [NostrEvent], into state: ModeState) -> [NostrEvent] {
         var newly: [NostrEvent] = []
         for event in events where event.kind == 1 {
             let inserted = ingestEvent(
                 event,
                 seen: &state.seen,
-                accept: { self.accept($0, follows: follows) },
+                accept: { self.accept($0) },
                 onAccepted: { _ in },
                 signalFlush: {}
             )
@@ -408,8 +303,7 @@ final class OnlyFoodFeedViewModel {
         return newly
     }
 
-    private func accept(_ event: NostrEvent, follows: Set<String>?) -> Bool {
-        if let follows, !follows.contains(event.pubkey) { return false }
+    private func accept(_ event: NostrEvent) -> Bool {
         guard FoodHashtags.hasFoodTag(event) else { return false }
         switch filter.decideKind1(event) {
         case .accept:
@@ -422,13 +316,12 @@ final class OnlyFoodFeedViewModel {
         }
     }
 
-    private func emitCurrentMode() {
-        let st = stateOf(mode)
+    private func emitNotes() {
         notes = mergeFeedOrder(
-            ordered: &st.ordered,
-            placedIds: &st.placedIds,
-            seen: st.seen.values,
-            settled: st.settled
+            ordered: &state.ordered,
+            placedIds: &state.placedIds,
+            seen: state.seen.values,
+            settled: state.settled
         )
     }
 
@@ -436,10 +329,6 @@ final class OnlyFoodFeedViewModel {
         isLoading = false
         isPaging = false
         isRefreshing = false
-    }
-
-    private func stateOf(_ mode: Mode) -> ModeState {
-        states[mode]!
     }
 
     private func observeProfiles(in events: [NostrEvent]) {
@@ -466,25 +355,6 @@ final class OnlyFoodFeedViewModel {
         }
     }
 
-    /// Following was short-circuited because the follow list was empty. If
-    /// follows have since arrived, drop that latch so the first real REQ can run.
-    private func dropEmptyFollowsLatchIfFollowsArrived() {
-        let st = stateOf(.following)
-        guard st.emptyFollows, !follows().isEmpty else { return }
-        st.loaded = false
-        st.emptyFollows = false
-    }
-
-    /// A follow from another screen must unstick the empty-follows CTA without
-    /// requiring a mode toggle (the tab stays mounted).
-    func resyncFollowingIfNeeded() {
-        dropEmptyFollowsLatchIfFollowsArrived()
-        let st = stateOf(.following)
-        guard mode == .following, !st.loaded, !follows().isEmpty else { return }
-        emptyFollows = false
-        submit(mode: .following, state: st, load: .initial, since: nil, until: nil)
-    }
-
     private func observeContentHidden() {
         guard hideObserver == nil else { return }
         hideObserver = NotificationCenter.default.addObserver(
@@ -500,17 +370,14 @@ final class OnlyFoodFeedViewModel {
 
     private func dropHidden(eventIds: Set<String>, pubkeys: Set<String>) {
         guard !eventIds.isEmpty || !pubkeys.isEmpty else { return }
-        for mode in Mode.allCases {
-            let st = stateOf(mode)
-            st.seen = st.seen.filter {
-                !eventIds.contains($0.key) && !pubkeys.contains($0.value.pubkey)
-            }
-            st.ordered.removeAll {
-                eventIds.contains($0.id) || pubkeys.contains($0.pubkey)
-            }
-            st.placedIds.subtract(eventIds)
+        state.seen = state.seen.filter {
+            !eventIds.contains($0.key) && !pubkeys.contains($0.value.pubkey)
         }
-        emitCurrentMode()
+        state.ordered.removeAll {
+            eventIds.contains($0.id) || pubkeys.contains($0.pubkey)
+        }
+        state.placedIds.subtract(eventIds)
+        emitNotes()
     }
 
     // MARK: - Own publishes (Concern C-H)
@@ -531,49 +398,29 @@ final class OnlyFoodFeedViewModel {
     }
 
     /// Optimistic insert of the user's own freshly published kind-1 into the
-    /// per-mode caches — **no relay query** (§7.4). The note goes through the
-    /// exact `accept` the relay ingest uses: it must carry a ``FoodHashtags``
-    /// `t` tag, pass the mute / structural filter, and (Following) come from
-    /// a followed author. A note that would not come back from the relay is
-    /// not painted either — that is what makes the "post, then see it" gate
-    /// honest rather than cosmetic. Placed at the top: `mergeFeedOrder` only
-    /// appends unplaced ids on a settled mode, and re-sorts by `createdAt`
-    /// on an unsettled one, so the newest note lands first either way.
+    /// cache — **no relay query** (§7.4). The note goes through the exact
+    /// `accept` the relay ingest uses: it must carry a ``FoodHashtags`` `t`
+    /// tag and pass the mute / structural filter. A note that would not come
+    /// back from the relay is not painted either — that is what makes the
+    /// "post, then see it" gate honest rather than cosmetic. Placed at the
+    /// top: `mergeFeedOrder` only appends unplaced ids on a settled feed, and
+    /// re-sorts by `createdAt` on an unsettled one, so the newest note lands
+    /// first either way.
     ///
-    /// Returns the modes the note was inserted into (tests).
+    /// Returns true iff the note was inserted (tests).
     @discardableResult
-    func insertOwnPublished(_ event: NostrEvent) -> [Mode] {
-        guard event.pubkey == pubkey, event.kind == 1 else { return [] }
-        var inserted: [Mode] = []
-        for mode in Mode.allCases {
-            let st = stateOf(mode)
-            guard st.seen[event.id] == nil else { continue }
-            let followsSet: Set<String>? = (mode == .following) ? Set(follows()) : nil
-            guard accept(event, follows: followsSet) else { continue }
-            st.seen[event.id] = event
-            if st.settled {
-                st.ordered.insert(event, at: 0)
-                st.placedIds.insert(event.id)
-            }
-            inserted.append(mode)
+    func insertOwnPublished(_ event: NostrEvent) -> Bool {
+        guard event.pubkey == pubkey, event.kind == 1 else { return false }
+        guard state.seen[event.id] == nil else { return false }
+        guard accept(event) else { return false }
+        state.seen[event.id] = event
+        if state.settled {
+            state.ordered.insert(event, at: 0)
+            state.placedIds.insert(event.id)
         }
-        guard !inserted.isEmpty else { return [] }
-        if inserted.contains(self.mode) { emitCurrentMode() }
+        emitNotes()
         observeProfiles(in: [event])
-        return inserted
-    }
-
-    private func observeFollowsChanges() {
-        guard followsObserver == nil else { return }
-        followsObserver = NotificationCenter.default.addObserver(
-            forName: .followsDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.resyncFollowingIfNeeded()
-            }
-        }
+        return true
     }
 
     static func nextSubId() -> String {
@@ -581,9 +428,9 @@ final class OnlyFoodFeedViewModel {
     }
 }
 
-// MARK: - Per-mode cache
+// MARK: - Feed cache
 
-/// Source of truth + display cache for one mode. Not thread-safe; the VM
+/// Source of truth + display cache for the feed. Not thread-safe; the VM
 /// is `@MainActor` so every mutation is on one thread.
 nonisolated final class ModeState: @unchecked Sendable {
     var seen: [String: NostrEvent] = [:]
@@ -591,7 +438,6 @@ nonisolated final class ModeState: @unchecked Sendable {
     var placedIds: Set<String> = []
     var loaded = false
     var endReached = false
-    var emptyFollows = false
     var settled = false
 
     func unsettle() {
@@ -739,7 +585,7 @@ nonisolated func mergeFeedOrder(
     return ordered
 }
 
-/// A mode is "loaded" (so it won't be re-queried on toggle) ONLY when the
+/// The feed is "loaded" (so a second `start()` won't re-query) ONLY when the
 /// socket was connected, at least one REQ was actually sent, AND a genuine
 /// EOSE arrived. EOSE-with-zero-events still latches; a timeout does not.
 nonisolated func shouldLatchLoaded(connected: Bool, anySent: Bool, eoseFired: Bool) -> Bool {
@@ -765,16 +611,4 @@ nonisolated func pageEndReached(_ receivedNew: Int) -> Bool {
 /// `#t`) must not move this cursor.
 nonisolated func oldestPageableCreatedAt(_ seen: some Collection<NostrEvent>) -> Int? {
     seen.lazy.filter { FoodHashtags.hasFoodTag($0) }.map(\.createdAt).min()
-}
-
-private func chunked<T>(_ items: [T], into size: Int) -> [[T]] {
-    guard size > 0, !items.isEmpty else { return items.isEmpty ? [] : [items] }
-    var chunks: [[T]] = []
-    var i = 0
-    while i < items.count {
-        let end = min(i + size, items.count)
-        chunks.append(Array(items[i..<end]))
-        i = end
-    }
-    return chunks
 }

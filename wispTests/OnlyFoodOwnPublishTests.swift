@@ -3,9 +3,9 @@ import Testing
 @testable import wisp
 
 /// Concern C-H — optimistic insert of the user's own published kind-1 into
-/// the OnlyFood caches. Hermetic: injected query, no sockets. The insert must
-/// mirror the relay's own rule (food `t` tag + mute filter + Following author
-/// gate) and must never issue a REQ (§7.4).
+/// the OnlyFood cache. Hermetic: injected query, no sockets. The insert must
+/// mirror the relay's own rule (food `t` tag + mute filter) and must never
+/// issue a REQ (§7.4). Single-mode since unified-feed PR 3.
 @MainActor
 struct OnlyFoodOwnPublishTests {
 
@@ -45,21 +45,19 @@ struct OnlyFoodOwnPublishTests {
     }
 
     private func vm(
-        follows: [String] = [],
         mutedWords: Set<String> = [],
         query: @escaping (OnlyFoodQueryRequest) async -> OnlyFoodQueryResult
     ) -> OnlyFoodFeedViewModel {
         OnlyFoodFeedViewModel(
             pubkey: me,
             filter: filter(mutedWords: mutedWords),
-            follows: { follows },
             query: query,
             seedCache: { [] },
             persist: { _ in }
         )
     }
 
-    @Test func ownFoodNote_landsAtTopOfGlobal_withNoQuery() async {
+    @Test func ownFoodNote_landsAtTop_withNoQuery() async {
         var calls = 0
         let vm = vm { _ in
             calls += 1
@@ -69,8 +67,7 @@ struct OnlyFoodOwnPublishTests {
         #expect(vm.notes.map(\.id) == ["old"])
 
         let mine = note(id: "mine", author: me, createdAt: 200)
-        let inserted = vm.insertOwnPublished(mine)
-        #expect(inserted == [.global])
+        #expect(vm.insertOwnPublished(mine))
         #expect(vm.notes.map(\.id) == ["mine", "old"])
         #expect(calls == 1)
         #expect(vm.queryCount == 1)
@@ -82,7 +79,7 @@ struct OnlyFoodOwnPublishTests {
         let vm = vm { _ in self.loaded([self.note(id: "old", author: self.follow, createdAt: 100)]) }
         await vm.startAndWait()
         let untagged = note(id: "untagged", author: me, createdAt: 200, tags: [], content: "dinner was great")
-        #expect(vm.insertOwnPublished(untagged).isEmpty)
+        #expect(vm.insertOwnPublished(untagged) == false)
         #expect(vm.notes.map(\.id) == ["old"])
     }
 
@@ -91,7 +88,7 @@ struct OnlyFoodOwnPublishTests {
         await vm.startAndWait()
         let tags = ["foodstr", "soup", "stew", "dinner", "homemade", "cooking"].map { ["t", $0] }
         let spammy = note(id: "six", author: me, createdAt: 200, tags: tags)
-        #expect(vm.insertOwnPublished(spammy).isEmpty)
+        #expect(vm.insertOwnPublished(spammy) == false)
         #expect(vm.notes.isEmpty)
     }
 
@@ -99,18 +96,18 @@ struct OnlyFoodOwnPublishTests {
         let vm = vm(mutedWords: ["cilantro"]) { _ in self.loaded([]) }
         await vm.startAndWait()
         let muted = note(id: "m", author: me, createdAt: 200, content: "cilantro soup")
-        #expect(vm.insertOwnPublished(muted).isEmpty)
+        #expect(vm.insertOwnPublished(muted) == false)
     }
 
     @Test func otherAuthorOrOtherKind_isIgnored() async {
         let vm = vm { _ in self.loaded([]) }
         await vm.startAndWait()
-        #expect(vm.insertOwnPublished(note(id: "theirs", author: follow, createdAt: 200)).isEmpty)
+        #expect(vm.insertOwnPublished(note(id: "theirs", author: follow, createdAt: 200)) == false)
         let repost = NostrEvent(
             id: "k6", pubkey: me, kind: 6, createdAt: 200,
             tags: [["t", "foodstr"]], content: "", sig: String(repeating: "0", count: 128)
         )
-        #expect(vm.insertOwnPublished(repost).isEmpty)
+        #expect(vm.insertOwnPublished(repost) == false)
         #expect(vm.notes.isEmpty)
     }
 
@@ -118,47 +115,9 @@ struct OnlyFoodOwnPublishTests {
         let vm = vm { _ in self.loaded([]) }
         await vm.startAndWait()
         let mine = note(id: "mine", author: me, createdAt: 200)
-        #expect(vm.insertOwnPublished(mine) == [.global])
-        #expect(vm.insertOwnPublished(mine).isEmpty)
+        #expect(vm.insertOwnPublished(mine))
+        #expect(vm.insertOwnPublished(mine) == false)
         #expect(vm.notes.map(\.id) == ["mine"])
-    }
-
-    /// Following mirrors the relay's `authors ∈ follows` filter: own notes
-    /// land there only when the user follows themself.
-    @Test func following_insertsOnlyWhenSelfIsFollowed() async {
-        let vmNotSelf = vm(follows: [follow]) { _ in self.loaded([]) }
-        await vmNotSelf.startAndWait()
-        vmNotSelf.setMode(.following)
-        await vmNotSelf.inFlight?.value
-        #expect(vmNotSelf.insertOwnPublished(note(id: "a", author: me, createdAt: 200)) == [.global])
-        #expect(vmNotSelf.notes.isEmpty)
-
-        let vmSelf = vm(follows: [follow, me]) { _ in self.loaded([]) }
-        await vmSelf.startAndWait()
-        vmSelf.setMode(.following)
-        await vmSelf.inFlight?.value
-        let inserted = vmSelf.insertOwnPublished(note(id: "b", author: me, createdAt: 200))
-        #expect(Set(inserted) == Set([.global, .following]))
-        #expect(vmSelf.notes.map(\.id) == ["b"])
-    }
-
-    /// Inserted into a mode that is not on screen: the visible list is
-    /// untouched now and the note is there after the toggle — still no REQ.
-    @Test func insertIntoHiddenMode_showsAfterToggle_withoutRequery() async {
-        var calls = 0
-        let vm = vm(follows: [follow]) { _ in
-            calls += 1
-            return self.loaded([self.note(id: "old", author: self.follow, createdAt: 100)])
-        }
-        await vm.startAndWait()          // global loaded (1)
-        vm.setMode(.following)           // following loaded (2)
-        await vm.inFlight?.value
-        #expect(calls == 2)
-        #expect(vm.insertOwnPublished(note(id: "mine", author: me, createdAt: 200)) == [.global])
-        #expect(vm.notes.map(\.id) == ["old"])
-        vm.setMode(.global)
-        #expect(vm.notes.map(\.id) == ["mine", "old"])
-        #expect(calls == 2)
     }
 
     /// Insert while the initial load is still unsettled: the sort on EOSE
@@ -170,7 +129,7 @@ struct OnlyFoodOwnPublishTests {
             return self.loaded([self.note(id: "old", author: self.follow, createdAt: 100)])
         }
         vm.start()
-        #expect(vm.insertOwnPublished(note(id: "mine", author: me, createdAt: 200)) == [.global])
+        #expect(vm.insertOwnPublished(note(id: "mine", author: me, createdAt: 200)))
         #expect(vm.notes.map(\.id) == ["mine"])
         gate.continuation.yield(())
         await vm.inFlight?.value
