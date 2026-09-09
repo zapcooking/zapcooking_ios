@@ -642,9 +642,10 @@ struct MainView: View {
     }
 
 
-    /// The Home tab's navigation stack. Rendered ALWAYS (see `mainShell`),
-    /// merely hidden when another tab is active, so its feed `ScrollView` is
-    /// never torn down on a tab switch. SwiftUI preserves the scroll position of
+    /// The feed tab's navigation stack — the one feed surface (OnlyFood or
+    /// the general feed by `viewModel.currentKind`). Rendered ALWAYS (see
+    /// `mainShell`), merely hidden when another tab is active, so its feed
+    /// `ScrollView` is never torn down on a tab switch. SwiftUI preserves the scroll position of
     /// views it doesn't destroy, so the user returns to exactly where they were
     /// — with zero scroll tracking and nothing added to the scroll hot path.
     private var feedTab: some View {
@@ -1477,24 +1478,31 @@ struct MainView: View {
                     // scrolls this list to the top too.
                     Color.clear.frame(height: 0).id("feedTop")
                     ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
-                        FeedEventNavigationLink(event: event) {
-                            PostCardView(
-                                event: event,
-                                profile: onlyfoodFeedVM.profiles[event.pubkey],
-                                profiles: onlyfoodFeedVM.profiles,
-                                engagement: nil,
-                                onProfileTap: { pubkey in
-                                    feedPath.append(ProfileRoute(pubkey: pubkey))
-                                },
-                                onNoteTap: { eventId in
-                                    feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: event.pubkey))
-                                },
-                                onHashtagTap: { tag in
-                                    feedPath.append(HashtagFeedRoute(tag: tag))
-                                }
-                            )
+                        PostCardView(
+                            event: event,
+                            profile: onlyfoodFeedVM.profiles[event.pubkey],
+                            profiles: onlyfoodFeedVM.profiles,
+                            engagement: nil,
+                            onProfileTap: { pubkey in
+                                feedPath.append(ProfileRoute(pubkey: pubkey))
+                            },
+                            onNoteTap: { eventId in
+                                feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: event.pubkey))
+                            },
+                            onHashtagTap: { tag in
+                                feedPath.append(HashtagFeedRoute(tag: tag))
+                            }
+                        )
+                        .equatable()
+                        // Same programmatic push as the general feed (not a
+                        // NavigationLink wrapper): the link's press gesture
+                        // loses races against the inner avatar / action-bar /
+                        // link buttons, so taps on empty card space needed
+                        // two presses. One tap behavior across the surface.
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            ArticleTapRouting.appendCardTap(to: &feedPath, event: event)
                         }
-                        .buttonStyle(.plain)
                         .onAppear {
                             engagementRepo.markVisible(event: event)
                             MediaLookaheadPrefetcher.shared.noteAppeared(
