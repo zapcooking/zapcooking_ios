@@ -77,7 +77,7 @@ final class OnlyFoodFeedViewModel {
     let pubkey: String
 
     @ObservationIgnored private var started = false
-    @ObservationIgnored private let state = ModeState()
+    @ObservationIgnored private let state = OnlyFoodCacheState()
     @ObservationIgnored private(set) var inFlight: Task<Void, Never>?
     @ObservationIgnored private var submitGeneration = 0
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
@@ -250,7 +250,7 @@ final class OnlyFoodFeedViewModel {
         }
     }
 
-    private func paintFromCache(_ state: ModeState) async {
+    private func paintFromCache(_ state: OnlyFoodCacheState) async {
         guard state.seen.isEmpty else { return }
         let cached = await seedCache()
         var added = false
@@ -288,7 +288,7 @@ final class OnlyFoodFeedViewModel {
 
     // MARK: - Ingest / emit
 
-    private func ingestBatch(_ events: [NostrEvent], into state: ModeState) -> [NostrEvent] {
+    private func ingestBatch(_ events: [NostrEvent], into state: OnlyFoodCacheState) -> [NostrEvent] {
         var newly: [NostrEvent] = []
         for event in events where event.kind == 1 {
             let inserted = ingestEvent(
@@ -432,7 +432,7 @@ final class OnlyFoodFeedViewModel {
 
 /// Source of truth + display cache for the feed. Not thread-safe; the VM
 /// is `@MainActor` so every mutation is on one thread.
-nonisolated final class ModeState: @unchecked Sendable {
+nonisolated final class OnlyFoodCacheState: @unchecked Sendable {
     var seen: [String: NostrEvent] = [:]
     var ordered: [NostrEvent] = []
     var placedIds: Set<String> = []
