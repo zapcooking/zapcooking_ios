@@ -124,6 +124,27 @@ struct FeedKindStoreTests {
         #expect(UserDefaults.standard.object(forKey: key) == nil)
     }
 
+    /// Copilot review on #67: the same-kind guard in `selectOnlyFood()` must
+    /// not swallow the persist when the VM is already on the cold-start
+    /// default — that pick is the one that turns "never chose" into "chose".
+    @Test func viewModel_explicitOnlyFoodOnDefaultLanding_writesKey() {
+        let pk = freshPubkey()
+        let key = FeedKindStore.typeKey(pk)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let vm = FeedViewModel(keypair: Keypair(privkey: String(repeating: "1", count: 64), pubkey: pk))
+        #expect(vm.currentKind == .onlyFood)
+        #expect(UserDefaults.standard.object(forKey: key) == nil)
+
+        vm.selectOnlyFood()
+        #expect(vm.currentKind == .onlyFood)
+        #expect(UserDefaults.standard.string(forKey: key) == "ONLY_FOOD")
+
+        // A later cold start now restores an explicit choice, not the default.
+        let again = FeedViewModel(keypair: Keypair(privkey: String(repeating: "1", count: 64), pubkey: pk))
+        #expect(again.currentKind == .onlyFood)
+        #expect(UserDefaults.standard.string(forKey: key) == "ONLY_FOOD")
+    }
+
     @Test func viewModel_restoresSavedPick_andExplicitOnlyFoodWritesKey() {
         let pk = freshPubkey()
         let key = FeedKindStore.typeKey(pk)

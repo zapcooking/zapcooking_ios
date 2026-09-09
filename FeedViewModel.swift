@@ -618,12 +618,16 @@ final class FeedViewModel {
     /// is to drop the live subscription, clear the list, and persist the
     /// explicit pick.
     func selectOnlyFood() {
+        // Persist BEFORE the same-kind guard: on the cold-start default
+        // `currentKind` is already `.onlyFood` with no key written, and an
+        // explicit pick must still record ONLY_FOOD so "chose OnlyFood" stays
+        // distinct from "never chose" (§2.4). Only the list reset is skipped.
+        FeedKindStore.persist(.onlyFood, pubkey: keypair.pubkey)
         guard currentKind != .onlyFood else { return }
         cancelLiveSubscription()
         currentKind = .onlyFood
         resetForKindSwitch()
         relayFeedStatus = .idle
-        FeedKindStore.persist(.onlyFood, pubkey: keypair.pubkey)
     }
 
     /// Shared list reset for every kind switch.
