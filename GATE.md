@@ -4,19 +4,22 @@ Following went unreachable in PR 2. Own branch off main at 0759aa6 (the PR 2
 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud
 box by hand. This GATE.md replaces PR 2's.
 
-**Frozen at this commit.** App code is frozen at **4de3981**; this GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **98953b7** (4de3981 plus the
+Copilot review fix: `ModeState` renamed `OnlyFoodCacheState`, four references
+in one file). This GATE.md is the only commit after it and is the HEAD commit —
+`gate.sh` refuses to run otherwise. The previous GATE.md (5177ded) is
+superseded; a further review fix re-opens the freeze again: push a fresh
+GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 4de3981.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 98953b7.
 - Warnings in touched files: **zero** — `OnlyFoodFeedViewModel.swift`,
   `MainView.swift`, `wispTests/OnlyFoodFeedViewModelTests.swift`,
   `wispTests/OnlyFoodOwnPublishTests.swift`, `wispTests/FeedTabRoutingTests.swift`
   produce no warning lines.
 - Targeted serial run, 2026-09-09, `test-without-building`
   `-only-testing:wispTests/OnlyFoodFeedViewModelTests -only-testing:wispTests/OnlyFoodOwnPublishTests -only-testing:wispTests/FeedTabRoutingTests -only-testing:wispTests/FeedKindStoreTests`:
-  **39 tests in 4 suites passed** (13 + 8 + 7 + 11).
+  **39 tests in 4 suites passed** (13 + 8 + 7 + 11), re-run at the re-freeze.
 - pbxproj: no diff (three-dot). No files added or removed.
 - `OnlyFoodFeedViewModel.swift`: **780 → 614 lines**.
 
