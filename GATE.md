@@ -5,19 +5,22 @@ the drawer's Feeds row gone). Own branch off main at a2975fc (the PR 1
 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud
 box by hand. This GATE.md replaces PR 1's, which main still carried.
 
-**Frozen at this commit.** App code is frozen at **76829cf**; this GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **926e48a** (76829cf plus the
+Copilot review fix: OnlyFood rows use the general feed's programmatic card
+tap instead of a NavigationLink wrapper; `feedTab` doc comment). This GATE.md
+is the only commit after it and is the HEAD commit — `gate.sh` refuses to run
+otherwise. The previous GATE.md (617fa15) is superseded; a further review fix
+re-opens the freeze again: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 76829cf.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 926e48a.
 - Warnings in touched files: **zero** — `MainView.swift`,
   `SidebarDrawerView.swift`, `wisp/FeedTabRouting.swift`,
   `wispTests/FeedTabRoutingTests.swift` produce no warning lines (both edited
   views had zero in the PR 1 baseline build as well).
 - Targeted serial run, 2026-09-09, `test-without-building`
   `-only-testing:wispTests/FeedTabRoutingTests -only-testing:wispTests/OnlyFoodFeedViewModelTests -only-testing:wispTests/FeedKindStoreTests`:
-  **33 tests in 3 suites passed** (13 s; 7 new + 15 + 11 unchanged).
+  **33 tests in 3 suites passed** (9 s at the re-freeze; 7 new + 15 + 11 unchanged).
 - pbxproj: no diff (three-dot). The deleted `wisp/OnlyFoodFeedView.swift` and
   the new `wisp/FeedTabRouting.swift` / `wispTests/FeedTabRoutingTests.swift`
   all live in synchronized groups, so the deletion did not dirty the project.
