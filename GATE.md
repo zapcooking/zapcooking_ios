@@ -26,8 +26,10 @@ for the one UI gap (reposts render without a "reposted by" line).
 - Targeted serial run, 2026-09-09, `test-without-building` over
   `OnlyFoodIngestParityTests OnlyFoodFeedViewModelTests OnlyFoodOwnPublishTests
   OnlyFoodHelpersTests OnlyFoodFilterTests FeedTabRoutingTests FeedKindStoreTests`:
-  **73 tests in 7 suites passed** (16 + 13 + 8 + 12 + 14 + 8 + 11 by suite order
-  of the count; the new suite and one new routing case account for the delta).
+  **73 tests in 7 suites passed** (OnlyFoodIngestParityTests 16, OnlyFoodFeedViewModelTests 13,
+  OnlyFoodOwnPublishTests 8, OnlyFoodHelpersTests 11, OnlyFoodFilterTests 6,
+  FeedTabRoutingTests 8, FeedKindStoreTests 11; the new suite and one new
+  routing case are the +17 over main).
 - pbxproj: no diff (three-dot). New file `wispTests/OnlyFoodIngestParityTests.swift`
   is self-registering.
 
