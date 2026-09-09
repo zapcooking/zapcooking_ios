@@ -48,13 +48,21 @@ final class OnlyFoodFeedViewModel {
     /// `PAGE_PREFETCH_DISTANCE`.
     static let loadMorePrefetch = 6
 
-    /// Hashtag REQ target. Android's OnlyFood hashtag path is also
-    /// `SearchViewModel.DEFAULT_SEARCH_RELAY` alone (`wss://search.nostrarchives.com`)
-    /// for both initial and paging. Android's extra `nos.lol` / `primal` /
-    /// `nostr.net` set is the keyword-only firehose (`discoverContentOnlyFood`),
-    /// a separate protocol file skipped in 3.3. Single-relay here is parity,
-    /// not a gap versus that hashtag path.
+    /// Hashtag REQ targets — Android `FeedSubscriptionManager.ONLY_FOOD_RELAYS`
+    /// (§3.1): the search relay for its efficient `#t` indexing, plus the web
+    /// feed's standard set. One REQ per relay on one subId; the three answer
+    /// one logical load (`queryCount` increments once), and the first EOSE
+    /// from any of them latches it — Android's `max(1, 30%)` EOSE target.
     static let searchRelay = SearchViewModel.defaultSearchRelay
+    static let relays: [String] = {
+        var out: [String] = []
+        for url in [searchRelay, "wss://nos.lol", "wss://relay.primal.net"] where !out.contains(url) {
+            out.append(url)
+        }
+        return out
+    }()
+    /// Android `ONLY_FOOD_KINDS` (§3.2): notes, reposts, polls.
+    static let kinds: [Int] = [1, 6, Nip88.kindPoll]
     static let maxRetainedEvents = 3000
     static let queryTimeout: TimeInterval = 10
 
@@ -109,7 +117,7 @@ final class OnlyFoodFeedViewModel {
         self.query = query ?? OnlyFoodRelay.query
         self.seedCache = seedCache ?? {
             let cached = await EventStore.shared.seedCache()
-            return cached.filter { $0.kind == 1 && FoodHashtags.hasFoodTag($0) }
+            return cached.filter { OnlyFoodFeedViewModel.kinds.contains($0.kind) && FoodHashtags.hasFoodTag($0) }
         }
         self.persist = persist ?? { events in
             guard !events.isEmpty else { return }
@@ -177,13 +185,41 @@ final class OnlyFoodFeedViewModel {
         await inFlight?.value
     }
 
+    /// Foreground / reconnect (§3.3, Android's resume branch of
+    /// `subscribeFeed`). Paints from cache ONLY when the list is actually
+    /// empty, then merges fresh on top with `clear = false`: `seen` and
+    /// `notes` are never emptied, so the feed does not blank while relays
+    /// come back. A no-op before `start()` (the first load owns the paint)
+    /// and while an initial load is in flight (never overlap a paint).
+    func resume() {
+        guard started, !isLoading else { return }
+        state.endReached = false
+        submit(load: .refresh, paintIfEmpty: true, since: nil, until: nil)
+    }
+
+    func resumeAndWait() async {
+        resume()
+        await inFlight?.value
+    }
+
+    /// Reposters of the list entry `eventId`, in arrival order (Android
+    /// `repostAuthors`). Empty for a note that arrived on its own.
+    func repostAuthors(for eventId: String) -> [String] {
+        state.repostAuthors[eventId] ?? []
+    }
+
+    /// True when the current user is one of the reposters (Android `userReposts`).
+    func hasUserReposted(_ eventId: String) -> Bool {
+        state.userReposts.contains(eventId)
+    }
+
     func loadMore() {
         if isLoading || isPaging || isRefreshing || state.endReached { return }
         if state.seen.count >= Self.maxRetainedEvents {
             state.endReached = true
             return
         }
-        guard let oldest = oldestPageableCreatedAt(state.seen.values) else { return }
+        guard let oldest = oldestPageableCreatedAt(state.seen.values, sortKey: state.sortTime) else { return }
         let bounds = pageBoundsBehind(oldest)
         submit(load: .page, since: bounds.since, until: bounds.until)
     }
@@ -196,8 +232,9 @@ final class OnlyFoodFeedViewModel {
     // MARK: - Submit
 
     /// Single serialized entry point. Cancels the previous job before the
-    /// next REQ (§7.5).
-    private func submit(load: Load, since: Int?, until: Int?) {
+    /// next REQ (§7.5). `paintIfEmpty` is the resume path: paint from cache
+    /// first, but only when nothing is cached yet.
+    private func submit(load: Load, paintIfEmpty: Bool = false, since: Int?, until: Int?) {
         inFlight?.cancel()
         submitGeneration += 1
         let generation = submitGeneration
@@ -211,14 +248,14 @@ final class OnlyFoodFeedViewModel {
         inFlight = Task { @MainActor in
             if load == .initial || load == .refresh { state.unsettle() }
             if load == .refresh { self.wotDropped = 0 }
-            if load == .initial {
+            if load == .initial || paintIfEmpty {
                 await self.paintFromCache(state)
             }
 
             let filter = Self.baseFilter(since: since, until: until)
             let subId = Self.nextSubId()
-            let result = await self.issue(relays: [Self.searchRelay], filter: filter, subId: subId)
-            let accepted = self.ingestBatch(result.events, into: state)
+            let result = await self.issue(relays: Self.relays, filter: filter, subId: subId)
+            let outcome = self.ingestBatch(result.events, into: state)
 
             guard !Task.isCancelled, generation == self.submitGeneration else { return }
 
@@ -227,14 +264,15 @@ final class OnlyFoodFeedViewModel {
             )
             if latched {
                 state.loaded = true
-                if load == .page, pageEndReached(accepted.count) { state.endReached = true }
+                if load == .page, pageEndReached(outcome.inserted.count) { state.endReached = true }
             }
             if result.eoseFired, load == .initial || load == .refresh {
                 _ = mergeFeedOrder(
                     ordered: &state.ordered,
                     placedIds: &state.placedIds,
                     seen: state.seen.values,
-                    settled: false
+                    settled: false,
+                    sortKey: state.sortTime
                 )
                 state.settled = true
             }
@@ -245,29 +283,25 @@ final class OnlyFoodFeedViewModel {
                 self.loadFailed = true
             }
             self.clearIndicators()
-            self.persist(accepted)
-            self.observeProfiles(in: Array(state.seen.values))
+            // Persist the SOURCE events (outer kind-6 included) so a cache
+            // paint can rebuild repost attribution by re-running this ingest.
+            self.persist(outcome.persistable)
+            self.observeProfiles(in: Array(state.seen.values), reposters: outcome.reposters)
         }
     }
 
+    /// Cache-first paint (Android `paintOnlyFoodFromCache`): replays persisted
+    /// notes, reposts and polls through the same ingest as the relay path, so
+    /// repost attribution and sort times come back with them. Skipped when
+    /// anything is cached already — an unconditional paint would re-scan the
+    /// whole store on every resume and could overlap an in-flight paint.
     private func paintFromCache(_ state: OnlyFoodCacheState) async {
         guard state.seen.isEmpty else { return }
         let cached = await seedCache()
-        var added = false
-        for event in cached where event.kind == 1 {
-            if ingestEvent(
-                event,
-                seen: &state.seen,
-                accept: { self.accept($0) },
-                onAccepted: { _ in },
-                signalFlush: {}
-            ) {
-                added = true
-            }
-        }
-        if added {
+        let outcome = ingestBatch(cached, into: state)
+        if !outcome.inserted.isEmpty {
             emitNotes()
-            observeProfiles(in: Array(state.seen.values))
+            observeProfiles(in: Array(state.seen.values), reposters: outcome.reposters)
         }
     }
 
@@ -278,7 +312,7 @@ final class OnlyFoodFeedViewModel {
 
     private static func baseFilter(since: Int?, until: Int?) -> NostrFilter {
         NostrFilter(
-            kinds: [1],
+            kinds: kinds,
             tTags: FoodHashtags.all,
             limit: 100,
             since: since,
@@ -288,24 +322,74 @@ final class OnlyFoodFeedViewModel {
 
     // MARK: - Ingest / emit
 
-    private func ingestBatch(_ events: [NostrEvent], into state: OnlyFoodCacheState) -> [NostrEvent] {
-        var newly: [NostrEvent] = []
-        for event in events where event.kind == 1 {
-            let inserted = ingestEvent(
-                event,
-                seen: &state.seen,
-                accept: { self.accept($0) },
-                onAccepted: { _ in },
-                signalFlush: {}
-            )
-            if inserted { newly.append(event) }
-        }
-        return newly
+    /// What one batch did: `inserted` are new list entries (drive paging),
+    /// `persistable` are the source events worth caching (outer kind-6s
+    /// included, so attribution survives a paint), `reposters` need profiles.
+    struct IngestOutcome {
+        var inserted: [NostrEvent] = []
+        var persistable: [NostrEvent] = []
+        var reposters: Set<String> = []
     }
 
+    private func ingestBatch(_ events: [NostrEvent], into state: OnlyFoodCacheState) -> IngestOutcome {
+        var outcome = IngestOutcome()
+        for event in events {
+            ingest(event, into: state, outcome: &outcome)
+        }
+        return outcome
+    }
+
+    /// Port of Android `EventRepository.addHashtagFeedEvent`. Every kind is
+    /// gated on a food `t` tag on the event itself — that is what the relay
+    /// `#t` filter returns and what Android's cache paint requires — then:
+    /// - kind 1: `decideKind1` (unchanged, verbatim parity);
+    /// - poll: `decidePoll`;
+    /// - kind 6: `decideRepost`; the reposter is recorded against the INNER
+    ///   id (and `userReposts` when it is the current user); the INNER note
+    ///   is inserted, sorted by the REPOST's `created_at`, and only when it
+    ///   is not a reply.
+    private func ingest(_ event: NostrEvent, into state: OnlyFoodCacheState, outcome: inout IngestOutcome) {
+        guard FoodHashtags.hasFoodTag(event) else { return }
+        switch event.kind {
+        case 1:
+            guard state.seen[event.id] == nil else { return }
+            guard accept(filter.decideKind1(event)) else { return }
+            state.seen[event.id] = event
+            outcome.inserted.append(event)
+            outcome.persistable.append(event)
+        case Nip88.kindPoll:
+            guard state.seen[event.id] == nil else { return }
+            guard accept(filter.decidePoll(event)) else { return }
+            state.seen[event.id] = event
+            outcome.inserted.append(event)
+            outcome.persistable.append(event)
+        case 6:
+            guard state.seenRepostIds.insert(event.id).inserted else { return }
+            let (decision, inner) = filter.decideRepost(event)
+            guard accept(decision), let inner else { return }
+            var authors = state.repostAuthors[inner.id] ?? []
+            if !authors.contains(event.pubkey) { authors.append(event.pubkey) }
+            state.repostAuthors[inner.id] = authors
+            if event.pubkey == pubkey { state.userReposts.insert(inner.id) }
+            outcome.reposters.insert(event.pubkey)
+            outcome.persistable.append(event)
+            guard !inner.hasThreadingETag, state.seen[inner.id] == nil else { return }
+            state.seen[inner.id] = inner
+            state.sortTimes[inner.id] = event.createdAt
+            outcome.inserted.append(inner)
+        default:
+            return
+        }
+    }
+
+    /// Kind-1 acceptance for the optimistic self-insert.
     private func accept(_ event: NostrEvent) -> Bool {
         guard FoodHashtags.hasFoodTag(event) else { return false }
-        switch filter.decideKind1(event) {
+        return accept(filter.decideKind1(event))
+    }
+
+    private func accept(_ decision: OnlyFoodFilter.Decision) -> Bool {
+        switch decision {
         case .accept:
             return true
         case .wotFiltered:
@@ -321,7 +405,8 @@ final class OnlyFoodFeedViewModel {
             ordered: &state.ordered,
             placedIds: &state.placedIds,
             seen: state.seen.values,
-            settled: state.settled
+            settled: state.settled,
+            sortKey: state.sortTime
         )
     }
 
@@ -331,12 +416,13 @@ final class OnlyFoodFeedViewModel {
         isRefreshing = false
     }
 
-    private func observeProfiles(in events: [NostrEvent]) {
-        let pubkeys = Set(events.map(\.pubkey))
+    private func observeProfiles(in events: [NostrEvent], reposters: Set<String> = []) {
+        let pubkeys = Set(events.map(\.pubkey)).union(reposters)
         for pk in pubkeys where profiles[pk] == nil {
             if let cached = profileRepo.get(pk) { profiles[pk] = cached }
         }
         MissingProfileWatcher.shared.observe(events)
+        if !reposters.isEmpty { MissingProfileWatcher.shared.observePubkeys(reposters) }
     }
 
     private func ensureProfileUpdatesSubscription() {
@@ -377,6 +463,14 @@ final class OnlyFoodFeedViewModel {
             eventIds.contains($0.id) || pubkeys.contains($0.pubkey)
         }
         state.placedIds.subtract(eventIds)
+        // A hidden reposter's attribution goes too; the entry stays if it
+        // has other reposters or arrived on its own.
+        if !pubkeys.isEmpty {
+            for (id, authors) in state.repostAuthors {
+                let kept = authors.filter { !pubkeys.contains($0) }
+                if kept.isEmpty { state.repostAuthors.removeValue(forKey: id) } else { state.repostAuthors[id] = kept }
+            }
+        }
         emitNotes()
     }
 
@@ -439,6 +533,20 @@ nonisolated final class OnlyFoodCacheState: @unchecked Sendable {
     var loaded = false
     var endReached = false
     var settled = false
+    /// Inner event id → reposters in arrival order (Android `repostAuthors`).
+    var repostAuthors: [String: [String]] = [:]
+    /// Inner event ids the current user reposted (Android `userReposts`).
+    var userReposts: Set<String> = []
+    /// Entry id → sort time when it differs from the event's own
+    /// `createdAt` (a reposted note sorts by the REPOST's time).
+    var sortTimes: [String: Int] = [:]
+    /// Outer kind-6 ids already processed — the same repost arrives from
+    /// every relay and again on refresh.
+    var seenRepostIds: Set<String> = []
+
+    func sortTime(_ event: NostrEvent) -> Int {
+        sortTimes[event.id] ?? event.createdAt
+    }
 
     func unsettle() {
         settled = false
@@ -558,7 +666,8 @@ func ingestEvent(
 /// Compute the OnlyFood display order.
 ///
 /// - `settled == false`: rebuild `ordered`/`placedIds` from `seen` by a full
-///   descending-`createdAt` sort.
+///   descending sort on `sortKey` (the event's `createdAt` by default; a
+///   reposted note passes the repost's time).
 /// - `settled == true`: append only unseen ids, sorted within the batch, to
 ///   the tail. Rows already on screen keep their position.
 @discardableResult
@@ -566,17 +675,18 @@ nonisolated func mergeFeedOrder(
     ordered: inout [NostrEvent],
     placedIds: inout Set<String>,
     seen: some Collection<NostrEvent>,
-    settled: Bool
+    settled: Bool,
+    sortKey: (NostrEvent) -> Int = { $0.createdAt }
 ) -> [NostrEvent] {
     if !settled {
         ordered.removeAll()
         placedIds.removeAll()
-        for event in seen.sorted(by: { $0.createdAt > $1.createdAt }) {
+        for event in seen.sorted(by: { sortKey($0) > sortKey($1) }) {
             ordered.append(event)
             placedIds.insert(event.id)
         }
     } else {
-        let fresh = seen.filter { !placedIds.contains($0.id) }.sorted { $0.createdAt > $1.createdAt }
+        let fresh = seen.filter { !placedIds.contains($0.id) }.sorted { sortKey($0) > sortKey($1) }
         for event in fresh {
             ordered.append(event)
             placedIds.insert(event.id)
@@ -607,8 +717,13 @@ nonisolated func pageEndReached(_ receivedNew: Int) -> Bool {
     receivedNew == 0
 }
 
-/// Oldest hashtag-reachable event. Keyword-only firehose candidates (no food
-/// `#t`) must not move this cursor.
-nonisolated func oldestPageableCreatedAt(_ seen: some Collection<NostrEvent>) -> Int? {
-    seen.lazy.filter { FoodHashtags.hasFoodTag($0) }.map(\.createdAt).min()
+/// Oldest hashtag-reachable entry by its sort time. Keyword-only firehose
+/// candidates (no food `#t`) must not move this cursor; a reposted inner note
+/// counts at the REPOST's time, not its own (which could be years older and
+/// would make the next page skip everything in between).
+nonisolated func oldestPageableCreatedAt(
+    _ seen: some Collection<NostrEvent>,
+    sortKey: (NostrEvent) -> Int = { $0.createdAt }
+) -> Int? {
+    seen.lazy.filter { FoodHashtags.hasFoodTag($0) }.map(sortKey).min()
 }

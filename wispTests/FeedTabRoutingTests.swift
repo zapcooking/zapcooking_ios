@@ -104,6 +104,34 @@ struct FeedTabRoutingTests {
         #expect(vm.queryCount == 0)
     }
 
+    @Test func resumeHook_onlyResumesOnlyFood_andOnlyAfterStart() async {
+        var calls = 0
+        let vm = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            query: { _ in
+                calls += 1
+                return OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: true)
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        FeedTabRouting.resumeOnlyFoodIfActive(kind: .onlyFood, onlyFood: vm)
+        #expect(calls == 0, "resume before start is a no-op")
+
+        FeedTabRouting.ensureOnlyFoodStarted(kind: .onlyFood, onlyFood: vm)
+        await vm.inFlight?.value
+        #expect(calls == 1)
+
+        FeedTabRouting.resumeOnlyFoodIfActive(kind: .follows, onlyFood: vm)
+        await vm.inFlight?.value
+        #expect(calls == 1, "not the active kind: no resume")
+
+        FeedTabRouting.resumeOnlyFoodIfActive(kind: .onlyFood, onlyFood: vm)
+        await vm.inFlight?.value
+        #expect(calls == 2, "foreground on OnlyFood merges fresh on top")
+    }
+
     // MARK: - Default landing renders the OnlyFood list
 
     @Test func coldStart_defaultLanding_rendersOnlyFoodBody_notPlaceholder() {
