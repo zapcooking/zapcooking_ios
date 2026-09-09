@@ -49,7 +49,6 @@ struct FeedTabRoutingTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 calls += 1
                 return OnlyFoodQueryResult(
@@ -91,7 +90,6 @@ struct FeedTabRoutingTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 calls += 1
                 return OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: true)

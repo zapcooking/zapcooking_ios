@@ -2,9 +2,10 @@ import Foundation
 import Testing
 @testable import wisp
 
-/// Gate for Concern 3.3 — per-mode cache, mute-only ingest, empty follows.
-/// Hermetic: every VM is constructed with an injected query, so a cache miss
-/// cannot open a socket.
+/// Gate for Concern 3.3 — one-shot cache (§7.4), mute-only ingest, and the
+/// three derived states. Single-mode since unified-feed PR 3 dropped
+/// Following. Hermetic: every VM is constructed with an injected query, so a
+/// cache miss cannot open a socket.
 @MainActor
 struct OnlyFoodFeedViewModelTests {
 
@@ -56,7 +57,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 calls += 1
                 return self.result([self.food(id: "aa", createdAt: 100)])
@@ -71,130 +71,41 @@ struct OnlyFoodFeedViewModelTests {
         #expect(vm.queryCount == 1)
     }
 
-    @Test func toggle_globalFollowingGlobal_doesNotRequeryGlobal() async {
-        var calls: [String] = []
-        let globalNote = food(id: "g1", author: String(repeating: "c", count: 64), createdAt: 200)
-        let followNote = food(id: "f1", createdAt: 150)
-        let vm = OnlyFoodFeedViewModel(
-            pubkey: pubkey,
-            filter: muteOnlyFilter(),
-            follows: { [follow] },
-            query: { req in
-                let key = req.filter.authors == nil ? "global" : "following"
-                calls.append(key)
-                if key == "global" { return self.result([globalNote]) }
-                return self.result([followNote])
-            },
-            seedCache: { [] },
-            persist: { _ in }
-        )
-
-        await vm.startAndWait()
-        #expect(calls == ["global"])
-        #expect(vm.notes.map(\.id) == ["g1"])
-        #expect(vm.cachedCount(.global) == 1)
-
-        vm.setMode(.following)
-        await vm.inFlight?.value
-        #expect(calls == ["global", "following"])
-        #expect(vm.notes.map(\.id) == ["f1"])
-        #expect(vm.cachedCount(.following) == 1)
-
-        vm.setMode(.global)
-        #expect(calls == ["global", "following"])
-        #expect(vm.queryCount == 2)
-        #expect(vm.notes.map(\.id) == ["g1"])
-        #expect(!vm.isLoading)
-    }
-
-    @Test func emptyFollows_doesNotQuery_andIsNotASpinner() async {
+    /// §7.4 in single-mode form: the feed tab calls `start()` on appear and on
+    /// every feed-kind change; after the first load every later call is a
+    /// no-op and the cached list stays on screen.
+    @Test func repeatedStart_afterLoad_keepsCacheAndIssuesNoREQ() async {
         var calls = 0
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 calls += 1
-                return self.result([])
+                return self.result([self.food(id: "g1", createdAt: 200)])
             },
             seedCache: { [] },
             persist: { _ in }
         )
+
         await vm.startAndWait()
         #expect(calls == 1)
+        #expect(vm.notes.map(\.id) == ["g1"])
+        #expect(vm.hasLoaded)
 
-        vm.setMode(.following)
+        vm.start()
+        vm.start()
+        await vm.inFlight?.value
         #expect(calls == 1)
         #expect(vm.queryCount == 1)
-        #expect(vm.emptyFollows)
-        #expect(vm.isLoaded(.following))
+        #expect(vm.notes.map(\.id) == ["g1"])
         #expect(!vm.isLoading)
-        #expect(!vm.isAwaitingFirstPaint)
-        #expect(!vm.isLoadFailed)
-        #expect(vm.notes.isEmpty)
     }
 
-    @Test func emptyFollows_unlatchesWhenFollowsArrive() async {
-        var followList: [String] = []
+    @Test func zeroEvents_stillLatches_soSecondStartDoesNotRequery() async {
         var calls = 0
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { followList },
-            query: { _ in
-                calls += 1
-                return self.result([self.food(id: "f1", createdAt: 100)])
-            },
-            seedCache: { [] },
-            persist: { _ in }
-        )
-        await vm.startAndWait()
-        vm.setMode(.following)
-        #expect(vm.emptyFollows)
-        #expect(vm.isLoaded(.following))
-        #expect(calls == 1)
-
-        followList = [follow]
-        vm.setMode(.global)
-        vm.setMode(.following)
-        await vm.inFlight?.value
-        #expect(!vm.emptyFollows)
-        #expect(calls == 2)
-        #expect(vm.notes.map(\.id) == ["f1"])
-    }
-
-    @Test func emptyFollows_resyncOnVisibleModeQueries() async {
-        var followList: [String] = []
-        var calls = 0
-        let vm = OnlyFoodFeedViewModel(
-            pubkey: pubkey,
-            filter: muteOnlyFilter(),
-            follows: { followList },
-            query: { _ in
-                calls += 1
-                return self.result([self.food(id: "f1", createdAt: 100)])
-            },
-            seedCache: { [] },
-            persist: { _ in }
-        )
-        await vm.startAndWait()
-        vm.setMode(.following)
-        #expect(calls == 1)
-
-        followList = [follow]
-        vm.resyncFollowingIfNeeded()
-        await vm.inFlight?.value
-        #expect(!vm.emptyFollows)
-        #expect(calls == 2)
-        #expect(vm.notes.map(\.id) == ["f1"])
-    }
-
-    @Test func zeroEvents_stillLatches_soToggleDoesNotRequery() async {
-        var calls = 0
-        let vm = OnlyFoodFeedViewModel(
-            pubkey: pubkey,
-            filter: muteOnlyFilter(),
-            follows: { [follow] },
             query: { _ in
                 calls += 1
                 return self.result([])
@@ -204,23 +115,21 @@ struct OnlyFoodFeedViewModelTests {
         )
         await vm.startAndWait()
         #expect(calls == 1)
-        #expect(vm.isLoaded(.global))
+        #expect(vm.hasLoaded)
         #expect(vm.isEmpty)
         #expect(!vm.isLoadFailed)
         #expect(!vm.isAwaitingFirstPaint)
 
-        vm.setMode(.following)
+        vm.start()
         await vm.inFlight?.value
-        #expect(calls == 2)
-        vm.setMode(.global)
-        #expect(calls == 2)
+        #expect(calls == 1)
+        #expect(vm.queryCount == 1)
     }
 
     @Test func timeout_doesNotLatch() async {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false)
             },
@@ -228,7 +137,7 @@ struct OnlyFoodFeedViewModelTests {
             persist: { _ in }
         )
         await vm.startAndWait()
-        #expect(!vm.isLoaded(.global))
+        #expect(!vm.hasLoaded)
         #expect(!vm.isLoading)
         #expect(vm.isLoadFailed)
         #expect(!vm.isEmpty)
@@ -239,7 +148,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 OnlyFoodQueryResult(events: [], connected: false, anySent: false, eoseFired: false)
             },
@@ -247,7 +155,7 @@ struct OnlyFoodFeedViewModelTests {
             persist: { _ in }
         )
         await vm.startAndWait()
-        #expect(!vm.isLoaded(.global))
+        #expect(!vm.hasLoaded)
         #expect(vm.isLoadFailed)
         #expect(!vm.isEmpty)
         #expect(!vm.isAwaitingFirstPaint)
@@ -258,7 +166,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 if fail {
                     return OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false)
@@ -273,7 +180,7 @@ struct OnlyFoodFeedViewModelTests {
         fail = false
         await vm.refreshAndWait()
         #expect(!vm.isLoadFailed)
-        #expect(vm.isLoaded(.global))
+        #expect(vm.hasLoaded)
         #expect(vm.notes.map(\.id) == ["ok"])
     }
 
@@ -282,7 +189,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false)
             },
@@ -290,7 +196,7 @@ struct OnlyFoodFeedViewModelTests {
             persist: { _ in }
         )
         await vm.startAndWait()
-        #expect(!vm.isLoaded(.global))
+        #expect(!vm.hasLoaded)
         #expect(!vm.isLoadFailed)
         #expect(!vm.isEmpty)
         #expect(vm.notes.map(\.id) == ["cache"])
@@ -305,7 +211,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(blocked: [blocked], mutedWords: ["spamword"]),
-            follows: { [] },
             query: { _ in
                 self.result([good, mutedAuthor, mutedWord, reply])
             },
@@ -321,7 +226,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 calls += 1
                 return self.result([self.food(id: "aa", createdAt: 100)])
@@ -330,11 +234,75 @@ struct OnlyFoodFeedViewModelTests {
             persist: { _ in }
         )
         await vm.startAndWait()
-        vm.setMode(.following)
-        vm.setMode(.global)
+        vm.start()
+        vm.start()
         #expect(calls == 1)
         await vm.refreshAndWait()
         #expect(calls == 2)
+        #expect(vm.queryCount == 2)
+    }
+
+    /// The three derived states with the `emptyFollows` term gone: for every
+    /// reachable input the truth table is unchanged, because on the surviving
+    /// (Global) path `emptyFollows` was always false. Exactly one state holds
+    /// while the list is empty; none holds once a note is on screen.
+    @Test func derivedStates_truthTable_unchangedWithoutEmptyFollows() async {
+        // awaiting: started, nothing resolved yet.
+        let gate = AsyncStream<Void>.makeStream()
+        let pending = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            query: { _ in
+                for await _ in gate.stream { break }
+                return self.result([])
+            },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        pending.start()
+        #expect(pending.isAwaitingFirstPaint)
+        #expect(!pending.isEmpty)
+        #expect(!pending.isLoadFailed)
+        gate.continuation.yield(())
+        await pending.inFlight?.value
+        // genuine empty: EOSE, zero accepted.
+        #expect(!pending.isAwaitingFirstPaint)
+        #expect(pending.isEmpty)
+        #expect(!pending.isLoadFailed)
+
+        // relay miss: no EOSE, nothing on screen.
+        let missed = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            query: { _ in OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false) },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await missed.startAndWait()
+        #expect(!missed.isAwaitingFirstPaint)
+        #expect(!missed.isEmpty)
+        #expect(missed.isLoadFailed)
+
+        // a note on screen: none of the three, whether the load latched or not.
+        let seededMiss = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            query: { _ in OnlyFoodQueryResult(events: [], connected: true, anySent: true, eoseFired: false) },
+            seedCache: { [self.food(id: "cache", createdAt: 50)] },
+            persist: { _ in }
+        )
+        await seededMiss.startAndWait()
+        #expect(!seededMiss.isAwaitingFirstPaint && !seededMiss.isEmpty && !seededMiss.isLoadFailed)
+
+        let loaded = OnlyFoodFeedViewModel(
+            pubkey: pubkey,
+            filter: muteOnlyFilter(),
+            query: { _ in self.result([self.food(id: "ok", createdAt: 100)]) },
+            seedCache: { [] },
+            persist: { _ in }
+        )
+        await loaded.startAndWait()
+        #expect(!loaded.isAwaitingFirstPaint && !loaded.isEmpty && !loaded.isLoadFailed)
     }
 
     @Test func cacheSeed_paintsBeforeQuery_andDoesNotLatch() async {
@@ -344,7 +312,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 queried = true
                 return self.result([live])
@@ -355,7 +322,7 @@ struct OnlyFoodFeedViewModelTests {
         await vm.startAndWait()
         #expect(queried)
         #expect(Set(vm.notes.map(\.id)) == ["cache", "live"])
-        #expect(vm.isLoaded(.global))
+        #expect(vm.hasLoaded)
     }
 
     @Test func subIds_comeFromProcessWideSequence() {
@@ -371,7 +338,6 @@ struct OnlyFoodFeedViewModelTests {
         let vm = OnlyFoodFeedViewModel(
             pubkey: pubkey,
             filter: muteOnlyFilter(),
-            follows: { [] },
             query: { _ in
                 self.result([
                     self.food(id: "ok", createdAt: 2),

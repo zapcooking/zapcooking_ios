@@ -898,7 +898,7 @@ struct MainView: View {
                 // The feed is kept mounted (hidden) rather than switched away,
                 // so its ScrollViews survive tab changes and SwiftUI restores
                 // the scroll position for free, and so the OnlyFood VM's
-                // per-mode cache survives too (§7.4). See `feedTab`.
+                // one-shot cache survives too (§7.4). See `feedTab`.
                 feedTab
                     .opacity(selectedTab == .feed ? 1 : 0)
                     .allowsHitTesting(selectedTab == .feed)
@@ -1375,14 +1375,10 @@ struct MainView: View {
 
     // MARK: - OnlyFood body (moved from the deleted OnlyFoodFeedView)
 
-    /// Global mode only: the Global / Following segmented control lived in
-    /// the deleted screen's header, so Following is unreachable here. Its VM
-    /// state and `onlyFoodEmptyFollowsState` are left for PR 3 to delete.
+    /// Three states plus the list: loading, relay miss, genuine empty.
     @ViewBuilder
     private var onlyFoodBody: some View {
-        if onlyfoodFeedVM.emptyFollows {
-            onlyFoodEmptyFollowsState
-        } else if onlyfoodFeedVM.isAwaitingFirstPaint {
+        if onlyfoodFeedVM.isAwaitingFirstPaint {
             onlyFoodLoadingState
         } else if onlyfoodFeedVM.isLoadFailed {
             onlyFoodErrorState
@@ -1402,33 +1398,6 @@ struct MainView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel("Fetching food posts")
-    }
-
-    /// Following with an empty follow list. Unreachable while the merged
-    /// feed is Global-only; kept verbatim for PR 3's deletion.
-    private var onlyFoodEmptyFollowsState: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Text("🍳")
-                .font(.system(size: 40))
-            Text("You're not following anyone yet")
-                .font(AppFont.bodyLarge)
-                .foregroundStyle(Color.wispOnSurface)
-                .multilineTextAlignment(.center)
-            Text("Switch to Global to see food posts from the network.")
-                .font(.subheadline)
-                .foregroundStyle(Color.wispOnSurfaceVariant)
-                .multilineTextAlignment(.center)
-            Button("View Global") {
-                onlyfoodFeedVM.setMode(.global)
-            }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 4)
-            Spacer()
-        }
-        .padding(.horizontal, 32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .refreshable { await onlyfoodFeedVM.refreshAndWait() }
     }
 
     /// Genuine empty: EOSE arrived and nothing was accepted.
