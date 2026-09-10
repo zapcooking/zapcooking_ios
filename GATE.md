@@ -4,14 +4,17 @@ default OFF), drop counter, hidden-by-WoT empty state (§4). Own branch off main
 at 78fe6bf (the PR 4 merge). Local build only on Seth's MacBook Air; gates run
 on the MacinCloud box by hand. This GATE.md replaces PR 4's.
 
-**Frozen at this commit.** App code is frozen at **604d989**; this GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **17c32af** (604d989 plus the
+Copilot review fixes: the toggle persists its own key without a `SafetyFilter`
+rebuild; plural in the a11y label). This GATE.md is the only commit after it
+and is the HEAD commit — `gate.sh` refuses to run otherwise. Previous GATE.md
+commits (79fd972, 9aa7c62) are superseded; a further review fix re-opens the
+freeze again: push a fresh GATE.md last.
 
 **The toggle ships OFF**: nothing changes for a user who does not turn it on.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 604d989.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 17c32af.
 - Warnings in touched files: **zero new**. `OnlyFoodFeedViewModel.swift`,
   `wisp/OnlyFoodWotGate.swift`, `SafetyPreferences.swift`,
   `SafetySettingsView.swift`, `MainView.swift`, both test files: none.
@@ -25,10 +28,13 @@ otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
   **106 tests in 8 suites passed** (OnlyFoodWotTests 15, SafetyTests 27,
   OnlyFoodIngestParityTests 18, OnlyFoodFeedViewModelTests 13,
   OnlyFoodOwnPublishTests 8, OnlyFoodHelpersTests 11, OnlyFoodFilterTests 6,
-  FeedTabRoutingTests 8). `SafetyTests` is in the run on purpose: an earlier
-  draft of the preference test flipped the shared toggle, whose persist spawns
-  a `rebuildSnapshot` task that landed during `SafetyTests` and failed
-  `wordMatchIsCaseInsensitive`; the committed test binds only.
+  FeedTabRoutingTests 8), verdict read from the `.xcresult` with
+  `xcresulttool get test-results summary` (106 / 106 / 0 / 0). `SafetyTests` is
+  in the run on purpose: the toggle's original `didSet` went through the shared
+  `persist()`, which scheduled a `SafetyFilter.rebuildSnapshot` that landed
+  during `SafetyTests` and failed `wordMatchIsCaseInsensitive`. The review fix
+  persists the key alone; the preference test now flips the toggle and pins a
+  sentinel snapshot to prove no rebuild is scheduled.
 - pbxproj: no diff (three-dot). New files `wisp/OnlyFoodWotGate.swift` and
   `wispTests/OnlyFoodWotTests.swift` are self-registering.
 
@@ -72,7 +78,8 @@ Required cases, each present and passing (the gate list from the PR 5 brief):
   `wotEnabled_isCapturedPerLoad`
 - empty state is WoT only with the toggle on; stale count + toggle off → genuine
   empty; relay miss wins: `displayState_truthTable`
-- toggle ships OFF, own key: `preference_shipsOff_andHasItsOwnPerPubkeyKey`
+- toggle ships OFF, own key, notifies, schedules no SafetyFilter rebuild:
+  `preference_shipsOff_persistsOwnKey_notifies_andDoesNotRebuildSafetySnapshot`
 - live hook default: `OnlyFoodFilterTests/live_wotGateIsOffByDefault`
 - all pre-existing OnlyFood and §7.4 gates: every case in `OnlyFoodIngestParityTests`,
   `OnlyFoodFeedViewModelTests`, `OnlyFoodOwnPublishTests`, `OnlyFoodHelpersTests`,
