@@ -287,20 +287,50 @@ struct OnlyFoodWotTests {
 
     // MARK: - Preference
 
-    /// Default only. Flipping the shared singleton here would spawn a
-    /// `SafetyFilter.rebuildSnapshot` task that can land during a later suite
-    /// and clobber its installed snapshot; the flip → reload path is covered
-    /// by `toggleFlip_reloadsOnce_reFiltersCache_andIsAccounted` posting the
-    /// notification directly.
-    @Test func preference_shipsOff_andHasItsOwnPerPubkeyKey() {
+    /// The flip persists its own key and posts `.onlyFoodWotChanged` — and
+    /// nothing else. In particular it must not spawn a
+    /// `SafetyFilter.rebuildSnapshot` (Copilot review on #71): that task can
+    /// land during a later suite and clobber its installed snapshot, which is
+    /// what an earlier draft of this test did to `SafetyTests`. Asserted by
+    /// pinning the installed snapshot before the flips and checking it is
+    /// still the same object-state afterwards.
+    @Test func preference_shipsOff_persistsOwnKey_notifies_andDoesNotRebuildSafetySnapshot() async {
         let pk = (0..<32).map { _ in String(format: "%02x", Int.random(in: 0...255)) }.joined()
+        let key = SafetyPreferences.onlyFoodWotKey(pk)
         let previous = SafetyPreferences.shared.activePubkey
         defer {
+            UserDefaults.standard.removeObject(forKey: key)
             if let previous { SafetyPreferences.shared.bind(activePubkey: previous) } else { SafetyPreferences.shared.unbind() }
         }
         SafetyPreferences.shared.bind(activePubkey: pk)
         #expect(SafetyPreferences.shared.onlyFoodWotEnabled == false, "ships OFF")
-        #expect(SafetyPreferences.onlyFoodWotKey(pk) == "onlyfood_wot_enabled_\(pk)")
-        #expect(SafetyPreferences.onlyFoodWotKey(pk) != SafetyPreferences.wotKey(pk), "separate from the fail-closed global filter")
+        #expect(key == "onlyfood_wot_enabled_\(pk)")
+        #expect(key != SafetyPreferences.wotKey(pk), "separate from the fail-closed global filter")
+
+        // Pin a recognizable snapshot; a stray rebuild would replace it.
+        let sentinel = SafetyFilterSnapshot(
+            mutedWords: ["sentinel-word"], blockedPubkeys: [], mutedThreads: [],
+            wotEnabled: false, qualifiedNetwork: [], userPubkey: pk,
+            hellthreadFilterEnabled: false, hellthreadThreshold: NostrEvent.hellthreadThreshold,
+            reportedEventIds: [], reportedPubkeys: []
+        )
+        SafetyFilter.shared.install(sentinel)
+
+        var posts = 0
+        let token = NotificationCenter.default.addObserver(forName: .onlyFoodWotChanged, object: nil, queue: .main) { _ in posts += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        SafetyPreferences.shared.onlyFoodWotEnabled = true
+        #expect(UserDefaults.standard.bool(forKey: key) == true, "own key written")
+        SafetyPreferences.shared.onlyFoodWotEnabled = true   // no change → no post
+        SafetyPreferences.shared.onlyFoodWotEnabled = false
+        for _ in 0..<20 where posts < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(posts == 2)
+
+        // Give any (wrongly) scheduled rebuild every chance to land, then check
+        // the sentinel survived.
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(SafetyFilter.shared.snapshot.mutedWords == ["sentinel-word"], "no SafetyFilter rebuild was scheduled by the flip")
     }
 }

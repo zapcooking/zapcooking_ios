@@ -26,9 +26,11 @@ final class SafetyPreferences {
     /// Separate from `wotFilterEnabled`: that filter is fail-closed and must
     /// never reach the OnlyFood chain. A flip posts `.onlyFoodWotChanged` so
     /// the OnlyFood feed reloads (one accounted REQ, same as pull-to-refresh).
+    /// Persisted on its own: `SafetyFilter` does not read this key, so the
+    /// flip must not schedule a global snapshot rebuild.
     var onlyFoodWotEnabled: Bool = false {
         didSet {
-            persist()
+            persistOnlyFoodWot()
             if !binding, oldValue != onlyFoodWotEnabled {
                 NotificationCenter.default.post(name: .onlyFoodWotChanged, object: nil)
             }
@@ -102,13 +104,19 @@ final class SafetyPreferences {
     private func hellthreadThresholdKey(_ pubkey: String) -> String { Self.hellthreadThresholdKey(pubkey) }
     private func safelistKey(_ pubkey: String) -> String { Self.safelistKey(pubkey) }
 
+    /// The OnlyFood gate's key only — no `SafetyFilter` rebuild.
+    private func persistOnlyFoodWot() {
+        if binding { return }
+        guard let pk = activePubkey else { return }
+        UserDefaults.standard.set(onlyFoodWotEnabled, forKey: onlyFoodWotKey(pk))
+    }
+
     private func persist() {
         if binding { return }
         guard let pk = activePubkey else { return }
         let d = UserDefaults.standard
         d.set(spamFilterEnabled, forKey: spamKey(pk))
         d.set(wotFilterEnabled, forKey: wotKey(pk))
-        d.set(onlyFoodWotEnabled, forKey: onlyFoodWotKey(pk))
         d.set(hellthreadFilterEnabled, forKey: hellthreadKey(pk))
         d.set(hellthreadThreshold, forKey: hellthreadThresholdKey(pk))
         d.set(Array(spamSafelist), forKey: safelistKey(pk))

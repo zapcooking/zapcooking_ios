@@ -1439,7 +1439,7 @@ struct MainView: View {
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .refreshable { await onlyfoodFeedVM.refreshAndWait() }
-        .accessibilityLabel("\(count) posts hidden by your web-of-trust filter")
+        .accessibilityLabel("\(count) \(count == 1 ? "post" : "posts") hidden by your web-of-trust filter")
     }
 
     private var onlyFoodLoadingState: some View {
