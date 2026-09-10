@@ -33,6 +33,14 @@ enum FeedTabRouting {
         onlyFood.start()
     }
 
+    /// Foreground hook (§3.3). Resumes the OnlyFood VM only while the kind is
+    /// OnlyFood; `resume()` itself is a no-op before `start()` and while an
+    /// initial load is in flight, and never clears.
+    static func resumeOnlyFoodIfActive(kind: FeedKind, onlyFood: OnlyFoodFeedViewModel) {
+        guard kind == .onlyFood else { return }
+        onlyFood.resume()
+    }
+
     /// Re-tap of the feed tab: pop the stack to its root and bump the
     /// scroll-to-top trigger. `kind` is accepted so the call site and the gate
     /// state the invariant explicitly — the pop is the same on every kind.

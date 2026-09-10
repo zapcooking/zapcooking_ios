@@ -67,6 +67,9 @@ struct MainView: View {
     @State private var showCookingUtilitiesSheet = false
     @State private var cookingTimers = CookingTimerStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    /// Set on `.background`, consumed on the next `.active` — see the
+    /// `scenePhase` handler.
+    @State private var wasBackgrounded = false
     @State private var showRelayPicker = false
     @State private var showOnlineSheet = false
     @State private var showSocialGraph = false
@@ -267,6 +270,18 @@ struct MainView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             cookingTimers.handleScenePhase(phase)
+            // OnlyFood resume (§3.3): only on a genuine background → active
+            // return, not on the launch-time inactive → active transition, so
+            // the first load is never followed by an immediate second REQ.
+            switch phase {
+            case .background:
+                wasBackgrounded = true
+            case .active where wasBackgrounded:
+                wasBackgrounded = false
+                FeedTabRouting.resumeOnlyFoodIfActive(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
+            default:
+                break
+            }
         }
         .task {
             await cookingTimers.prepareNotifications()

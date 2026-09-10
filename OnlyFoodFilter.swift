@@ -1,8 +1,10 @@
 import Foundation
 
 /// Pure, dependency-injected OnlyFood food-quality filter — the single
-/// accept/reject decision for a kind-1 food note. Port of Android
-/// `repo/OnlyFoodFilter.kt`.
+/// accept/reject decision for a kind-1 food note (`decideKind1`, port of
+/// Android `repo/OnlyFoodFilter.kt`), plus the poll and repost decisions
+/// (`decidePoll`, `decideRepost`, port of the poll / kind-6 branches of
+/// Android `EventRepository.addHashtagFeedEvent`).
 ///
 /// **Pure**: no insertion, no caching, no counters, no I/O. The caller owns
 /// those side effects.
@@ -31,6 +33,8 @@ nonisolated struct OnlyFoodFilter: Sendable {
         case structuralSpam
         case reply
         case wotFiltered
+        /// Kind-6 whose `content` is blank or not a kind-1 event JSON.
+        case unparseable
     }
 
     /// Clock skew tolerance for future-dated events (seconds).
@@ -109,6 +113,50 @@ nonisolated struct OnlyFoodFilter: Sendable {
         if event.hasThreadingETag { return .reply }
         if isWotFiltered(event.pubkey) { return .wotFiltered }
         return .accept
+    }
+
+    /// NIP-88 poll (kind 1068). Android `addHashtagFeedEvent`'s pre-checks
+    /// (future-dated → app blocklist → user-blocked → deleted) then the poll
+    /// branch: muted word on content → structural spam → web-of-trust.
+    func decidePoll(_ event: NostrEvent) -> Decision {
+        if let pre = preCheck(event) { return pre }
+        if containsMutedWord(event.content) { return .mutedWord }
+        if Self.isStructuralSpam(event) { return .structuralSpam }
+        if isWotFiltered(event.pubkey) { return .wotFiltered }
+        return .accept
+    }
+
+    /// NIP-18 repost (kind 6). Android's pre-checks run on the OUTER event;
+    /// the inner note is parsed from `content` (blank or unparseable → drop
+    /// silently) and then judged: app blocklist → user-blocked → muted word
+    /// on the inner content → structural spam on the inner note → web of
+    /// trust, which drops only when BOTH the reposter and the inner author
+    /// fail — a trusted reposter surfacing a stranger's food note is allowed.
+    ///
+    /// Whether the inner note is a reply is the caller's business: Android
+    /// still records the repost attribution for a reply and only skips the
+    /// list insert, so that rule lives at the insert site, not here.
+    func decideRepost(_ event: NostrEvent) -> (decision: Decision, inner: NostrEvent?) {
+        if let pre = preCheck(event) { return (pre, nil) }
+        let trimmed = event.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let inner = NostrEvent.fromJSON(trimmed), inner.kind == 1 else {
+            return (.unparseable, nil)
+        }
+        if blockedPubkeys.contains(inner.pubkey) { return (.blockedPubkey, inner) }
+        if isUserBlocked(inner.pubkey) { return (.userBlocked, inner) }
+        if containsMutedWord(inner.content) { return (.mutedWord, inner) }
+        if Self.isStructuralSpam(inner) { return (.structuralSpam, inner) }
+        if isWotFiltered(event.pubkey) && isWotFiltered(inner.pubkey) { return (.wotFiltered, inner) }
+        return (.accept, inner)
+    }
+
+    /// The checks Android runs on every event before switching on kind.
+    private func preCheck(_ event: NostrEvent) -> Decision? {
+        if event.createdAt > nowSeconds() + Self.futureSkewSeconds { return .futureDated }
+        if blockedPubkeys.contains(event.pubkey) { return .blockedPubkey }
+        if isUserBlocked(event.pubkey) { return .userBlocked }
+        if isDeleted(event.id) { return .deleted }
+        return nil
     }
 
     /// Mirror the web client's structural caps: hellthread p-tags and hashtag
