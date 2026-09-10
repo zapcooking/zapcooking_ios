@@ -460,7 +460,7 @@ struct ArticleActionBar: View {
                 actionItem(icon: "bubble.right", count: replyCount)
             }
             .buttonStyle(.plain)
-            Spacer()
+            Spacer(minLength: 0)
 
             // React
             Button {
@@ -490,7 +490,7 @@ struct ArticleActionBar: View {
                 )
                 .presentationCompactAdaptation(.popover)
             }
-            Spacer()
+            Spacer(minLength: 0)
 
             // Repost / quote
             Button {
@@ -507,7 +507,7 @@ struct ArticleActionBar: View {
                 Button("Repost") { sendRepost() }
                 Button("Quote") { composePresenter?.openQuote(article) }
             }
-            Spacer()
+            Spacer(minLength: 0)
 
             // Zap — post-level, so gated by the §4.8 kill switch.
             if zapsOnPosts {
@@ -522,7 +522,7 @@ struct ArticleActionBar: View {
                     )
                 }
                 .buttonStyle(.plain)
-                Spacer()
+                Spacer(minLength: 0)
             }
 
             // Bookmark — recipes: kind 30001 (`RecipeBookmarkRepository`);
@@ -575,23 +575,16 @@ struct ArticleActionBar: View {
         }
     }
 
+    /// The shared 44×44 / 20pt `ActionRowItem` (unified feed §6) — the
+    /// article page's row is the same control family as `PostCardView`'s.
+    /// Zero counts stay hidden here, as before.
     private func actionItem(icon: String, count: Int? = nil, label: String? = nil, tint: Color? = nil) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(tint ?? .secondary)
-            if let label {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(tint ?? .secondary)
-            } else if let count, count > 0 {
-                Text("\(count)")
-                    .font(.caption)
-                    .foregroundStyle(tint ?? .secondary)
-            }
-        }
-        .frame(height: 28)
-        .contentShape(Rectangle())
+        let text: String? = {
+            if let label { return label }
+            if let count, count > 0 { return "\(count)" }
+            return nil
+        }()
+        return ActionRowItem(glyph: .symbol(icon), label: text, tint: tint)
     }
 
     private func sendReaction(_ picked: PickedEmoji) {

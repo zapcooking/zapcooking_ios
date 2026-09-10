@@ -16,22 +16,24 @@ struct MessagesView: View {
     @Bindable var viewModel: MessagesViewModel
     @Bindable var groupListVM: GroupListViewModel
     @State private var tab: MessagesTab = .dms
-    @State private var navPath = NavigationPath()
+    /// Owned by `MainView` (unified feed PR 6) so the bar's re-tap can pop
+    /// this tab to root like every other tab.
+    @Binding var path: NavigationPath
     @State private var showingNewDm = false
 
     var body: some View {
-        NavigationStack(path: $navPath) {
+        NavigationStack(path: $path) {
             ZStack {
                 switch tab {
                 case .dms:
                     DmListView(
                         viewModel: viewModel,
-                        onTap: { conv in navPath.append(conv) },
+                        onTap: { conv in path.append(conv) },
                         onCompose: { showingNewDm = true }
                     )
                 case .rooms:
                     GroupListView(viewModel: groupListVM,
-                                  onTap: { room in navPath.append(room) })
+                                  onTap: { room in path.append(room) })
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,7 +57,7 @@ struct MessagesView: View {
                     messages: [],
                     lastMessageAt: 0
                 )
-                navPath.append(conv)
+                path.append(conv)
             }
         }
         .onAppear {
@@ -93,7 +95,7 @@ struct MessagesView: View {
             if let room = groupListVM.repository.getRoom(
                 relayUrl: normalized, groupId: dl.groupId
             ) {
-                navPath.append(room)
+                path.append(room)
             }
             groupListVM.pendingChatDeepLink = nil
         }

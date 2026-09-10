@@ -25,18 +25,14 @@ struct RecipeBookmarkButton: View {
             }
             Task { await toggle() }
         } label: {
-            ZStack {
-                Image(systemName: filled ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 16))
-                    .foregroundStyle(filled ? Color.wispPrimary : Color.secondary)
-                    .opacity(pending ? 0 : 1)
-                if pending {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-            }
-            .frame(width: 28, height: 28)
-            .contentShape(Rectangle())
+            // Same 44×44 / 20pt control as the rest of the action row
+            // (unified feed §6); the spinner swaps into the glyph slot.
+            ActionRowItem(
+                glyph: pending
+                    ? .custom(AnyView(ProgressView().controlSize(.mini)))
+                    : .symbol(filled ? "bookmark.fill" : "bookmark"),
+                tint: filled ? Color.wispPrimary : nil
+            )
         }
         .buttonStyle(.plain)
         .disabled(pending)

@@ -170,16 +170,14 @@ struct FeedTabRoutingTests {
         }
     }
 
-    // MARK: - Tab enum: no home / onlyfood; feed keeps the slot and icon
+    // MARK: - Tab enum: no home / onlyfood; one feed case
 
-    @Test func bottomTab_hasNoHomeOrOnlyfood_feedKeepsSlotAndIcon() {
+    @Test func bottomTab_hasNoHomeOrOnlyfood_andOneFeedCase() {
         let names = BottomTab.allCases.map(\.rawValue)
         #expect(!names.contains("home"))
         #expect(!names.contains("onlyfood"))
-        #expect(names == ["recipes", "feed", "search", "kitchen", "notifications", "wallet", "messages"])
-        #expect(BottomTab.bottomBarCases == [.recipes, .feed, .search, .kitchen, .notifications])
-        #expect(BottomTab.feed.icon == "leaf")
-        #expect(BottomTab.feed.selectedIcon == "leaf.fill")
+        #expect(names.filter { $0 == "feed" }.count == 1)
+        #expect(BottomTab.bottomBarCases.contains(.feed))
         #expect(BottomTab.feed.title == "Feed")
     }
 

@@ -1083,22 +1083,22 @@ struct PostCardView: View {
                 )
             }
             .buttonStyle(.plain)
-            Spacer()
+            Spacer(minLength: 0)
             heartAction
-            Spacer()
+            Spacer(minLength: 0)
             // Hide repost/quote on private rumors — both would re-publish the
             // rumor id as a public kind-6 / kind-1 with q-tag, leaking the
             // encrypted chain. Reply, react, zap, bookmark stay visible.
             if !isPrivate {
                 repostAction
-                Spacer()
+                Spacer(minLength: 0)
             }
             // Post-level zap (tap, long-press quick zap). Hidden wholesale when
             // `FeatureFlags.zapsOnPosts` is off (§4.8 kill switch); the
             // author's profile keeps its own zap button.
             if ZapGate.postZapVisible() {
                 zapAction
-                Spacer()
+                Spacer(minLength: 0)
             }
             Button {
                 activeSheet = .addToList
@@ -1112,16 +1112,12 @@ struct PostCardView: View {
                 )
             }
             .buttonStyle(.plain)
-            Spacer()
-            Button {
+            Spacer(minLength: 0)
+            // Expand / collapse goes through the same 44×44 control as every
+            // other item in the row (§6: no per-icon overrides).
+            ActionRowButton(item: ActionRowItem(glyph: .symbol(expanded ? "chevron.up" : "chevron.down"))) {
                 withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
-            } label: {
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 28)
             }
-            .buttonStyle(.plain)
         }
         .foregroundStyle(.secondary)
     }
@@ -1142,27 +1138,17 @@ struct PostCardView: View {
         let isInteractive = !isFlying && !isOwnPost
         return ZStack {
             if isFlying {
-                LightningPulseView(image: settings.zapImage)
-                    .frame(width: 18, height: 18)
-                    .frame(height: 28)
+                ActionRowItem(glyph: .custom(AnyView(LightningPulseView(image: settings.zapImage))))
             } else {
                 let zapSats = repoBox.counts.zapSats > 0 ? repoBox.counts.zapSats : (engagement?.zapSats ?? 0)
                 // Orange only when *we* zapped (mirrors iReposted / iReactedEmoji);
                 // otherwise grey, even when others have zapped the note.
-                let iconTint: Color = iZapped ? Color.wispZapColor : .secondary
-                let labelTint: Color = iZapped ? Color.wispZapColor : .secondary
-                HStack(spacing: 4) {
-                    settings.zapImage
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .foregroundStyle(iconTint)
-                    // Always show a number; plain "0" (not a fiat "$0.00") when unzapped.
-                    Text(zapSats > 0 ? (zapLabel(zapSats) ?? "0") : "0")
-                        .font(.caption)
-                        .foregroundStyle(labelTint)
-                }
-                .frame(height: 28)
+                // Always show a number; plain "0" (not a fiat "$0.00") when unzapped.
+                ActionRowItem(
+                    glyph: .image(settings.zapImage),
+                    label: zapSats > 0 ? (zapLabel(zapSats) ?? "0") : "0",
+                    tint: iZapped ? Color.wispZapColor : .secondary
+                )
             }
         }
         .contentShape(Rectangle())
@@ -1600,33 +1586,21 @@ struct PostCardView: View {
             reactionPickerMaxHeight = min(192, max(80, chosenSpace))
             showReactionPicker = true
         } label: {
+            let countLabel: String? = resolvedReactionCount > 0 ? formatCount(resolvedReactionCount) : nil
             if let emoji = displayed {
-                HStack(spacing: 4) {
-                    Text(emoji)
-                        .font(.system(size: 16))
-                    if resolvedReactionCount > 0 {
-                        Text(formatCount(resolvedReactionCount))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: 28)
+                ActionRowItem(glyph: .text(emoji), label: countLabel)
             } else if let custom {
-                HStack(spacing: 4) {
-                    EmojiText(
-                        ":\(custom.shortcode):",
-                        emojiMap: [custom.shortcode: custom.url],
-                        textStyle: .body,
-                        lineLimit: 1
-                    )
-                    .frame(width: 18, height: 18)
-                    if resolvedReactionCount > 0 {
-                        Text(formatCount(resolvedReactionCount))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: 28)
+                ActionRowItem(
+                    glyph: .custom(AnyView(
+                        EmojiText(
+                            ":\(custom.shortcode):",
+                            emojiMap: [custom.shortcode: custom.url],
+                            textStyle: .body,
+                            lineLimit: 1
+                        )
+                    )),
+                    label: countLabel
+                )
             } else {
                 actionItem(
                     icon: iReactedEmoji != nil ? "heart.fill" : "heart",
@@ -1926,43 +1900,15 @@ struct PostCardView: View {
         return ordered.sorted { ($0.lowercased()) < ($1.lowercased()) }
     }
 
-    /// SF Symbol action item. Sizes via `.font(.system(size:))` so each
-    /// symbol picks its natural visual weight — `arrow.2.squarepath` and
-    /// other wider glyphs were rendering visibly smaller under the prior
-    /// `.resizable().scaledToFit().frame(15x15)` because scaledToFit shrunk
-    /// the height to keep the aspect ratio.
+    /// SF Symbol action item — the shared 44×44 / 20pt `ActionRowItem` (§6).
+    /// Symbols size via `.font` so each keeps its natural visual weight.
     private func actionItem(icon: String, count: Int? = nil, label: String? = nil, tint: Color? = nil) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 17))
-                .frame(width: 22, height: 17, alignment: .center)
-            if let label, !label.isEmpty {
-                Text(label).font(.caption)
-            } else if let count {
-                Text(formatCount(count)).font(.caption)
-            }
-        }
-        .foregroundStyle(tint ?? .secondary)
-        .frame(height: 28)
-    }
-
-    /// Bitmap-image action item (zap glyph swap, custom emoji reactions).
-    /// Keeps the resize/frame path because asset / emoji images don't
-    /// participate in the SF Symbol weight system.
-    private func actionItem(image: Image, count: Int? = nil, label: String? = nil, tint: Color? = nil) -> some View {
-        HStack(spacing: 4) {
-            image
-                .resizable()
-                .scaledToFit()
-                .frame(width: 18, height: 18)
-            if let label, !label.isEmpty {
-                Text(label).font(.caption)
-            } else if let count {
-                Text(formatCount(count)).font(.caption)
-            }
-        }
-        .foregroundStyle(tint ?? .secondary)
-        .frame(height: 28)
+        let text: String? = {
+            if let label, !label.isEmpty { return label }
+            if let count { return formatCount(count) }
+            return nil
+        }()
+        return ActionRowItem(glyph: .symbol(icon), label: text, tint: tint)
     }
 
     private func zapLabel(_ sats: Int64?) -> String? {
