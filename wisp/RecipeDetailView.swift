@@ -28,6 +28,18 @@ import SwiftUI
 /// - Zap affordance follows `ZapGate.postZapVisible()` (Gate 0-F / §4.8).
 /// - Cook mode is Concern 1.8b — launched from this screen, snapshotted
 ///   at the current scale. Android's equivalent button is unwired.
+/// Which engagement bar a recipe detail shows. Watch-only accounts get the
+/// bookmark-only bar — no reply / react / zap control is rendered at all, so
+/// the zap route is unreachable from a recipe without a signing key.
+enum RecipeEngagementBar: Equatable {
+    case bookmarkOnly
+    case full
+
+    static func of(watchOnly: Bool) -> RecipeEngagementBar {
+        watchOnly ? .bookmarkOnly : .full
+    }
+}
+
 struct RecipeDetailView: View {
     let route: RecipeRoute
     let keypair: Keypair
@@ -346,15 +358,18 @@ struct RecipeDetailView: View {
 
     /// Signed-in: full engagement bar. Watch-only: bookmark only — the
     /// rest of the bar (reply / react / zap) stays gated like `ArticleView`.
+    /// The branch is `RecipeEngagementBar.of(watchOnly:)` so the hermetic
+    /// gate can pin it without hosting the view.
     @ViewBuilder
     private func engagementBar(_ event: NostrEvent) -> some View {
-        if activeUserIsWatchOnly {
+        switch RecipeEngagementBar.of(watchOnly: activeUserIsWatchOnly) {
+        case .bookmarkOnly:
             HStack {
                 Spacer()
                 RecipeBookmarkButton(event: event, keypair: keypair)
             }
             .padding(.horizontal, 8)
-        } else {
+        case .full:
             ArticleActionBar(
                 article: event,
                 keypair: keypair,

@@ -1,78 +1,73 @@
-# GATE — unified-feed/7-scroll-behavior
-Unified feed, PR 7 of 7 (§9), the last one: Android's stick-to-top scroll
-behaviour (§7) on both feed bodies, and the PR 2 scroll-position regression
-fixed by keeping both bodies mounted. Own branch off main at 13c0614 (the PR 6
-merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
-by hand. This GATE.md replaces PR 6's.
+# GATE — fix/article-action-bar-zap
+Zapping from a recipe (TestFlight 2.1 (2)) opened the wallet sheet and cycled
+open/closed. `ArticleActionBar` hosted `ZapSheet` locally; the keyboard the sheet
+raises tore the presenting lazy row down (the 2026-06-07 PostCardView diagnosis).
+The bar now routes through `ZapRoute` → `ComposePresenter` → MainView's root
+`.sheet(item:)`, and guards `store.mode != nil` (no wallet → setup prompt, never
+an empty sheet). Own branch off main at d71868e. Local build only on Seth's
+MacBook Air; gates run on the MacinCloud box by hand. This GATE.md replaces PR 7's.
 
-**Frozen at this commit.** App code is frozen at **1ef0b42** (2aa7731 plus the Copilot review fixes: the §7 re-pin is deferred one run loop, animated and coalesced per body through `MainView.scheduleRepin`; the hosted cost gate allows a viewport of incidental evaluations). The previous GATE.md (6d49943) is superseded. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **90972ad** (35c5e47 plus the review fixes: side-menu wallet prompt copy, source-scan tests dropped, #74 filed). The previous GATE.md (0bdeca9) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 1ef0b42. Three builds
-  across the PR: the first failed on the test file (a mutating call inside
-  `#expect`, and `FeedKindSwitchTracker` wrongly `nonisolated` next to the
-  main-actor `FeedKind`), the second was green at 2aa7731, the third is the
-  review-fix build. Free disk 53 GB before the first, 48 GB after the last.
-- Warnings in touched files: **zero**. `MainView.swift`, `wisp/FeedTabRouting.swift`,
-  `wisp/FeedFollowState.swift`, `wisp/KeptMountedFeedBodies.swift`,
-  `wispTests/FeedStickToTopTests.swift`: none.
-- Targeted serial run, 2026-09-09, `test-without-building` over every suite
-  matching `feed|onlyfood` (17 suites), rerun after the review fixes with the
-  same result: **140 tests, 139 passed, 1 failed** — the
-  failure is the known #4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`,
-  identical on main. `FeedStickToTopTests` 10 / 10, including the three hosted
-  gates. Measurement printed by the hosted test: hidden rows evaluated while the
-  visible body scrolled **0**, visible rows during that scroll 25, hidden rows on
-  an off-screen prepend **1 of 61**.
-- pbxproj: no diff (three-dot). New files `wisp/FeedFollowState.swift`,
-  `wisp/KeptMountedFeedBodies.swift`, `wispTests/FeedStickToTopTests.swift` are
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 90972ad (one build, 2026-09-10, full build on an emptied shared DerivedData; `wisp` + `wispTests` compiled, `** TEST BUILD SUCCEEDED **`). Free disk
+  56.9 GB before, 54.1 GB after. Total warning lines 697, identical to the first-freeze build at 35c5e47; all are pre-existing Swift 6 diagnostics in files this branch does not touch.
+- Warnings in touched files (`PostCardView.swift`, `ProfileView.swift`,
+  `wisp/ArticleView.swift`, `wisp/RecipeDetailView.swift`, `wisp/ZapRoute.swift`,
+  `wispTests/ZapRouteTests.swift`): **zero**.
+- pbxproj: no diff (three-dot, `git diff origin/main...HEAD --stat -- wisp.xcodeproj`
+  empty). New files `wisp/ZapRoute.swift`, `wispTests/ZapRouteTests.swift` are
   self-registering.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout unified-feed/7-scroll-behavior && git pull --ff-only
+git fetch origin && git checkout fix/article-action-bar-zap && git pull --ff-only
 cp ci_scripts/gate.sh ~/gate.sh && chmod +x ~/gate.sh
-~/gate.sh unified-feed/7-scroll-behavior
+~/gate.sh fix/article-action-bar-zap
 ```
 Expected verdict line: `gate: PASS — failure set is exactly the known set (4/4);
-N tests ran on unified-feed/7-scroll-behavior @ <this commit>`, with the four
-known failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus
-the three `SafetyTests`, issue #57) and no `NEW` line.
+N tests ran on fix/article-action-bar-zap @ <this commit>`, with the four known
+failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the
+three `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **824** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 814; the delta is **+10**
-(`FeedStickToTopTests` 10). If the parsed total is 814 the run was on a stale
-tree — the script's branch assertion is a hard stop.
+**Count.** This branch has **830** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 824; the delta is **+6**
+(`ZapRouteTests` 6). If the parsed total is 824 the run was on a stale tree.
 
-**Hosted gates on the box.** Three `FeedStickToTopTests` cases open a real
-`UIWindow` in the test host and pump the run loop (`kindSwitch_awayFromOnlyFoodAndBack_restoresScrollPosition`,
-`viewBuilderSwitch_losesScrollPosition_theRegression`,
-`hiddenBody_doesNoRowWorkWhileTheVisibleBodyScrolls`). They took ~26 s locally.
-If one fails on the box with "did not lay out", that is the harness, not §7 —
-report the recorded issue text rather than retrying blind.
-
-## Gate 2 — unit coverage (subset of Gate 1; name-check the bundle)
+## Gate 2 — the brief's three hermetic gates (subset of Gate 1; name-check the bundle)
 ```sh
 ~/gate.sh --parse "$(ls -td ~/Library/Developer/Xcode/DerivedData/wisp-*/Logs/Test/*.xcresult | head -1)" \
-  | grep -E 'FeedStickToTopTests|FeedTabRoutingTests|OnlyFood'
+  | grep -E 'ZapRouteTests|ZapGateTests|RecipeSaveToggleTests'
 ```
-Required cases, each present and passing (the gate list from the PR 7 brief):
-- head change with autoFollowTop true and no drag re-pins: `headChange_whileFollowingAndSettled_repins`
-- head change after a user drag does not re-pin: `headChange_afterUserDrag_doesNotRepin`
-- resumes only when settled AND at the very top, not near it:
-  `follow_resumesOnlyWhenSettledAtTheVeryTop_notNearIt`
-- re-tap / pill never fight auto-follow: `retapAndPill_followAgain_andNeverFightAutoFollow`
-- explicit picker selection re-pins; first composition and tab re-entry do not:
-  `pickerSelection_repins_firstCompositionAndTabReentryDoNot`
-- switching kind away from OnlyFood and back restores the scroll position:
-  `kindSwitch_awayFromOnlyFoodAndBack_restoresScrollPosition` (and the control
-  `viewBuilderSwitch_losesScrollPosition_theRegression`)
-- the optimistic self-insert while scrolled down does not re-pin:
-  `optimisticSelfInsert_whileScrolledDown_doesNotRepin`
-- the hidden body's cost: `hiddenBody_doesNoRowWorkWhileTheVisibleBodyScrolls`
-- prefetch distance unchanged: `pagePrefetchDistance_staysSix`
-- all pre-existing feed and OnlyFood gates: every other suite in the grep passes
-  (only the known #4 case fails).
+- ZapSheet's route is the app-root host for both PostCardView and ArticleActionBar:
+  `open_withWallet_handsTheRequestToTheRootHost`,
+
+
+  `profileZap_withoutAnEvent_keysTheRequestOnThePubkey`, `open_withoutRootHost_presentsNothing_andDoesNotPrompt`.
+- no-wallet shows the setup prompt, not an empty sheet:
+  `open_withoutWallet_promptsSetup_andPresentsNothing`,
+  `walletReady_needsAStoreWithAConfiguredMode`.
+- watch-only cannot reach the zap control from a recipe:
+  `recipeEngagementBar_watchOnly_isBookmarkOnly`.
+- gating unchanged: every `ZapGateTests` case still passes.
+
+## Gate 3 — MANUAL on device (TestFlight build from this branch)
+With a wallet configured (Spark or NWC), zap from each of the five surfaces. Each
+must open a usable sheet that stays open (keyboard up, amount editable, no flicker):
+1. a recipe (Recipes tab → recipe detail → bolt in the engagement bar)
+2. a feed post (bolt on a kind-1 card)
+3. a long-form article (feed → article → bolt)
+4. a profile (bolt in the header, and the lightning-address row)
+5. a live stream (host zap in the info bar, and a chat-message zap)
+Then with NO wallet configured: recipe and feed-post bolts show the
+"Set up a wallet in the side menu to send zaps" prompt; "Set Up Wallet" lands on the Wallet screen (drawer-only tab).
+Then signed in watch-only (npub): recipe detail shows the bookmark-only bar; no bolt.
+
+## Gate 4 — pbxproj
+`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty.
+
+## Results
+Pending — recorded in the PR description after Seth's run.

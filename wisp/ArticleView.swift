@@ -401,8 +401,16 @@ struct ArticleView: View {
 /// Slim engagement bar for the article event: reply / react / repost / zap /
 /// bookmark with counts. Mirrors `PostCardView.actionBar`'s wiring through
 /// the shared services (`EngagementRepository`, `ReactionSender`,
-/// `RepostSender`, `ComposePresenter`, `ZapSheet`) without extracting the
+/// `RepostSender`, `ComposePresenter`, `ZapRoute`) without extracting the
 /// card's deeply-coupled private bar.
+///
+/// The zap sheet is presented from the app root via `ZapRoute`, never from
+/// this bar: the bar sits inside the article / recipe `LazyVStack`, and the
+/// keyboard `ZapSheet` raises on appear tears a lazy row down — the sheet
+/// dies with it and the surviving `@State` re-presents, cycling every ~0.5s
+/// (the 2026-06-07 diagnosis on `PostCardView`, which got the root-host cure
+/// first; this bar shipped without it and recipes cycled while feed posts
+/// did not). No configured wallet → the setup prompt, never an empty sheet.
 ///
 /// Internal so `RecipeDetailView` (Concern 1.3) reuses this bar rather than
 /// forking it. `zapsOnPosts` is Gate 0-F / §4.8: when false the bolt is not
@@ -430,7 +438,7 @@ struct ArticleActionBar: View {
     @State private var noteListRepo = NoteListRepository.shared
     @State private var showReactionPicker = false
     @State private var showRepostDialog = false
-    @State private var showZapSheet = false
+    @State private var showWalletSetupPrompt = false
     @State private var showBookmarkSheet = false
     /// Cached so `RecipeParser.isRecipe` does not re-run on every engagement
     /// re-render. Seeded on appear / when `article.id` changes.
@@ -512,7 +520,17 @@ struct ArticleActionBar: View {
             // Zap — post-level, so gated by the §4.8 kill switch.
             if zapsOnPosts {
                 Button {
-                    showZapSheet = true
+                    let outcome = ZapRoute.open(
+                        ZapSheetRequest(
+                            recipientPubkey: article.pubkey,
+                            recipientLud16: authorProfile?.lud16,
+                            recipientName: authorProfile?.displayString,
+                            eventId: article.id
+                        ),
+                        store: walletStore,
+                        presenter: composePresenter
+                    )
+                    if outcome == .walletSetupNeeded { showWalletSetupPrompt = true }
                 } label: {
                     let sats = box.counts.zapSats
                     actionItem(
@@ -533,21 +551,7 @@ struct ArticleActionBar: View {
         .onChange(of: article.id, initial: true) { _, _ in
             bookmarkTarget = knownBookmarkTarget ?? BookmarkActionTarget.of(event: article)
         }
-        .sheet(isPresented: $showZapSheet) {
-            if let store = walletStore {
-                ZapSheet(
-                    store: store,
-                    recipientPubkey: article.pubkey,
-                    recipientLud16: authorProfile?.lud16,
-                    recipientName: authorProfile?.displayString,
-                    eventId: article.id,
-                    extraTags: [],
-                    forcePrivate: false,
-                    onSuccess: { _ in },
-                    dismiss: { showZapSheet = false }
-                )
-            }
-        }
+        .walletSetupPrompt(isPresented: $showWalletSetupPrompt)
         .sheet(isPresented: $showBookmarkSheet) {
             NavigationStack {
                 AddToNoteListSheet(keypair: keypair, event: article)
