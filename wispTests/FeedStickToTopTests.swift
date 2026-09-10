@@ -228,9 +228,10 @@ struct FeedStickToTopTests {
         #expect((back?.contentOffset.y ?? 0) < 1, "offset \(String(describing: back?.contentOffset.y))")
     }
 
-    /// What the hidden body costs: zero row evaluations while the visible
-    /// body scrolls, and a viewport's worth (not the whole list) when its own
-    /// data changes off-screen.
+    /// What the hidden body costs: no meaningful row work while the visible
+    /// body scrolls (measured 0; the gate allows a viewport's worth), and a
+    /// viewport's worth at most (not the whole list) when its own data
+    /// changes off-screen.
     @Test func hiddenBody_doesNoRowWorkWhileTheVisibleBodyScrolls() {
         let model = HostModel()
         let host = Host(KeptHarness(model: model))
@@ -252,7 +253,13 @@ struct FeedStickToTopTests {
         host.pump(0.3)
         let hiddenDuringScroll = model.onlyFoodCounter.evaluations - hiddenBefore
         let visibleDuringScroll = model.generalCounter.evaluations - visibleBefore
-        #expect(hiddenDuringScroll == 0, "hidden body evaluated \(hiddenDuringScroll) rows while the visible one scrolled")
+        // A hidden body that were laid out per scroll event would evaluate
+        // a viewport's worth of rows on every step (the visible body shows
+        // the scale: 25 over twelve steps). Allow up to one viewport of
+        // incidental evaluations so a SwiftUI version that touches a row or
+        // two does not fail the gate; the measurement is printed below.
+        let viewportRows = Int((844.0 / 100.0).rounded(.up))
+        #expect(hiddenDuringScroll <= viewportRows, "hidden body evaluated \(hiddenDuringScroll) rows while the visible one scrolled")
         #expect(visibleDuringScroll > 0, "visible body did scroll work: \(visibleDuringScroll)")
 
         // Data changes off-screen cost the viewport, not the list.

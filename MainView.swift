@@ -126,6 +126,11 @@ struct MainView: View {
     /// `feedScrollToTopTrigger`, which both bodies observe: OnlyFood must keep
     /// its position across a switch away and back.
     @State private var generalRepinTrigger: Int = 0
+    /// A §7 re-pin waiting for the next run loop, per body — `nil` none,
+    /// `false` conditional on the follow state at fire time, `true` forced
+    /// (the new-posts pill). See `scheduleRepin`.
+    @State private var onlyFoodRepinPending: Bool?
+    @State private var generalRepinPending: Bool?
     /// Active Picture-in-Picture session, observed so the floating window's
     /// "return to app" button can re-open the live stream / fullscreen video.
     @State private var pipCoordinator = VideoPiPCoordinator.shared
@@ -1614,7 +1619,12 @@ struct MainView: View {
             // included).
             .onChange(of: onlyfoodFeedVM.notes.first?.id) { _, _ in
                 if onlyFoodFollow.shouldRepinOnHeadChange() {
-                    proxy.scrollTo("feedTop", anchor: .top)
+                    scheduleRepin(
+                        pending: $onlyFoodRepinPending,
+                        forced: false,
+                        follows: { onlyFoodFollow.shouldRepinOnHeadChange() },
+                        proxy: proxy
+                    )
                 }
             }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
@@ -1815,7 +1825,12 @@ struct MainView: View {
                 // the head does not move under a reading user.
                 .onChange(of: viewModel.events.first?.id) { _, _ in
                     if generalFollow.shouldRepinOnHeadChange() {
-                        feedProxy.scrollTo("feedTop", anchor: .top)
+                        scheduleRepin(
+                            pending: $generalRepinPending,
+                            forced: false,
+                            follows: { generalFollow.shouldRepinOnHeadChange() },
+                            proxy: feedProxy
+                        )
                     }
                 }
                 .onChange(of: feedScrollToTopTrigger) { _, _ in
@@ -1842,17 +1857,16 @@ struct MainView: View {
                                 onTap: {
                                     generalFollow.follow()
                                     viewModel.applyPendingNewPosts()
-                                    // Defer to the next runloop so the LazyVStack
-                                    // has a chance to lay out the prepended rows
-                                    // before we resolve `feedTop`. Without this,
-                                    // `scrollTo` runs against the pre-merge
-                                    // layout and only nudges the offset by a
-                                    // single row's height.
-                                    DispatchQueue.main.async {
-                                        withAnimation(.easeInOut(duration: 0.35)) {
-                                            feedProxy.scrollTo("feedTop", anchor: .top)
-                                        }
-                                    }
+                                    // Forced: the pill is explicit intent, so
+                                    // it scrolls even if the merge did not
+                                    // move the head. The head-change observer
+                                    // coalesces into this one scroll.
+                                    scheduleRepin(
+                                        pending: $generalRepinPending,
+                                        forced: true,
+                                        follows: { generalFollow.shouldRepinOnHeadChange() },
+                                        proxy: feedProxy
+                                    )
                                 },
                                 onDismiss: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -1923,6 +1937,35 @@ struct MainView: View {
     }
 
     // MARK: - Helpers
+
+    /// §7 re-pin to `feedTop`, one run loop later and animated. Deferred so
+    /// the LazyVStack has laid out the prepended rows before `feedTop` is
+    /// resolved — against the pre-merge layout `scrollTo` only nudges by a
+    /// single row's height (the new-posts pill learnt this first). Animated
+    /// like the pill and the re-tap, so every route to the top looks the
+    /// same. Coalesced per body: a pill tap whose merge also moves the head
+    /// scrolls once, and the forced intent wins. The follow state is re-read
+    /// at fire time, so a user who grabbed the list in between is not yanked.
+    private func scheduleRepin(
+        pending: Binding<Bool?>,
+        forced: Bool,
+        follows: @escaping () -> Bool,
+        proxy: ScrollViewProxy
+    ) {
+        if let alreadyForced = pending.wrappedValue {
+            if forced && !alreadyForced { pending.wrappedValue = true }
+            return
+        }
+        pending.wrappedValue = forced
+        DispatchQueue.main.async {
+            let force = pending.wrappedValue ?? false
+            pending.wrappedValue = nil
+            guard force || follows() else { return }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                proxy.scrollTo("feedTop", anchor: .top)
+            }
+        }
+    }
 
     /// Tapping the already-selected tab pops its navigation stack back to the
     /// tab's root view. Mirrors the standard iOS tab-bar gesture.
