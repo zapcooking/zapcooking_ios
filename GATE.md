@@ -1,23 +1,29 @@
 # GATE — feed/onlyfood-polish
 Unified feed follow-ups from TestFlight 2.1 (2) device testing, six items on one
 surface: the live-now rail on OnlyFood (§2.3 reversed), the online-users pill and
-relay-count menu removed from the feed top bar, a Feed Relay row (and an Online Now
-row) in the drawer, a Cheffy entry in the bar's trailing slot, the bolt as the
+relay-count menu removed from the feed top bar (and Online Now removed from the app
+altogether, presence tracking included), a Feed Relay row in the drawer, a Cheffy entry in the bar's trailing slot, the bolt as the
 zap-glyph default, and the bounded read of the OnlyFood first-item clipping. Own
 branch off main at dca127a (the #75 merge). Local build only on Seth's MacBook Air;
 gates run on the MacinCloud box by hand. This GATE.md replaces #75's.
 
-**Frozen at this commit.** App code is frozen at **b8b1254**. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **cdfa739** (b8b1254 plus the follow-up: Online Now removed outright — the drawer row, its sheet and `FeedViewModel`'s presence tracking / metrics socket). The previous GATE.md (00df88c) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at b8b1254 (fourth build,
-  2026-09-10: builds one and two failed on "unable to type-check this expression in reasonable time" at the root `body` once the drawer call gained four arguments — fixed by moving the drawer and the Cheffy cover into their own properties; build three failed on argument order in that call; build four is the green one). Free disk 54.1 GB before the first, 54.0 GB after the last; no local Time
-  Machine snapshots at build time.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at cdfa739 — one build for this
+  follow-up (2026-09-10). Free disk 54.0 GB before and 54.0 GB after; no local Time
+  Machine snapshots at build time. (The earlier freeze at b8b1254 took four builds:
+  two failed on the root `body` type-check limit, one on argument order — issue #76.)
 - Warnings in touched files (`MainView.swift`, `SidebarDrawerView.swift`,
-  `DrawerRow.swift`, `AppSettings.swift`, `wisp/FeedTabRouting.swift`,
-  `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`): **zero** (the green build was incremental, so its 441 total warning lines are not comparable to a full-build baseline; every line is in a file this branch does not touch).
+  `DrawerRow.swift`, `AppSettings.swift`, `FeedViewModel.swift`, `wisp/FeedTabRouting.swift`,
+  `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`,
+  `wispTests/FeedStartTests.swift`): **zero new**. `FeedViewModel.swift` carries five
+  pre-existing Swift 6 diagnostics (`SafetyFilter.shared` from a nonisolated context,
+  two async-without-await, one no-async-in-await); the same five appear in the full
+  builds of main-equivalent code at lines 438/696/765/1077, now 423/677/746/1057 —
+  shifted by the deleted lines, none in a changed hunk.
 - pbxproj: no diff (three-dot, `git diff origin/main...HEAD --stat -- wisp.xcodeproj`
   empty). New files `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`
   are self-registering.
@@ -36,7 +42,9 @@ N tests ran on feed/onlyfood-polish @ <this commit>`, with the four known failur
 
 **Count.** This branch has **838** `@Test` declarations (`git grep -cE
 '^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 830; the delta is **+8**
-(`FeedTopBarPolishTests` 8). If the parsed total is 830 the run was on a stale tree.
+(`FeedTopBarPolishTests` 8). The Online Now removal deletes no whole test: its
+coverage was two assertions inside `FeedStartTests/onlyFoodLanding_startTwice_runsSharedSetupOnce`,
+which stays and must still pass. If the parsed total is 830 the run was on a stale tree.
 
 **Hosted gate on the box.** `feedPicker_staysCentred_whateverSitsAtTheEdges` opens a
 real `UIWindow` in the test host and pumps the run loop (the `FeedStickToTopTests`
@@ -52,6 +60,7 @@ report the recorded issue text rather than retrying blind.
 - no online-users or relay-count control on any kind:
   `topBar_hasNoOnlinePillOrRelayMenu_onAnyKind`
 - drawer relay row shows the count, red at zero: `drawerRelayRow_showsTheCount_redAtZero`
+- the shared setup block still runs once with the metrics socket gone: `FeedStartTests` (3)
 - Cheffy present iff `CheffyGate.entryVisible()`:
   `cheffyEntry_presentWhenGateOpen_absentWhenClosed_onEveryKind`,
   `cheffyButton_rendersAtThe44ptTarget_withAvatarWeightGlyph`
@@ -71,12 +80,16 @@ report the recorded issue text rather than retrying blind.
 3. Tap Cheffy from OnlyFood and from Follows: the Cheffy cover opens both times.
    (With `cheffyEnabled` off the button is absent.)
 4. Drawer: "Feed Relay" shows the connected count (red when 0) and opens the relay
-   picker; "Online Now" opens the online sheet. Feed picker → Relay still opens the
-   same picker.
+   picker. No "Online Now" row anywhere. Feed picker → Relay still opens the same
+   picker.
 5. Fresh install: the zap glyph is the bolt. Set Interface → Bitcoin B: the B shows
    and survives relaunch. Fiat mode: the coin stack, either way.
 6. Item 1 diagnostic (see PR body): after a pull-to-refresh on OnlyFood with no live
    stream, the first card's avatar and name must sit fully below the bar.
+7. Recipe-publish navigation (this PR changes it): open Cheffy from the FEED side
+   (either kind), publish a recipe. Expect: the app lands on the Recipes tab with the
+   new recipe pushed; Back returns to the Recipes root, not to the feed. Repeat from
+   My Kitchen's Intelligence menu: same result as before.
 
 ## Gate 4 — pbxproj
 `git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty.
