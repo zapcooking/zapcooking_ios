@@ -7,13 +7,13 @@ The bar now routes through `ZapRoute` → `ComposePresenter` → MainView's root
 an empty sheet). Own branch off main at d71868e. Local build only on Seth's
 MacBook Air; gates run on the MacinCloud box by hand. This GATE.md replaces PR 7's.
 
-**Frozen at this commit.** App code is frozen at **35c5e47**. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **90972ad** (35c5e47 plus the review fixes: side-menu wallet prompt copy, source-scan tests dropped, #74 filed). The previous GATE.md (0bdeca9) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 35c5e47 (one build, 2026-09-10; `wisp` + `wispTests` compiled, `** TEST BUILD SUCCEEDED **`). Free disk
-  15.3 GB before, 14.3 GB after — below the 15 GB floor, so no second build was run; the total warning count (697 lines, all pre-existing Swift 6 diagnostics elsewhere) was not re-baselined against a main build.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 90972ad (one build, 2026-09-10, full build on an emptied shared DerivedData; `wisp` + `wispTests` compiled, `** TEST BUILD SUCCEEDED **`). Free disk
+  56.9 GB before, 54.1 GB after. Total warning lines 697, identical to the first-freeze build at 35c5e47; all are pre-existing Swift 6 diagnostics in files this branch does not touch.
 - Warnings in touched files (`PostCardView.swift`, `ProfileView.swift`,
   `wisp/ArticleView.swift`, `wisp/RecipeDetailView.swift`, `wisp/ZapRoute.swift`,
   `wispTests/ZapRouteTests.swift`): **zero**.
@@ -33,9 +33,9 @@ N tests ran on fix/article-action-bar-zap @ <this commit>`, with the four known
 failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the
 three `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **832** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 824; the delta is **+8**
-(`ZapRouteTests` 8). If the parsed total is 824 the run was on a stale tree.
+**Count.** This branch has **830** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 824; the delta is **+6**
+(`ZapRouteTests` 6). If the parsed total is 824 the run was on a stale tree.
 
 ## Gate 2 — the brief's three hermetic gates (subset of Gate 1; name-check the bundle)
 ```sh
@@ -44,9 +44,9 @@ three `SafetyTests`, issue #57) and no `NEW` line.
 ```
 - ZapSheet's route is the app-root host for both PostCardView and ArticleActionBar:
   `open_withWallet_handsTheRequestToTheRootHost`,
-  `postCardAndArticleBar_useTheRootRoute_notALocalSheet`,
-  `zapSheet_isConstructedOnlyByTheRootHost_andAuditedScreenLevelHosts` (source
-  scan from `#filePath`; needs the checkout at its compile path — true on the box).
+
+
+  `profileZap_withoutAnEvent_keysTheRequestOnThePubkey`, `open_withoutRootHost_presentsNothing_andDoesNotPrompt`.
 - no-wallet shows the setup prompt, not an empty sheet:
   `open_withoutWallet_promptsSetup_andPresentsNothing`,
   `walletReady_needsAStoreWithAConfiguredMode`.
@@ -63,7 +63,7 @@ must open a usable sheet that stays open (keyboard up, amount editable, no flick
 4. a profile (bolt in the header, and the lightning-address row)
 5. a live stream (host zap in the info bar, and a chat-message zap)
 Then with NO wallet configured: recipe and feed-post bolts show the
-"Set up a wallet to send zaps" prompt; "Set Up Wallet" lands on the Wallet tab.
+"Set up a wallet in the side menu to send zaps" prompt; "Set Up Wallet" lands on the Wallet screen (drawer-only tab).
 Then signed in watch-only (npub): recipe detail shows the bookmark-only bar; no bolt.
 
 ## Gate 4 — pbxproj
