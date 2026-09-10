@@ -23,8 +23,8 @@ enum FeedTopBarControl: Equatable, CaseIterable {
 enum FeedTopBarLayout {
     /// Everything the bar renders for `kind`. The online-users pill and the
     /// relay-count menu are gone from the bar: relay selection lives in the
-    /// drawer's Feed Relay row (and the picker's Relay entry), Online Now in
-    /// the drawer's Online Now row.
+    /// drawer's Feed Relay row (and the picker's Relay entry); Online Now was
+    /// removed from the app.
     static func controls(kind: FeedKind, cheffyVisible: Bool) -> [FeedTopBarControl] {
         var controls: [FeedTopBarControl] = [.avatar]
         if kind != .onlyFood { controls.append(.contentFilter) }

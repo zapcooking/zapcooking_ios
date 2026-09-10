@@ -10,7 +10,6 @@ import Testing
 struct FeedStartTests {
 
     final class Calls {
-        var metrics = 0
         var discovery: [String] = []
         var registered: [UUID] = []
         var unregistered: [UUID] = []
@@ -26,10 +25,6 @@ struct FeedStartTests {
     private func makeVM(pubkey: String) -> (FeedViewModel, Calls) {
         let calls = Calls()
         let services = FeedViewModel.StartupServices(
-            liveMetrics: {
-                calls.metrics += 1
-                return AsyncStream { $0.finish() }
-            },
             startLiveDiscovery: { calls.discovery.append($0) },
             registerSweepSource: { _ in
                 let id = UUID()
@@ -69,7 +64,6 @@ struct FeedStartTests {
         #expect(vm.didStart)
         #expect(vm.isLoading == false)
         #expect(calls.registered.count == 1, "sweep source registered exactly once")
-        #expect(calls.metrics == 1, "one metrics socket, no orphaned metricsTask")
         #expect(calls.bootstraps == [pk], "relay-set bootstrap fired once")
         #expect(calls.discovery == [pk], "live discovery kicked once")
         #expect(calls.prunes == [pk], "event-store prune ran once")
@@ -82,7 +76,6 @@ struct FeedStartTests {
         // Follows list held it across stop/start too).
         await vm.start()
         #expect(calls.registered.count == 1)
-        #expect(calls.metrics == 1)
         #expect(calls.bootstraps.count == 1)
     }
 

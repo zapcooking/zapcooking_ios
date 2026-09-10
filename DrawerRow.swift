@@ -6,7 +6,7 @@ struct DrawerRow: View {
     var indented: Bool = false
     var tint: Color? = nil
     var trailingChevron: ChevronState = .none
-    /// Optional trailing value (the drawer's Feed Relay / Online Now counts),
+    /// Optional trailing value (the drawer's Feed Relay count),
     /// tinted so the row can carry a status colour.
     var trailingValue: String? = nil
     var trailingTint: Color = .secondary

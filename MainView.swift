@@ -76,7 +76,6 @@ struct MainView: View {
     /// `scenePhase` handler.
     @State private var wasBackgrounded = false
     @State private var showRelayPicker = false
-    @State private var showOnlineSheet = false
     @State private var showSocialGraph = false
     /// Read in `onlyFoodBody` for the live OnlyFood WoT toggle (§4).
     private var safetyPrefs: SafetyPreferences { SafetyPreferences.shared }
@@ -536,22 +535,6 @@ struct MainView: View {
                 }
             })
         }
-        .sheet(isPresented: $showOnlineSheet) {
-            OnlineNowSheet(
-                networkPubkeys: viewModel.onlineNetworkPubkeys,
-                globalCount: viewModel.globalOnlineCount,
-                profiles: viewModel.profiles,
-                onTapProfile: { pubkey in
-                    showOnlineSheet = false
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(350))
-                        feedPath.append(ProfileRoute(pubkey: pubkey))
-                        selectedTab = .feed
-                    }
-                }
-            )
-            .presentationDetents([.medium, .large])
-        }
         .onChange(of: pipCoordinator.restoreRequest) { _, request in
             guard let request else { return }
             switch request {
@@ -571,7 +554,7 @@ struct MainView: View {
     /// The sidebar drawer, in its own property: its initializer takes two
     /// dozen closures, and inline in the root `ZStack` it pushed the `body`
     /// expression past what the type checker will take once the Feed Relay
-    /// and Online Now rows added four more.
+    /// row added more.
     private var drawer: some View {
         SidebarDrawerView(
             profile: viewModel.userProfile,
@@ -681,11 +664,6 @@ struct MainView: View {
             onOpenRelayPicker: {
                 closeDrawer()
                 showRelayPicker = true
-            },
-            onlineCount: viewModel.onlineNetworkPubkeys.count,
-            onOpenOnlineNow: {
-                closeDrawer()
-                showOnlineSheet = true
             },
             onOpenAbout: {
                 closeDrawer()
@@ -1166,7 +1144,7 @@ struct MainView: View {
     /// Avatar · (content filter) · centred picker · Cheffy. The online-users
     /// pill and the relay-count menu left the bar (feed/onlyfood-polish):
     /// relay selection is the drawer's Feed Relay row and the picker's Relay
-    /// entry, Online Now is the drawer's Online Now row. Membership is
+    /// entry; Online Now was removed outright. Membership is
     /// `FeedTopBarLayout.controls`, pinned by `FeedTopBarPolishTests`.
     private var topBar: some View {
         let controls = FeedTopBarLayout.controls(
@@ -2132,48 +2110,6 @@ enum BottomTab: String, CaseIterable {
         case .notifications: "Notifications"
         case .wallet: "Wallet"
         case .messages: "Messages"
-        }
-    }
-}
-
-private struct OnlineNowSheet: View {
-    let networkPubkeys: [String]
-    let globalCount: Int?
-    let profiles: [String: ProfileData]
-    let onTapProfile: (String) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Online Now")
-                    .font(.title2.weight(.semibold))
-
-                row(text: "\(networkPubkeys.count) online in your network")
-                if let g = globalCount {
-                    row(text: "\(g) online across all of Nostr")
-                }
-
-                FlowLayout(spacing: 8) {
-                    ForEach(networkPubkeys, id: \.self) { pk in
-                        Button {
-                            onTapProfile(pk)
-                        } label: {
-                            CachedAvatarView(url: profiles[pk]?.picture, size: 44)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-        }
-    }
-
-    private func row(text: String) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(Color.wispRepostColor).frame(width: 8, height: 8)
-            Text(text).font(.subheadline)
         }
     }
 }
