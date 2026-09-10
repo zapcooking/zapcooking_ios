@@ -112,6 +112,20 @@ struct MainView: View {
     /// top" because rubber-banding can briefly leave the offset slightly
     /// positive even when the user is visually parked at the top.
     @State private var feedAtTop: Bool = true
+    /// Stick-to-top (§7), one per body — see `FeedFollowState`. Fed by the
+    /// scroll-phase observer each body already has for the FAB and by the
+    /// at-top bit of its geometry observer; consulted when the head of the
+    /// list changes.
+    @State private var onlyFoodFollow = FeedFollowState()
+    @State private var generalFollow = FeedFollowState()
+    /// Android's `prevMode` guard for the picker (§7): re-pin only on an
+    /// actual selection, never on first composition or tab re-entry.
+    @State private var kindSwitchTracker = FeedKindSwitchTracker()
+    /// Bumped by an actual picker selection of a general kind so the general
+    /// body lands at the top of its rebuilt list. Separate from
+    /// `feedScrollToTopTrigger`, which both bodies observe: OnlyFood must keep
+    /// its position across a switch away and back.
+    @State private var generalRepinTrigger: Int = 0
     /// Active Picture-in-Picture session, observed so the floating window's
     /// "return to app" button can re-open the live stream / fullscreen video.
     @State private var pipCoordinator = VideoPiPCoordinator.shared
@@ -670,6 +684,7 @@ struct MainView: View {
     /// `ScrollView` is never torn down on a tab switch. SwiftUI preserves the scroll position of
     /// views it doesn't destroy, so the user returns to exactly where they were
     /// — with zero scroll tracking and nothing added to the scroll hot path.
+    /// `feedContent` applies the same rule to its two bodies (§7).
     private var feedTab: some View {
         NavigationStack(path: $feedPath) {
             ZStack(alignment: .bottomTrailing) {
@@ -774,6 +789,18 @@ struct MainView: View {
             }
             .onChange(of: viewModel.currentKind) { _, kind in
                 FeedTabRouting.ensureOnlyFoodStarted(kind: kind, onlyFood: onlyfoodFeedVM)
+            }
+            // §7 picker re-pin, guarded like Android's `prevMode`: the initial
+            // observation only records the landing kind; a general kind
+            // picked later lands at the top of its rebuilt list with
+            // following re-armed; OnlyFood picked later keeps the position
+            // the user left (the PR 2 regression). Tab re-entry never gets
+            // here — the feed tab stays mounted.
+            .onChange(of: viewModel.currentKind, initial: true) { _, kind in
+                if FeedTabRouting.repinTarget(afterObserving: kind, tracker: &kindSwitchTracker) == .general {
+                    generalFollow.follow()
+                    generalRepinTrigger &+= 1
+                }
             }
             .navigationDestination(for: TrendingFeedRoute.self) { _ in
                 TrendingFeedView(
@@ -1382,12 +1409,15 @@ struct MainView: View {
     /// live-now strip, the new-posts pill and the content filter belong to
     /// the general feed; OnlyFood has its own loading / empty / relay-miss
     /// states. Both share the top bar, the picker and `feedPath`.
-    @ViewBuilder
+    ///
+    /// Both bodies stay mounted once shown (`KeptMountedFeedBodies`, §7):
+    /// a `@ViewBuilder` switch here tore down OnlyFood's `ScrollView` on
+    /// every kind change, and its notes — kept by the view model — came back
+    /// scrolled to the top.
     private var feedContent: some View {
-        switch FeedTabRouting.body(for: viewModel.currentKind) {
-        case .onlyFood:
+        KeptMountedFeedBodies(showOnlyFood: FeedTabRouting.body(for: viewModel.currentKind) == .onlyFood) {
             onlyFoodBody
-        case .general:
+        } general: {
             VStack(spacing: 0) {
                 relayFeedStatusBanner
                 feedBody
@@ -1556,7 +1586,10 @@ struct MainView: View {
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+            // One phase observer feeds both the FAB fade and §7's drag /
+            // settled bits.
             .onScrollPhaseChange { _, newPhase in
+                onlyFoodFollow.scrollPhase(newPhase)
                 switch newPhase {
                 case .tracking, .interacting:
                     feedFabOpacity = 0.35
@@ -1568,7 +1601,24 @@ struct MainView: View {
                     feedFabOpacity = 1.0
                 }
             }
+            // §7's at-the-very-top bit. The transform is one comparison per
+            // scroll event; the action runs only when the bit flips.
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y <= 0
+            } action: { _, atTop in
+                onlyFoodFollow.atTop(atTop)
+            }
+            // Re-pin to the newest note when the head changes while
+            // following: refresh, resume, the optimistic self-insert. A user
+            // who dragged away is left where they are (their own new post
+            // included).
+            .onChange(of: onlyfoodFeedVM.notes.first?.id) { _, _ in
+                if onlyFoodFollow.shouldRepinOnHeadChange() {
+                    proxy.scrollTo("feedTop", anchor: .top)
+                }
+            }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
+                onlyFoodFollow.follow()
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo("feedTop", anchor: .top)
                 }
@@ -1732,7 +1782,10 @@ struct MainView: View {
                 // (Search, Hashtag, Trending, NoteList, PeopleList, Thread).
                 .ignoresSafeArea(.keyboard, edges: .bottom)
                 .refreshable { await viewModel.refresh() }
+                // One phase observer feeds both the FAB fade and §7's drag /
+                // settled bits.
                 .onScrollPhaseChange { _, newPhase in
+                    generalFollow.scrollPhase(newPhase)
                     switch newPhase {
                     case .tracking, .interacting:
                         feedFabOpacity = 0.35
@@ -1747,17 +1800,33 @@ struct MainView: View {
                 // Drive the new-posts hold flag from the live scroll offset.
                 // 8pt slop covers rubber-band overshoot at the top so we
                 // don't flicker the pill on/off while the user is parked
-                // there.
-                .onScrollGeometryChange(for: Bool.self) { geo in
-                    geo.contentOffset.y <= 8
-                } action: { _, atTop in
-                    feedAtTop = atTop
-                    viewModel.setHoldNewPosts(!atTop)
+                // there. The same read yields §7's no-slop at-top bit; the
+                // action runs only when either bit flips.
+                .onScrollGeometryChange(for: FeedTopState.self) { geo in
+                    FeedTopState(offsetY: geo.contentOffset.y)
+                } action: { _, top in
+                    feedAtTop = top.nearTop
+                    viewModel.setHoldNewPosts(!top.nearTop)
+                    generalFollow.atTop(top.atTop)
+                }
+                // Re-pin to the newest event when the head changes while
+                // following (the initial fill, live prepends at the top).
+                // Away from the top, live events are held in the pill, so
+                // the head does not move under a reading user.
+                .onChange(of: viewModel.events.first?.id) { _, _ in
+                    if generalFollow.shouldRepinOnHeadChange() {
+                        feedProxy.scrollTo("feedTop", anchor: .top)
+                    }
                 }
                 .onChange(of: feedScrollToTopTrigger) { _, _ in
+                    generalFollow.follow()
                     withAnimation(.easeInOut(duration: 0.3)) {
                         feedProxy.scrollTo("feedTop", anchor: .top)
                     }
+                }
+                // An actual picker selection of a general kind (§7).
+                .onChange(of: generalRepinTrigger) { _, _ in
+                    feedProxy.scrollTo("feedTop", anchor: .top)
                 }
                 .overlay(alignment: .top) {
                     // Animation modifier scoped INSIDE the overlay so the pill's
@@ -1771,6 +1840,7 @@ struct MainView: View {
                             NewPostsPill(
                                 count: viewModel.pendingNewCount,
                                 onTap: {
+                                    generalFollow.follow()
                                     viewModel.applyPendingNewPosts()
                                     // Defer to the next runloop so the LazyVStack
                                     // has a chance to lay out the prepended rows

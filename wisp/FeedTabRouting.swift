@@ -50,6 +50,27 @@ enum FeedTabRouting {
         scrollToTopTrigger &+= 1
     }
 
+    /// Feed-kind change hook (§7, Android's `prevMode` principle). Which
+    /// body, if any, re-pins to the top after observing `kind`:
+    /// - `nil` when the tracker saw no change — first composition, or a tab
+    ///   re-entry re-observing the same kind — so a restored scroll position
+    ///   is kept;
+    /// - `.general` on an actual selection of a general kind: its list is
+    ///   rebuilt by `FeedViewModel.resetForKindSwitch`, so it lands at the
+    ///   top of the new content with following re-armed;
+    /// - `nil` on an actual selection of OnlyFood. Its list is the same list
+    ///   the user left (§7.4: no new REQ), so the body restores the position
+    ///   they left at — the PR 2 regression fix — and its follow state is
+    ///   left as it was. Android re-pins here too; iOS keeps the position
+    ///   because that is the bug this PR was opened for.
+    static func repinTarget(afterObserving kind: FeedKind, tracker: inout FeedKindSwitchTracker) -> Body? {
+        guard tracker.observe(kind) else { return nil }
+        switch body(for: kind) {
+        case .general: return .general
+        case .onlyFood: return nil
+        }
+    }
+
     /// Compose FAB seed (§8): the visible, removable `#foodstr` prefill on
     /// OnlyFood; `nil` means the plain note composer.
     static func composePrefill(for kind: FeedKind) -> String? {
