@@ -5,20 +5,22 @@ fixed by keeping both bodies mounted. Own branch off main at 13c0614 (the PR 6
 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
 by hand. This GATE.md replaces PR 6's.
 
-**Frozen at this commit.** App code is frozen at **2aa7731**. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **1ef0b42** (2aa7731 plus the Copilot review fixes: the §7 re-pin is deferred one run loop, animated and coalesced per body through `MainView.scheduleRepin`; the hosted cost gate allows a viewport of incidental evaluations). The previous GATE.md (6d49943) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 2aa7731. Two builds, not
-  one: the first failed on the test file (a mutating call inside `#expect`, and
-  `FeedKindSwitchTracker` wrongly `nonisolated` next to the main-actor
-  `FeedKind`); both fixed, second build green. Free disk 53 GB before, 53 GB after.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 1ef0b42. Three builds
+  across the PR: the first failed on the test file (a mutating call inside
+  `#expect`, and `FeedKindSwitchTracker` wrongly `nonisolated` next to the
+  main-actor `FeedKind`), the second was green at 2aa7731, the third is the
+  review-fix build. Free disk 53 GB before the first, 48 GB after the last.
 - Warnings in touched files: **zero**. `MainView.swift`, `wisp/FeedTabRouting.swift`,
   `wisp/FeedFollowState.swift`, `wisp/KeptMountedFeedBodies.swift`,
   `wispTests/FeedStickToTopTests.swift`: none.
 - Targeted serial run, 2026-09-09, `test-without-building` over every suite
-  matching `feed|onlyfood` (17 suites): **140 tests, 139 passed, 1 failed** — the
+  matching `feed|onlyfood` (17 suites), rerun after the review fixes with the
+  same result: **140 tests, 139 passed, 1 failed** — the
   failure is the known #4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`,
   identical on main. `FeedStickToTopTests` 10 / 10, including the three hosted
   gates. Measurement printed by the hosted test: hidden rows evaluated while the
