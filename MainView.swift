@@ -26,6 +26,11 @@ struct MainView: View {
     @State private var selectedTab: BottomTab = .recipes
     @State private var feedPath = NavigationPath()
     @State private var recipesPath = NavigationPath()
+    /// Hoisted out of `MessagesView` (unified feed PR 6) so Messages, now a
+    /// bar tab, pops to root on re-tap through `popToRoot` like every other
+    /// tab, and so its navigation state survives leaving the switch-mounted
+    /// tab and coming back.
+    @State private var messagesPath = NavigationPath()
     @State private var kitchenPath = NavigationPath()
     @State private var placeholderPath = NavigationPath()
     @State private var notificationsPath = NavigationPath()
@@ -934,7 +939,7 @@ struct MainView: View {
                 case .feed, .recipes:
                     EmptyView()
                 case .messages:
-                    MessagesView(viewModel: messagesVM, groupListVM: groupListVM)
+                    MessagesView(viewModel: messagesVM, groupListVM: groupListVM, path: $messagesPath)
                 case .search:
                     NavigationStack(path: $searchPath) {
                         SearchView(keypair: keypair, viewModel: searchVM, path: $searchPath)
@@ -1800,9 +1805,14 @@ struct MainView: View {
 
     // MARK: - Bottom Bar
 
+    /// Android `WispBottomBar` minus the raised wallet: icon only, no labels,
+    /// 24pt glyphs (Feed 26pt, as Android bumps its flame to 24dp next to
+    /// 21dp siblings), an 8pt amber unread dot on Messages and Notifications.
+    /// Watch-only accounts get Android's read-only bar shape: Messages is
+    /// dropped (it is drawer-gated for them today for the same reason).
     private var bottomBar: some View {
         HStack {
-            ForEach(BottomTab.bottomBarCases, id: \.self) { tab in
+            ForEach(BottomTab.bottomBarCases(watchOnly: isWatchOnly), id: \.self) { tab in
                 Button {
                     if selectedTab == tab {
                         popToRoot(tab)
@@ -1811,23 +1821,35 @@ struct MainView: View {
                     }
                 } label: {
                     Image(systemName: tab == selectedTab ? tab.selectedIcon : tab.icon)
-                        .font(.system(size: 22))
-                        .frame(height: 28)
+                        .font(.system(size: tab.barGlyphSize))
+                        .frame(height: 30)
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .topTrailing) {
-                            if tab == .notifications, notificationsVM.hasUnread {
+                            if hasUnreadBadge(tab) {
                                 Circle()
-                                    .fill(Color.red)
+                                    .fill(BottomTab.unreadDotColor)
                                     .frame(width: 8, height: 8)
                                     .offset(x: -10, y: 2)
                             }
                         }
                 }
                 .foregroundStyle(tab == selectedTab ? Color.wispPrimary : .secondary)
+                .accessibilityLabel(tab.title)
+                .accessibilityIdentifier("tab-\(tab.rawValue)")
             }
         }
         .padding(.vertical, 10)
         .padding(.bottom, 2)
+    }
+
+    /// Android drives `hasUnreadMessages` / `hasUnreadNotifications` into the
+    /// same `SideNavItem` dot; both badged tabs read the same way here.
+    private func hasUnreadBadge(_ tab: BottomTab) -> Bool {
+        switch tab {
+        case .notifications: return notificationsVM.hasUnread
+        case .messages: return messagesVM.hasUnread
+        case .feed, .recipes, .search, .kitchen, .wallet: return false
+        }
     }
 
     // MARK: - Helpers
@@ -1850,7 +1872,7 @@ struct MainView: View {
         case .wallet: placeholderPath = NavigationPath()
         case .search: searchPath = NavigationPath()
         case .notifications: notificationsPath = NavigationPath()
-        case .messages: break  // MessagesView owns its own NavigationStack
+        case .messages: messagesPath = NavigationPath()
         case .kitchen: kitchenPath = NavigationPath()
         }
     }
@@ -1900,48 +1922,69 @@ struct MainView: View {
 // MARK: - Bottom Tab Definition
 
 enum BottomTab: String, CaseIterable {
-    // Bottom-bar tabs (food-first layout, build spec §5 Gate 0-E — Spec
-    // proposal, locked 2026-08-11).
-    case recipes
+    // Bottom-bar tabs (unified feed §5): Android's bar with Search in the
+    // wallet's slot — Feed · Recipes · Search · Messages · Notifications.
+    // Bar ORDER and LAUNCH TAB are separate settings: `MainView.selectedTab`
+    // still launches on `.recipes` (Gate 0-E's food-first lock); Feed
+    // defaulting to OnlyFood carries the food-first story.
     /// The one feed surface (unified feed PR 2): OnlyFood or the general
-    /// feed by `FeedViewModel.currentKind`. Keeps the former OnlyFood slot
-    /// and icon; the bar reshape is PR 6.
+    /// feed by `FeedViewModel.currentKind`.
     case feed
+    case recipes
     case search
-    case kitchen
+    case messages
     case notifications
 
     // Drawer-only destinations — NOT rendered in the bottom bar. `wallet`
-    // and `messages` were demoted out of the tab bar (food-first, and to
-    // reduce zap surface area for App Store review).
+    // stays out of the bar for App Store review; `kitchen` (My Kitchen)
+    // moved to the drawer in PR 6 when Messages took its slot. Their paths
+    // and thread chains are unchanged; only membership moved.
+    case kitchen
     case wallet
-    case messages
 
     /// The five cases rendered in the bottom bar, in display order.
     /// Drawer-only destinations are intentionally excluded.
-    static let bottomBarCases: [BottomTab] = [.recipes, .feed, .search, .kitchen, .notifications]
+    static let bottomBarCases: [BottomTab] = [.feed, .recipes, .search, .messages, .notifications]
+
+    /// Android's read-only bar drops Messages (and Wallet); watch-only
+    /// accounts cannot send DMs, and the drawer already gated the row.
+    static func bottomBarCases(watchOnly: Bool) -> [BottomTab] {
+        watchOnly ? bottomBarCases.filter { $0 != .messages } : bottomBarCases
+    }
+
+    /// Destinations reachable only from the drawer.
+    static let drawerOnlyCases: [BottomTab] = allCases.filter { !bottomBarCases.contains($0) }
+
+    /// Unread dot — brand amber-400 (`#FBBF24`), lighter than the tinted
+    /// nav icons so it reads as an alert rather than blending in (Android
+    /// `UnreadDotColor`).
+    static let unreadDotColor = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+
+    /// Bar glyph point size: 24pt, Feed 26pt (Android 21dp with the flame
+    /// bumped to 24dp — the flame reads small next to its siblings).
+    var barGlyphSize: CGFloat { self == .feed ? 26 : 24 }
 
     var icon: String {
         switch self {
+        case .feed: "flame"
         case .recipes: "book"
-        case .feed: "leaf"
         case .search: "magnifyingglass"
-        case .kitchen: "fork.knife"
-        case .notifications: "bell"
-        case .wallet: "creditcard"
         case .messages: "bubble.left.and.bubble.right"
+        case .notifications: "bell"
+        case .kitchen: "fork.knife"
+        case .wallet: "creditcard"
         }
     }
 
     var selectedIcon: String {
         switch self {
+        case .feed: "flame.fill"
         case .recipes: "book.fill"
-        case .feed: "leaf.fill"
         case .search: "magnifyingglass"
-        case .kitchen: "fork.knife"
-        case .notifications: "bell.fill"
-        case .wallet: "creditcard.fill"
         case .messages: "bubble.left.and.bubble.right.fill"
+        case .notifications: "bell.fill"
+        case .kitchen: "fork.knife"
+        case .wallet: "creditcard.fill"
         }
     }
 

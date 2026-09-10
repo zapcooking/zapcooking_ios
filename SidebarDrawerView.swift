@@ -329,10 +329,12 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "magnifyingglass", label: "Search") {
                 onSelectTab(.search)
             }
+            // My Kitchen left the bottom bar in unified feed PR 6 (Messages
+            // took its slot); Wallet stays drawer-only for App Store review.
+            DrawerRow(icon: "fork.knife", label: "My Kitchen") {
+                onSelectTab(.kitchen)
+            }
             if !keypair.isWatchOnly {
-                DrawerRow(icon: "envelope", label: "Messages") {
-                    onSelectTab(.messages)
-                }
                 DrawerRow(icon: "creditcard", label: "Wallet") {
                     onSelectTab(.wallet)
                 }
