@@ -145,6 +145,16 @@ struct SafetySettingsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.orange)
                 }
+
+                // OnlyFood's own gate (unified feed §3.4). Plain binding: unlike
+                // the fail-closed filter above it needs no forced compute — it
+                // fails open until the social graph is ready and the creator
+                // seed has loaded, so it can never blank the default feed.
+                Toggle("OnlyFood web of trust", isOn: $prefs.onlyFoodWotEnabled)
+                    .toggleStyle(SwitchToggleStyle(tint: theme.primary))
+                Text("Hides OnlyFood posts from authors outside your social graph and the Zap Cooking creator list. Off by default — the #foodstr feed is for discovery. Has no effect until your social graph has been computed.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.onSurfaceVariant)
             }
 
             section(title: "Network") {

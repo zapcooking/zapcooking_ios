@@ -78,10 +78,12 @@ nonisolated struct OnlyFoodFilter: Sendable {
         self.isWotFiltered = isWotFiltered
     }
 
-    /// Production v1: mute / block / structural / reply. WoT is a no-op
-    /// (`isWotFiltered` always false) so an unready social graph cannot blank
-    /// the feed. `isDeleted` is the reporter-local hide set (successful
-    /// NIP-56), not NIP-09 tombstones — those are still untracked here.
+    /// Production: mute / block / structural / reply, plus the opt-in OnlyFood
+    /// web-of-trust gate read from ``OnlyFoodWotGate`` (default OFF; fails
+    /// open while the social graph is not ready or the curator seed has not
+    /// loaded, so it cannot blank the feed). `isDeleted` is the reporter-local
+    /// hide set (successful NIP-56), not NIP-09 tombstones — those are still
+    /// untracked here.
     static func live() -> OnlyFoodFilter {
         OnlyFoodFilter(
             isUserBlocked: {
@@ -97,7 +99,7 @@ nonisolated struct OnlyFoodFilter: Sendable {
             },
             isThreadMuted: { SafetyFilter.shared.snapshot.mutedThreads.contains($0) },
             isDeleted: { SafetyFilter.shared.snapshot.reportedEventIds.contains($0) },
-            isWotFiltered: { _ in false }
+            isWotFiltered: { OnlyFoodWotGate.shared.isFiltered($0) }
         )
     }
 

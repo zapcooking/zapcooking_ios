@@ -21,6 +21,22 @@ final class SafetyPreferences {
         didSet { persist() }
     }
 
+    /// OnlyFood web-of-trust gate (unified feed §3.4). Opt-in, default OFF —
+    /// the web client applies no WoT gate to the #foodstr discovery feed.
+    /// Separate from `wotFilterEnabled`: that filter is fail-closed and must
+    /// never reach the OnlyFood chain. A flip posts `.onlyFoodWotChanged` so
+    /// the OnlyFood feed reloads (one accounted REQ, same as pull-to-refresh).
+    /// Persisted on its own: `SafetyFilter` does not read this key, so the
+    /// flip must not schedule a global snapshot rebuild.
+    var onlyFoodWotEnabled: Bool = false {
+        didSet {
+            persistOnlyFoodWot()
+            if !binding, oldValue != onlyFoodWotEnabled {
+                NotificationCenter.default.post(name: .onlyFoodWotChanged, object: nil)
+            }
+        }
+    }
+
     var hellthreadFilterEnabled: Bool = false {
         didSet { persist() }
     }
@@ -44,6 +60,7 @@ final class SafetyPreferences {
         let defaults = UserDefaults.standard
         spamFilterEnabled = defaults.object(forKey: spamKey(pk)) as? Bool ?? true
         wotFilterEnabled = defaults.bool(forKey: wotKey(pk))
+        onlyFoodWotEnabled = defaults.bool(forKey: onlyFoodWotKey(pk))
         hellthreadFilterEnabled = defaults.object(forKey: hellthreadKey(pk)) as? Bool ?? false
         hellthreadThreshold = defaults.object(forKey: hellthreadThresholdKey(pk)) as? Int ?? NostrEvent.hellthreadThreshold
         spamSafelist = Set(defaults.stringArray(forKey: safelistKey(pk)) ?? [])
@@ -55,6 +72,7 @@ final class SafetyPreferences {
         activePubkey = nil
         spamFilterEnabled = true
         wotFilterEnabled = false
+        onlyFoodWotEnabled = false
         hellthreadFilterEnabled = false
         hellthreadThreshold = NostrEvent.hellthreadThreshold
         spamSafelist = []
@@ -74,15 +92,24 @@ final class SafetyPreferences {
 
     static func spamKey(_ pubkey: String) -> String { "spam_filter_enabled_\(pubkey)" }
     static func wotKey(_ pubkey: String) -> String { "wot_filter_enabled_\(pubkey)" }
+    static func onlyFoodWotKey(_ pubkey: String) -> String { "onlyfood_wot_enabled_\(pubkey)" }
     static func hellthreadKey(_ pubkey: String) -> String { "hellthread_filter_enabled_\(pubkey)" }
     static func hellthreadThresholdKey(_ pubkey: String) -> String { "hellthread_threshold_\(pubkey)" }
     static func safelistKey(_ pubkey: String) -> String { "spam_safelist_\(pubkey)" }
 
     private func spamKey(_ pubkey: String) -> String { Self.spamKey(pubkey) }
     private func wotKey(_ pubkey: String) -> String { Self.wotKey(pubkey) }
+    private func onlyFoodWotKey(_ pubkey: String) -> String { Self.onlyFoodWotKey(pubkey) }
     private func hellthreadKey(_ pubkey: String) -> String { Self.hellthreadKey(pubkey) }
     private func hellthreadThresholdKey(_ pubkey: String) -> String { Self.hellthreadThresholdKey(pubkey) }
     private func safelistKey(_ pubkey: String) -> String { Self.safelistKey(pubkey) }
+
+    /// The OnlyFood gate's key only — no `SafetyFilter` rebuild.
+    private func persistOnlyFoodWot() {
+        if binding { return }
+        guard let pk = activePubkey else { return }
+        UserDefaults.standard.set(onlyFoodWotEnabled, forKey: onlyFoodWotKey(pk))
+    }
 
     private func persist() {
         if binding { return }
@@ -95,4 +122,9 @@ final class SafetyPreferences {
         d.set(Array(spamSafelist), forKey: safelistKey(pk))
         Task { await SafetyFilter.shared.rebuildSnapshot() }
     }
+}
+
+extension Notification.Name {
+    /// Posted by `SafetyPreferences` when `onlyFoodWotEnabled` flips.
+    static let onlyFoodWotChanged = Notification.Name("WispOnlyFoodWotChanged")
 }

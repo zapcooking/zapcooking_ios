@@ -71,7 +71,13 @@ final class OnlyFoodFeedViewModel {
     var isLoading = false
     var isPaging = false
     var isRefreshing = false
+    /// Events the OnlyFood web-of-trust gate dropped during the current load
+    /// (kind-1, poll and repost branches alike). Reset on every reload —
+    /// initial, refresh, resume and a toggle flip — so it never goes stale.
     var wotDropped = 0
+    /// Whether the OnlyFood WoT gate was on for the current load, captured
+    /// when the load was submitted.
+    private(set) var wotEnabled = false
     /// True when the last initial/refresh query finished
     /// without a genuine EOSE (timeout, dropped send, connect miss) and nothing
     /// is on screen. Distinct from ``isEmpty`` (EOSE arrived, zero accepted).
@@ -92,12 +98,17 @@ final class OnlyFoodFeedViewModel {
     @ObservationIgnored private var sweepSourceId: UUID?
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
+    @ObservationIgnored private var wotObserver: NSObjectProtocol?
 
     @ObservationIgnored private let filter: OnlyFoodFilter
     @ObservationIgnored private let query: (OnlyFoodQueryRequest) async -> OnlyFoodQueryResult
     @ObservationIgnored private let seedCache: () async -> [NostrEvent]
     @ObservationIgnored private let persist: ([NostrEvent]) -> Void
     @ObservationIgnored private let profileRepo: ProfileRepository
+    /// Refresh the WoT gate's snapshot for the load about to run and report
+    /// whether the gate is on. Production rebuilds `OnlyFoodWotGate`; tests
+    /// inject a constant.
+    @ObservationIgnored private let prepareWot: () -> Bool
 
     /// Process-wide subId sequence — unique across all VM instances (§7.2).
     /// An instance-scoped counter restarting at 0 per nav entry is the bug
@@ -110,9 +121,11 @@ final class OnlyFoodFeedViewModel {
         query: ((OnlyFoodQueryRequest) async -> OnlyFoodQueryResult)? = nil,
         seedCache: (() async -> [NostrEvent])? = nil,
         persist: (([NostrEvent]) -> Void)? = nil,
-        profileRepo: ProfileRepository? = nil
+        profileRepo: ProfileRepository? = nil,
+        prepareWot: (() -> Bool)? = nil
     ) {
         self.pubkey = pubkey
+        self.prepareWot = prepareWot ?? { OnlyFoodWotGate.shared.refresh(pubkey: pubkey).enabled }
         self.filter = filter ?? OnlyFoodFilter.live()
         self.query = query ?? OnlyFoodRelay.query
         self.seedCache = seedCache ?? {
@@ -133,6 +146,9 @@ final class OnlyFoodFeedViewModel {
         }
         if let publishObserver {
             NotificationCenter.default.removeObserver(publishObserver)
+        }
+        if let wotObserver {
+            NotificationCenter.default.removeObserver(wotObserver)
         }
         if let id = sweepSourceId {
             Task { @MainActor in MissingProfileWatcher.shared.unregisterSource(id) }
@@ -155,6 +171,41 @@ final class OnlyFoodFeedViewModel {
     /// "no food posts yet."
     var isLoadFailed: Bool { notes.isEmpty && loadFailed && !hasLoaded }
 
+    /// The web-of-trust gate removed everything the load accepted. Gated on
+    /// the live toggle by the caller (not on the count alone) so a stale
+    /// count from a now-disabled filter can never claim posts were hidden.
+    func isWotHidden(wotEnabled: Bool) -> Bool {
+        notes.isEmpty && hasLoaded && wotEnabled && wotDropped > 0
+    }
+
+    /// What the feed body should show. One truth table, states mutually
+    /// exclusive (list empty unless `.list`):
+    ///
+    /// | hasLoaded | loadFailed | wotEnabled && wotDropped > 0 | state      |
+    /// |-----------|------------|------------------------------|------------|
+    /// | false     | false      | –                            | loading    |
+    /// | false     | true       | –                            | relayMiss  |
+    /// | true      | –          | true                         | wotHidden  |
+    /// | true      | –          | false                        | empty      |
+    ///
+    /// A relay miss never latches, so it wins over both empties; the two
+    /// empties are complementary on the WoT condition.
+    enum DisplayState: Equatable {
+        case loading
+        case relayMiss
+        case wotHidden(Int)
+        case empty
+        case list
+    }
+
+    func displayState(wotEnabled: Bool) -> DisplayState {
+        if !notes.isEmpty { return .list }
+        if isAwaitingFirstPaint { return .loading }
+        if isLoadFailed { return .relayMiss }
+        if isWotHidden(wotEnabled: wotEnabled) { return .wotHidden(wotDropped) }
+        return .empty
+    }
+
     /// One-shot. The feed tab calls this on appear and on every feed-kind
     /// change; a second call is a no-op so an identical filter never re-hits
     /// the same connection (§7.4).
@@ -164,6 +215,7 @@ final class OnlyFoodFeedViewModel {
         ensureProfileUpdatesSubscription()
         observeContentHidden()
         observeOwnPublishes()
+        observeWotToggle()
         if !state.loaded {
             submit(load: .initial, since: nil, until: nil)
         }
@@ -200,6 +252,33 @@ final class OnlyFoodFeedViewModel {
     func resumeAndWait() async {
         resume()
         await inFlight?.value
+    }
+
+    /// The OnlyFood WoT toggle flipped (either direction). Treated exactly as
+    /// a user-initiated reload: the cache is dropped and one accounted REQ is
+    /// issued through the same `submit` as the first load, so the cache paint
+    /// and the relay result are both re-judged by the new gate and
+    /// `wotDropped` is recounted from zero. No-op before `start()`.
+    func reloadForWotChange() {
+        guard started else { return }
+        inFlight?.cancel()
+        inFlight = nil
+        state.reset()
+        loadFailed = false
+        clearIndicators()
+        notes = []
+        submit(load: .initial, since: nil, until: nil)
+    }
+
+    private func observeWotToggle() {
+        guard wotObserver == nil else { return }
+        wotObserver = NotificationCenter.default.addObserver(
+            forName: .onlyFoodWotChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.reloadForWotChange()
+            }
+        }
     }
 
     /// Reposters of the list entry `eventId`, in arrival order (Android
@@ -242,7 +321,13 @@ final class OnlyFoodFeedViewModel {
         inFlight?.cancel()
         submitGeneration += 1
         let generation = submitGeneration
-        if load == .initial || load == .refresh { loadFailed = false }
+        if load == .initial || load == .refresh {
+            loadFailed = false
+            // Every reload re-arms the WoT gate and recounts from zero — a
+            // stale count is worse than none.
+            wotEnabled = prepareWot()
+            wotDropped = 0
+        }
         switch load {
         case .initial: isLoading = true
         case .page: isPaging = true
@@ -251,7 +336,6 @@ final class OnlyFoodFeedViewModel {
         let state = self.state
         inFlight = Task { @MainActor in
             if load == .initial || load == .refresh { state.unsettle() }
-            if load == .refresh { self.wotDropped = 0 }
             if load == .initial || paintIfEmpty {
                 await self.paintFromCache(state)
             }
@@ -552,6 +636,21 @@ nonisolated final class OnlyFoodCacheState: @unchecked Sendable {
 
     func sortTime(_ event: NostrEvent) -> Int {
         sortTimes[event.id] ?? event.createdAt
+    }
+
+    /// Back to never-loaded. Used by a filter-change reload, which re-judges
+    /// the cache paint and the relay result from scratch.
+    func reset() {
+        seen.removeAll()
+        ordered.removeAll()
+        placedIds.removeAll()
+        loaded = false
+        endReached = false
+        settled = false
+        repostAuthors.removeAll()
+        userReposts.removeAll()
+        sortTimes.removeAll()
+        seenRepostIds.removeAll()
     }
 
     /// An entry the relay `#t` query can reach: it carries a food tag itself,
