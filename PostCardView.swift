@@ -2057,7 +2057,8 @@ struct PostCardView: View {
     /// reply/quote/emoji: host from the never-recycled root. The card used
     /// to keep a local `.zap` sheet as a fallback for a missing presenter;
     /// that fallback was the bug's shape and is gone — `ZapRoute` is the one
-    /// route (`ZapRouteTests` pins it).
+    /// route (`ZapRouteTests` covers it; the exempt local hosts are listed in
+    /// `ZapRoute`'s doc comment).
     private func triggerZapOrWalletSetup() {
         let resolved = resolveRepost()
         let target = resolved.event

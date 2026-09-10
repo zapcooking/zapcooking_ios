@@ -14,6 +14,15 @@ import SwiftUI
 /// `ComposePresenter.request`, and every recyclable caller hands its request
 /// there through this seam instead of owning a `.sheet` of its own.
 ///
+/// Three local hosts remain by design and are exempt: `MainView` (it *is*
+/// the root host), `LiveStreamView` (a pushed full-screen view whose
+/// `.sheet` sits on its root `VStack`, never in a lazy container) and
+/// `ProfileHeaderView` (the first row of the profile scroll, which holds the
+/// tapped control so the keyboard's viewport shrink cannot evict it, and
+/// which must keep presenting when the profile is inside `SocialGraphView`'s
+/// sheet, where a second root-hosted sheet would not appear). Any other
+/// `ZapSheet` host belongs here.
+///
 /// The seam also owns the no-wallet guard. Presenting `ZapSheet` without a
 /// configured wallet shows an empty sheet that dismisses at once — visually
 /// the same as the loop — so callers must not present at all in that case;
@@ -69,14 +78,18 @@ enum ZapRoute {
 
 /// The confirmation dialog shown instead of `ZapSheet` when no wallet is
 /// configured. "Set Up Wallet" posts `.openWalletTab`, which `MainView`
-/// turns into a tab switch so the user lands on the setup UI directly.
+/// turns into `selectedTab = .wallet` — the same assignment the side menu's
+/// Wallet row makes (Wallet is drawer-only since unified feed PR 6, not a
+/// bottom-bar tab) — so the user lands on the setup UI directly.
 private struct WalletSetupPromptModifier: ViewModifier {
     @Binding var isPresented: Bool
     @Environment(AppSettings.self) private var settings
 
     func body(content: Content) -> some View {
         content.confirmationDialog(
-            settings.fiatModeEnabled ? "Set up a wallet to send money" : "Set up a wallet to send zaps",
+            settings.fiatModeEnabled
+                ? "Set up a wallet in the side menu to send money"
+                : "Set up a wallet in the side menu to send zaps",
             isPresented: $isPresented,
             titleVisibility: .visible
         ) {
@@ -86,8 +99,8 @@ private struct WalletSetupPromptModifier: ViewModifier {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(settings.fiatModeEnabled
-                 ? "Connect a Lightning wallet (Spark or NWC) from the Wallet tab to send money."
-                 : "Connect a Lightning wallet (Spark or NWC) from the Wallet tab to send zaps.")
+                 ? "Connect a Lightning wallet (Spark or NWC) under Wallet in the side menu to send money."
+                 : "Connect a Lightning wallet (Spark or NWC) under Wallet in the side menu to send zaps.")
         }
     }
 }
