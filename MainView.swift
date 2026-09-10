@@ -73,6 +73,8 @@ struct MainView: View {
     @State private var showRelayPicker = false
     @State private var showOnlineSheet = false
     @State private var showSocialGraph = false
+    /// Read in `onlyFoodBody` for the live OnlyFood WoT toggle (§4).
+    private var safetyPrefs: SafetyPreferences { SafetyPreferences.shared }
     @State private var showSafety = false
     @State private var showProofOfWork = false
     @State private var showAbout = false
@@ -1390,18 +1392,54 @@ struct MainView: View {
 
     // MARK: - OnlyFood body (moved from the deleted OnlyFoodFeedView)
 
-    /// Three states plus the list: loading, relay miss, genuine empty.
+    /// Four states plus the list: loading, relay miss, WoT hid everything,
+    /// genuine empty — one truth table in
+    /// `OnlyFoodFeedViewModel.displayState(wotEnabled:)`. The WoT branch is
+    /// gated on the LIVE toggle (§4), so a stale count from a now-disabled
+    /// filter can never claim posts were hidden.
     @ViewBuilder
     private var onlyFoodBody: some View {
-        if onlyfoodFeedVM.isAwaitingFirstPaint {
+        switch onlyfoodFeedVM.displayState(wotEnabled: safetyPrefs.onlyFoodWotEnabled) {
+        case .loading:
             onlyFoodLoadingState
-        } else if onlyfoodFeedVM.isLoadFailed {
+        case .relayMiss:
             onlyFoodErrorState
-        } else if onlyfoodFeedVM.isEmpty {
+        case .wotHidden(let count):
+            onlyFoodWotHiddenState(count: count)
+        case .empty:
             onlyFoodEmptyState
-        } else {
+        case .list:
             onlyFoodList
         }
+    }
+
+    /// The web-of-trust filter dropped everything the load accepted (§4,
+    /// Android `FeedScreen`'s OnlyFood branch). "Show all" flips the toggle
+    /// off; the toggle's change notification reloads the feed.
+    private func onlyFoodWotHiddenState(count: Int) -> some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Text("🍳")
+                .font(.system(size: 40))
+            Text("\(count) \(count == 1 ? "post" : "posts") hidden by your web-of-trust filter")
+                .font(AppFont.bodyLarge)
+                .foregroundStyle(Color.wispOnSurfaceVariant)
+                .multilineTextAlignment(.center)
+            Button("Show all") {
+                safetyPrefs.onlyFoodWotEnabled = false
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
+            Button("Go to social graph") {
+                showSocialGraph = true
+            }
+            .buttonStyle(.bordered)
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await onlyfoodFeedVM.refreshAndWait() }
+        .accessibilityLabel("\(count) posts hidden by your web-of-trust filter")
     }
 
     private var onlyFoodLoadingState: some View {

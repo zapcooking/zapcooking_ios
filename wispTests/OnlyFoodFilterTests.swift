@@ -124,7 +124,9 @@ struct OnlyFoodFilterTests {
         #expect(f.decideKind1(reply) == .reply)
     }
 
-    @Test func live_isMuteOnly_wotIsNoOp() {
+    /// The live hook reads `OnlyFoodWotGate`, which is `.off` until a load
+    /// refreshes it with the toggle on — so by default it drops nobody.
+    @Test func live_wotGateIsOffByDefault() {
         let f = OnlyFoodFilter.live()
         #expect(f.isWotFiltered("stranger") == false)
     }
