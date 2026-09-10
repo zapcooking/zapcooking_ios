@@ -22,7 +22,7 @@ otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 - Targeted serial run, 2026-09-09, `test-without-building` over
   `OnlyFoodWotTests SafetyTests OnlyFoodIngestParityTests OnlyFoodFeedViewModelTests
   OnlyFoodOwnPublishTests OnlyFoodHelpersTests OnlyFoodFilterTests FeedTabRoutingTests`:
-  **106 tests in 8 suites passed** (OnlyFoodWotTests 15, SafetyTests 31,
+  **106 tests in 8 suites passed** (OnlyFoodWotTests 15, SafetyTests 27,
   OnlyFoodIngestParityTests 18, OnlyFoodFeedViewModelTests 13,
   OnlyFoodOwnPublishTests 8, OnlyFoodHelpersTests 11, OnlyFoodFilterTests 6,
   FeedTabRoutingTests 8). `SafetyTests` is in the run on purpose: an earlier
