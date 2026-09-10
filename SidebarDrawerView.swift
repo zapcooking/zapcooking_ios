@@ -27,6 +27,16 @@ struct SidebarDrawerView: View {
     var onOpenProofOfWork: () -> Void = {}
     var onOpenRelays: () -> Void = {}
     var onOpenMediaServers: () -> Void = {}
+    /// Feed Relay row (feed/onlyfood-polish): the relay-count pill left the
+    /// feed top bar, so the drawer carries the connected count and opens
+    /// `RelayPickerSheet`. Count and closure only — the drawer does not take
+    /// the feed view model.
+    var connectedRelayCount: Int = 0
+    var onOpenRelayPicker: () -> Void = {}
+    /// Online Now row: the online-users pill left the top bar with no other
+    /// route to `OnlineNowSheet`, so it lives here with the same count.
+    var onlineCount: Int = 0
+    var onOpenOnlineNow: () -> Void = {}
     /// Settings → About: policy links (privacy, terms, child safety) — the
     /// in-app placement Android uses (drawer → About → Policies).
     var onOpenAbout: () -> Void = {}
@@ -339,6 +349,24 @@ struct SidebarDrawerView: View {
                     onSelectTab(.wallet)
                 }
             }
+            DrawerRow(
+                icon: "network",
+                label: "Feed Relay",
+                trailingValue: DrawerRelayRow.value(count: connectedRelayCount),
+                trailingTint: DrawerRelayRow.tint(count: connectedRelayCount)
+            ) {
+                onOpenRelayPicker()
+            }
+            .accessibilityIdentifier("drawer-feed-relay")
+            DrawerRow(
+                icon: "person.fill",
+                label: "Online Now",
+                trailingValue: onlineCount > 0 ? "\(onlineCount)" : nil,
+                trailingTint: Color.wispRepostColor
+            ) {
+                onOpenOnlineNow()
+            }
+            .accessibilityIdentifier("drawer-online-now")
             DrawerRow(icon: "list.bullet", label: "Lists") {
                 onOpenLists()
             }

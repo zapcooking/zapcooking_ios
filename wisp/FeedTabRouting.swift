@@ -71,6 +71,17 @@ enum FeedTabRouting {
         }
     }
 
+    /// Whether the body for `kind` renders `FeedLiveNowSection` above its
+    /// first post. Spec §2.3 gated the rail off OnlyFood on the grounds that
+    /// live streams are not food-specific; that is reversed (feed/onlyfood-
+    /// polish): OnlyFood models the general feed and shows the rail, so this
+    /// is `true` for every kind. Kept as a seam so the gate states it and a
+    /// future exception is one edit here, not a scattered `!= .onlyFood`.
+    static func showsLiveRail(for kind: FeedKind) -> Bool {
+        _ = kind
+        return true
+    }
+
     /// Compose FAB seed (§8): the visible, removable `#foodstr` prefill on
     /// OnlyFood; `nil` means the plain note composer.
     static func composePrefill(for kind: FeedKind) -> String? {

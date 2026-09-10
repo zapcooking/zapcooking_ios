@@ -6,6 +6,10 @@ struct DrawerRow: View {
     var indented: Bool = false
     var tint: Color? = nil
     var trailingChevron: ChevronState = .none
+    /// Optional trailing value (the drawer's Feed Relay / Online Now counts),
+    /// tinted so the row can carry a status colour.
+    var trailingValue: String? = nil
+    var trailingTint: Color = .secondary
     let action: () -> Void
 
     enum ChevronState {
@@ -27,6 +31,15 @@ struct DrawerRow: View {
                     .foregroundStyle(tint ?? Color.primary)
 
                 Spacer()
+
+                if let trailingValue {
+                    Text(trailingValue)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(trailingTint)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.wispSurfaceVariant.opacity(0.5), in: Capsule())
+                }
 
                 switch trailingChevron {
                 case .none:

@@ -159,7 +159,7 @@ struct MainView: View {
     var body: some View {
         @Bindable var presenter = composePresenter
         return ZStack(alignment: .leading) {
-            mainShell
+            shellWithCheffyCover
 
             if drawerOpen {
                 Color.black
@@ -169,121 +169,7 @@ struct MainView: View {
                     .onTapGesture { closeDrawer() }
             }
 
-            SidebarDrawerView(
-                profile: viewModel.userProfile,
-                keypair: keypair,
-                onClose: { closeDrawer() },
-                onSelectTab: { tab in
-                    selectedTab = tab
-                    closeDrawer()
-                },
-                onLogout: {
-                    closeDrawer()
-                    Task {
-                        // Multi-account branch: when another saved account exists, only
-                        // delete the current account's keychain + per-pubkey UserDefaults
-                        // and hand off to the next account. The full `AppDataWipe` path
-                        // was throwing every saved account out of the app, forcing a
-                        // multi-account user back through the splash login / signup flow
-                        // on every logout.
-                        let currentPubkey = keypair.pubkey
-                        let nextPubkey = NostrKey.accounts().first { $0 != currentPubkey }
-                        if let nextPubkey, let nextKp = NostrKey.switchAccount(pubkey: nextPubkey) {
-                            NostrKey.deleteAccount(pubkey: currentPubkey)
-                            onSwitchAccount(nextKp)
-                        } else {
-                            await AppDataWipe.wipeEverything()
-                            onLogout()
-                        }
-                    }
-                },
-                onSwitchAccount: { newKeypair in
-                    closeDrawer()
-                    onSwitchAccount(newKeypair)
-                },
-                onAddAccount: {
-                    closeDrawer()
-                    onAddAccount()
-                },
-                onOpenProfile: {
-                    closeDrawer()
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(280))
-                        selectedTab = .feed
-                        feedPath.append(ProfileRoute(pubkey: keypair.pubkey))
-                    }
-                },
-                onOpenProfileByPubkey: { scannedPubkey in
-                    closeDrawer()
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(280))
-                        selectedTab = .feed
-                        feedPath.append(ProfileRoute(pubkey: scannedPubkey))
-                    }
-                },
-                onOpenInterface: {
-                    closeDrawer()
-                    showInterfaceSettings = true
-                },
-                onOpenKeys: {
-                    closeDrawer()
-                    showKeys = true
-                },
-                onOpenDraftsScheduled: {
-                    closeDrawer()
-                    showDraftsScheduled = true
-                },
-                onOpenGadgets: {
-                    closeDrawer()
-                    showCookingUtilitiesSheet = true
-                },
-                onOpenCustomEmojis: {
-                    closeDrawer()
-                    showCustomEmojis = true
-                },
-                onOpenLists: {
-                    closeDrawer()
-                    showLists = true
-                },
-                onOpenPolls: {
-                    closeDrawer()
-                    showPolls = true
-                },
-                onOpenHashtagSets: {
-                    closeDrawer()
-                    showHashtagSets = true
-                },
-                onOpenSocialGraph: {
-                    closeDrawer()
-                    showSocialGraph = true
-                },
-                onOpenSafety: {
-                    closeDrawer()
-                    showSafety = true
-                },
-                onOpenProofOfWork: {
-                    closeDrawer()
-                    showProofOfWork = true
-                },
-                onOpenRelays: {
-                    closeDrawer()
-                    showRelaySettings = true
-                },
-                onOpenMediaServers: {
-                    closeDrawer()
-                    showMediaServers = true
-                },
-                onOpenAbout: {
-                    closeDrawer()
-                    showAbout = true
-                }
-            )
-            .frame(width: drawerWidth)
-            .frame(maxHeight: .infinity)
-            .background(Color.wispBackground)
-            .offset(x: drawerOpen ? drawerDragOffset : -drawerWidth)
-            .animation(.smooth(duration: 0.25), value: drawerOpen)
-            .gesture(drawerDragGesture)
+            drawer
         }
         .background(Color.wispBackground)
         .overlay(SuccessToastOverlay())
@@ -682,6 +568,159 @@ struct MainView: View {
         }
     }
 
+    /// The sidebar drawer, in its own property: its initializer takes two
+    /// dozen closures, and inline in the root `ZStack` it pushed the `body`
+    /// expression past what the type checker will take once the Feed Relay
+    /// and Online Now rows added four more.
+    private var drawer: some View {
+        SidebarDrawerView(
+            profile: viewModel.userProfile,
+            keypair: keypair,
+            onClose: { closeDrawer() },
+            onSelectTab: { tab in
+                selectedTab = tab
+                closeDrawer()
+            },
+            onLogout: {
+                closeDrawer()
+                Task {
+                    // Multi-account branch: when another saved account exists, only
+                    // delete the current account's keychain + per-pubkey UserDefaults
+                    // and hand off to the next account. The full `AppDataWipe` path
+                    // was throwing every saved account out of the app, forcing a
+                    // multi-account user back through the splash login / signup flow
+                    // on every logout.
+                    let currentPubkey = keypair.pubkey
+                    let nextPubkey = NostrKey.accounts().first { $0 != currentPubkey }
+                    if let nextPubkey, let nextKp = NostrKey.switchAccount(pubkey: nextPubkey) {
+                        NostrKey.deleteAccount(pubkey: currentPubkey)
+                        onSwitchAccount(nextKp)
+                    } else {
+                        await AppDataWipe.wipeEverything()
+                        onLogout()
+                    }
+                }
+            },
+            onSwitchAccount: { newKeypair in
+                closeDrawer()
+                onSwitchAccount(newKeypair)
+            },
+            onAddAccount: {
+                closeDrawer()
+                onAddAccount()
+            },
+            onOpenProfile: {
+                closeDrawer()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(280))
+                    selectedTab = .feed
+                    feedPath.append(ProfileRoute(pubkey: keypair.pubkey))
+                }
+            },
+            onOpenProfileByPubkey: { scannedPubkey in
+                closeDrawer()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(280))
+                    selectedTab = .feed
+                    feedPath.append(ProfileRoute(pubkey: scannedPubkey))
+                }
+            },
+            onOpenInterface: {
+                closeDrawer()
+                showInterfaceSettings = true
+            },
+            onOpenKeys: {
+                closeDrawer()
+                showKeys = true
+            },
+            onOpenDraftsScheduled: {
+                closeDrawer()
+                showDraftsScheduled = true
+            },
+            onOpenGadgets: {
+                closeDrawer()
+                showCookingUtilitiesSheet = true
+            },
+            onOpenCustomEmojis: {
+                closeDrawer()
+                showCustomEmojis = true
+            },
+            onOpenLists: {
+                closeDrawer()
+                showLists = true
+            },
+            onOpenPolls: {
+                closeDrawer()
+                showPolls = true
+            },
+            onOpenHashtagSets: {
+                closeDrawer()
+                showHashtagSets = true
+            },
+            onOpenSocialGraph: {
+                closeDrawer()
+                showSocialGraph = true
+            },
+            onOpenSafety: {
+                closeDrawer()
+                showSafety = true
+            },
+            onOpenProofOfWork: {
+                closeDrawer()
+                showProofOfWork = true
+            },
+            onOpenRelays: {
+                closeDrawer()
+                showRelaySettings = true
+            },
+            onOpenMediaServers: {
+                closeDrawer()
+                showMediaServers = true
+            },
+            connectedRelayCount: viewModel.connectedRelayCount,
+            onOpenRelayPicker: {
+                closeDrawer()
+                showRelayPicker = true
+            },
+            onlineCount: viewModel.onlineNetworkPubkeys.count,
+            onOpenOnlineNow: {
+                closeDrawer()
+                showOnlineSheet = true
+            },
+            onOpenAbout: {
+                closeDrawer()
+                showAbout = true
+            }
+        )
+        .frame(width: drawerWidth)
+        .frame(maxHeight: .infinity)
+        .background(Color.wispBackground)
+        .offset(x: drawerOpen ? drawerDragOffset : -drawerWidth)
+        .animation(.smooth(duration: 0.25), value: drawerOpen)
+        .gesture(drawerDragGesture)
+    }
+
+    /// `mainShell` plus the Cheffy cover. The cover used to sit on the
+    /// recipes tab's stack; it is hosted above both tabs so My Kitchen's
+    /// Intelligence menu and the feed top bar's button present the one
+    /// cover. A published recipe lands on the Recipes tab whichever tab
+    /// opened Cheffy. Its own property so the root `body` expression stays
+    /// within what the type checker will take.
+    private var shellWithCheffyCover: some View {
+        mainShell
+            .fullScreenCover(isPresented: $showCheffy) {
+                CheffyView(
+                    keypair: keypair,
+                    onPublished: { author, dTag in
+                        showCheffy = false
+                        selectedTab = .recipes
+                        recipesPath.append(RecipeRoute(author: author, dTag: dTag))
+                    },
+                    onDismiss: { showCheffy = false }
+                )
+            }
+    }
+
 
     /// The feed tab's navigation stack — the one feed surface (OnlyFood or
     /// the general feed by `viewModel.currentKind`). Rendered ALWAYS (see
@@ -891,16 +930,6 @@ struct MainView: View {
                         recipesPath.append(RecipeRoute(author: author, dTag: dTag))
                     },
                     onDismiss: { showSousChef = false }
-                )
-            }
-            .fullScreenCover(isPresented: $showCheffy) {
-                CheffyView(
-                    keypair: keypair,
-                    onPublished: { author, dTag in
-                        showCheffy = false
-                        recipesPath.append(RecipeRoute(author: author, dTag: dTag))
-                    },
-                    onDismiss: { showCheffy = false }
                 )
             }
         }
@@ -1134,58 +1163,50 @@ struct MainView: View {
 
     // MARK: - Top Bar
 
+    /// Avatar · (content filter) · centred picker · Cheffy. The online-users
+    /// pill and the relay-count menu left the bar (feed/onlyfood-polish):
+    /// relay selection is the drawer's Feed Relay row and the picker's Relay
+    /// entry, Online Now is the drawer's Online Now row. Membership is
+    /// `FeedTopBarLayout.controls`, pinned by `FeedTopBarPolishTests`.
     private var topBar: some View {
-        HStack(spacing: 12) {
+        let controls = FeedTopBarLayout.controls(
+            kind: viewModel.currentKind,
+            cheffyVisible: CheffyGate.entryVisible()
+        )
+        return FeedTopBarFrame {
             profileAvatar
-            // Neither the content filter nor the relay-count pill applies to
-            // the hashtag-backed OnlyFood feed.
-            if viewModel.currentKind != .onlyFood {
+            // The content filter does not apply to the hashtag-backed
+            // OnlyFood feed.
+            if controls.contains(.contentFilter) {
                 contentFilterButton
             }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                if !viewModel.onlineNetworkPubkeys.isEmpty {
-                    Button {
-                        showOnlineSheet = true
-                    } label: {
-                        statusPill(
-                            icon: "person.fill",
-                            value: formatCount(viewModel.onlineNetworkPubkeys.count),
-                            color: .wispRepostColor
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if viewModel.currentKind != .onlyFood {
-                    Menu {
-                        if viewModel.connectedRelays.isEmpty {
-                            Text("Not connected")
-                        } else {
-                            ForEach(viewModel.connectedRelays, id: \.url) { relay in
-                                let host = URL(string: relay.url)?.host ?? relay.url
-                                Button {
-                                    viewModel.selectRelay(url: relay.url)
-                                } label: {
-                                    Text("\(host) (\(relay.authorCount))")
-                                }
-                            }
-                        }
-                    } label: {
-                        statusPill(
-                            icon: "network",
-                            value: "\(viewModel.connectedRelayCount)",
-                            color: viewModel.connectedRelayCount > 0 ? .wispRepostColor : .red
-                        )
-                    }
-                }
+        } center: {
+            feedPicker
+        } trailing: {
+            if controls.contains(.cheffy) {
+                cheffyButton
             }
         }
-        .overlay(feedPicker)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    /// Second entry to Cheffy (the first is My Kitchen's Intelligence menu):
+    /// same gate, same `showCheffy` cover — hosted at the root so it presents
+    /// from either tab. `CheffyIcon` rather than the generic sparkle: it is
+    /// vector-drawn for 24–88 pt so it is crisp at 30, and on the Recipes bar
+    /// the sparkle means the AI-tools *menu*, not Cheffy specifically.
+    private var cheffyButton: some View {
+        Button {
+            showCheffy = true
+        } label: {
+            CheffyIcon(size: FeedTopBarLayout.cheffyGlyphSize)
+                .frame(width: FeedTopBarLayout.cheffyTargetSize, height: FeedTopBarLayout.cheffyTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cheffy")
+        .accessibilityIdentifier("feed-cheffy-entry")
     }
 
     private var profileAvatar: some View {
@@ -1298,19 +1319,6 @@ struct MainView: View {
             .background(Color.wispSurfaceVariant.opacity(0.5), in: RoundedRectangle(cornerRadius: 20))
             .foregroundStyle(Color.primary)
         }
-    }
-
-    private func statusPill(icon: String, value: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundStyle(color)
-            Text(value)
-                .font(.caption.weight(.medium))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.wispSurfaceVariant.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
     }
 
     // MARK: - Feed Content
@@ -1539,6 +1547,26 @@ struct MainView: View {
                     // Same anchor as the general feed so a feed-tab re-tap
                     // scrolls this list to the top too.
                     Color.clear.frame(height: 0).id("feedTop")
+                    // Live-now rail, same slot and same data as the general
+                    // feed (`LiveStreamRepository.shared`, fed by the live
+                    // discovery `FeedViewModel.start` kicks off before its
+                    // kind switch, so it runs on an OnlyFood landing too).
+                    // Self-contained: chat mutations re-evaluate the section,
+                    // not this body. §2.3's OnlyFood exclusion is reversed —
+                    // `FeedTabRouting.showsLiveRail`.
+                    if FeedTabRouting.showsLiveRail(for: viewModel.currentKind) {
+                        FeedLiveNowSection(
+                            profiles: onlyfoodFeedVM.profiles,
+                            onSelect: { stream in
+                                feedPath.append(LiveStreamRoute(
+                                    aTagValue: stream.aTagValue,
+                                    hostPubkey: stream.activity.hostPubkey,
+                                    dTag: stream.activity.dTag,
+                                    relayHints: stream.activity.relayHints
+                                ))
+                            }
+                        )
+                    }
                     ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
                         PostCardView(
                             event: event,
@@ -1672,8 +1700,9 @@ struct MainView: View {
                         // Self-contained so live-chat `streams` mutations
                         // don't re-evaluate this feed body (and every
                         // PostCardView in it) — see `FeedLiveNowSection`.
-                        // Not shown on OnlyFood (§2.3).
-                        if viewModel.currentKind != .onlyFood {
+                        // Shown on every kind (`FeedTabRouting.showsLiveRail`;
+                        // OnlyFood renders the same rail in its own body).
+                        if FeedTabRouting.showsLiveRail(for: viewModel.currentKind) {
                             FeedLiveNowSection(
                                 profiles: viewModel.profiles,
                                 onSelect: { stream in
@@ -1987,14 +2016,6 @@ struct MainView: View {
         case .notifications: notificationsPath = NavigationPath()
         case .messages: messagesPath = NavigationPath()
         case .kitchen: kitchenPath = NavigationPath()
-        }
-    }
-
-    private func formatCount(_ n: Int) -> String {
-        switch n {
-        case 1_000_000...: String(format: "%.1fM", Double(n) / 1_000_000)
-        case 1_000...: String(format: "%.1fk", Double(n) / 1_000)
-        default: "\(n)"
         }
     }
 

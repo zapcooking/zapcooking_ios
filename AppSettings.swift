@@ -21,6 +21,37 @@ final class AppSettings {
     enum ZapIconStyle: String, CaseIterable {
         case bolt
         case bitcoin
+
+        /// The default for a user who never picked one. Was `.bitcoin`;
+        /// the bolt is the default since TestFlight 2.1 (2)'s follow-ups.
+        static let `default`: ZapIconStyle = .bolt
+
+        /// What a stored raw value resolves to. `nil` is "never set" — the
+        /// `didSet` on `zapIconStyle` is the only writer of the key, and it
+        /// does not run for the assignment in `init`, so a present key is
+        /// always a deliberate pick from Interface settings and survives the
+        /// default flip. An unknown raw value is treated as unset.
+        static func resolve(stored raw: String?) -> ZapIconStyle {
+            raw.flatMap(ZapIconStyle.init(rawValue:)) ?? .default
+        }
+
+        var symbolName: String {
+            switch self {
+            case .bolt: "bolt.fill"
+            case .bitcoin: "bitcoinsign"
+            }
+        }
+    }
+
+    /// What the zap affordances draw: the coin-stack asset in fiat mode
+    /// (unaffected by the style), otherwise the style's SF Symbol.
+    enum ZapGlyph: Equatable {
+        case coinStack
+        case symbol(String)
+    }
+
+    static func zapGlyph(fiatMode: Bool, style: ZapIconStyle) -> ZapGlyph {
+        fiatMode ? .coinStack : .symbol(style.symbolName)
     }
 
     private struct Keys {
@@ -199,8 +230,7 @@ final class AppSettings {
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
         self.postUndoTimerForReplies = defaults.object(forKey: Keys.postUndoTimerForReplies) as? Bool ?? false
         self.autoApproveRelayAuth = defaults.object(forKey: Keys.autoApproveRelayAuth) as? Bool ?? true
-        let zapRaw = defaults.string(forKey: Keys.zapIconStyle) ?? ZapIconStyle.bitcoin.rawValue
-        self.zapIconStyle = ZapIconStyle(rawValue: zapRaw) ?? .bitcoin
+        self.zapIconStyle = ZapIconStyle.resolve(stored: defaults.string(forKey: Keys.zapIconStyle))
         self.videoLoop = defaults.object(forKey: Keys.videoLoop) as? Bool ?? true
         self.autoTranslate = defaults.object(forKey: Keys.autoTranslate) as? Bool ?? false
         self.includeRepliesInFeed = defaults.object(forKey: Keys.includeRepliesInFeed) as? Bool ?? false
@@ -230,14 +260,16 @@ final class AppSettings {
     /// SF Symbol name for the zap icon. Only valid when `fiatModeEnabled` is false.
     /// Use `zapImage` for rendering — it handles the fiat coin stack automatically.
     var zapSymbolName: String {
-        zapIconStyle == .bitcoin ? "bitcoinsign" : "bolt.fill"
+        zapIconStyle.symbolName
     }
 
     /// The correct zap icon for the current mode. Fiat mode renders the coin stack asset;
     /// otherwise uses the user's bolt / bitcoin SF Symbol preference.
     var zapImage: Image {
-        if fiatModeEnabled { return Image("CoinStack") }
-        return Image(systemName: zapSymbolName)
+        switch Self.zapGlyph(fiatMode: fiatModeEnabled, style: zapIconStyle) {
+        case .coinStack: Image("CoinStack")
+        case .symbol(let name): Image(systemName: name)
+        }
     }
 
     var preferredColorScheme: ColorScheme? {
