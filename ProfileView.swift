@@ -357,7 +357,18 @@ private struct ProfileHeaderView: View {
     @State private var muteRepo = MuteRepository.shared
     @State private var followBusy = false
     @State private var showDmSheet = false
+    /// Local host, deliberately: this header is the first row of the profile
+    /// `LazyVStack` and holds the tapped control, so the keyboard's viewport
+    /// shrink cannot push it out of the window the way a feed row is
+    /// recycled (see `ZapRoute`). Presenting locally also keeps profile zaps
+    /// working when the profile is itself inside a sheet (`SocialGraphView`),
+    /// where a root-hosted second sheet would not present.
     @State private var showZapSheet = false
+    /// Bolt tapped with no configured wallet and no lightning address to
+    /// fall back to. `WalletStore` is injected app-wide, so `walletStore ==
+    /// nil` never disables the bolt; presenting `ZapSheet` with `mode == nil`
+    /// showed an empty sheet that dismissed at once.
+    @State private var showWalletSetupPrompt = false
     /// No-wallet fallback: QR + copy + open-in-external-wallet for the
     /// profile's lightning address.
     @State private var showLightningPay = false
@@ -523,6 +534,20 @@ private struct ProfileHeaderView: View {
                 )
             }
         }
+        .walletSetupPrompt(isPresented: $showWalletSetupPrompt)
+    }
+
+    /// The bolt button: same routing as the lightning-address tap when a
+    /// wallet is configured or a lightning address exists to pay externally;
+    /// otherwise the wallet-setup prompt rather than an empty `ZapSheet`.
+    private func handleZapButtonTap() {
+        if ZapRoute.walletReady(walletStore) {
+            showZapSheet = true
+        } else if let lud16 = viewModel.profile?.lud16, !lud16.isEmpty {
+            showLightningPay = true
+        } else {
+            showWalletSetupPrompt = true
+        }
     }
 
     /// Tapping a profile's lightning address. On someone else's profile this
@@ -533,7 +558,7 @@ private struct ProfileHeaderView: View {
     private func handleLightningTap(_ lud16: String) {
         if isMe {
             showLightningReceive = true
-        } else if let store = walletStore, store.mode != nil {
+        } else if ZapRoute.walletReady(walletStore) {
             showZapSheet = true
         } else {
             showLightningPay = true
@@ -716,9 +741,9 @@ private struct ProfileHeaderView: View {
                 systemName: "bolt.fill",
                 active: false,
                 activeTint: Color.wispZapColor,
-                disabled: walletStore == nil,
+                disabled: false,
                 accessibilityLabel: "Zap",
-                action: { showZapSheet = true }
+                action: { handleZapButtonTap() }
             )
             iconButton(
                 systemName: following ? "person.fill.checkmark" : "person.badge.plus",
