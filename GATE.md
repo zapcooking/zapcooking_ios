@@ -7,15 +7,17 @@ zap-glyph default, and the bounded read of the OnlyFood first-item clipping. Own
 branch off main at dca127a (the #75 merge). Local build only on Seth's MacBook Air;
 gates run on the MacinCloud box by hand. This GATE.md replaces #75's.
 
-**Frozen at this commit.** App code is frozen at **cdfa739** (b8b1254 plus the follow-up: Online Now removed outright — the drawer row, its sheet and `FeedViewModel`'s presence tracking / metrics socket). The previous GATE.md (00df88c) is superseded. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **5c06e2d** (cdfa739 plus the Copilot review fixes: the drawer relay count hides on OnlyFood as the pill did, the write-only `connectedRelays` list is gone, `FeedTopBarControl` is explicitly `Hashable`). The previous GATE.md (1c686ce) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at cdfa739 — one build for this
-  follow-up (2026-09-10). Free disk 54.0 GB before and 54.0 GB after; no local Time
-  Machine snapshots at build time. (The earlier freeze at b8b1254 took four builds:
-  two failed on the root `body` type-check limit, one on argument order — issue #76.)
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 5c06e2d — two builds for the
+  review pass (2026-09-10): the first was green but introduced one warning (a
+  main-actor static method passed as a function value into `Optional.map`), fixed as
+  a closure; the second is the green one. Free disk 53.9 GB before and after; no local
+  Time Machine snapshots. (Earlier freezes: b8b1254 took four builds — issue #76;
+  cdfa739 one.)
 - Warnings in touched files (`MainView.swift`, `SidebarDrawerView.swift`,
   `DrawerRow.swift`, `AppSettings.swift`, `FeedViewModel.swift`, `wisp/FeedTabRouting.swift`,
   `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`,
@@ -40,9 +42,9 @@ N tests ran on feed/onlyfood-polish @ <this commit>`, with the four known failur
 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
 `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **838** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 830; the delta is **+8**
-(`FeedTopBarPolishTests` 8). The Online Now removal deletes no whole test: its
+**Count.** This branch has **839** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 830; the delta is **+9**
+(`FeedTopBarPolishTests` 9). The Online Now removal deletes no whole test: its
 coverage was two assertions inside `FeedStartTests/onlyFoodLanding_startTwice_runsSharedSetupOnce`,
 which stays and must still pass. If the parsed total is 830 the run was on a stale tree.
 
@@ -59,7 +61,8 @@ report the recorded issue text rather than retrying blind.
 - live rail on OnlyFood: `liveRail_rendersOnEveryKind_includingOnlyFood`
 - no online-users or relay-count control on any kind:
   `topBar_hasNoOnlinePillOrRelayMenu_onAnyKind`
-- drawer relay row shows the count, red at zero: `drawerRelayRow_showsTheCount_redAtZero`
+- drawer relay row shows the count, red at zero: `drawerRelayRow_showsTheCount_redAtZero`;
+  and no value on OnlyFood: `drawerRelayRow_hidesTheCountOnOnlyFood_likeThePillDid`
 - the shared setup block still runs once with the metrics socket gone: `FeedStartTests` (3)
 - Cheffy present iff `CheffyGate.entryVisible()`:
   `cheffyEntry_presentWhenGateOpen_absentWhenClosed_onEveryKind`,
@@ -79,8 +82,9 @@ report the recorded issue text rather than retrying blind.
    Cheffy at the trailing edge; no person-count pill, no relay-count menu.
 3. Tap Cheffy from OnlyFood and from Follows: the Cheffy cover opens both times.
    (With `cheffyEnabled` off the button is absent.)
-4. Drawer: "Feed Relay" shows the connected count (red when 0) and opens the relay
-   picker. No "Online Now" row anywhere. Feed picker → Relay still opens the same
+4. Drawer: on a general kind "Feed Relay" shows the connected count (red when 0);
+   on OnlyFood it shows no count (the pill was hidden there too). Tap opens the relay
+   picker on both. No "Online Now" row anywhere. Feed picker → Relay still opens the same
    picker.
 5. Fresh install: the zap glyph is the bolt. Set Interface → Bitcoin B: the B shows
    and survives relaunch. Fiat mode: the coin stack, either way.
