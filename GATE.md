@@ -1,70 +1,99 @@
-# GATE — fix/article-action-bar-zap
-Zapping from a recipe (TestFlight 2.1 (2)) opened the wallet sheet and cycled
-open/closed. `ArticleActionBar` hosted `ZapSheet` locally; the keyboard the sheet
-raises tore the presenting lazy row down (the 2026-06-07 PostCardView diagnosis).
-The bar now routes through `ZapRoute` → `ComposePresenter` → MainView's root
-`.sheet(item:)`, and guards `store.mode != nil` (no wallet → setup prompt, never
-an empty sheet). Own branch off main at d71868e. Local build only on Seth's
-MacBook Air; gates run on the MacinCloud box by hand. This GATE.md replaces PR 7's.
+# GATE — feed/onlyfood-polish
+Unified feed follow-ups from TestFlight 2.1 (2) device testing, six items on one
+surface: the live-now rail on OnlyFood (§2.3 reversed), the online-users pill and
+relay-count menu removed from the feed top bar (and Online Now removed from the app
+altogether, presence tracking included), a Feed Relay row in the drawer, a Cheffy entry in the bar's trailing slot, the bolt as the
+zap-glyph default, and the bounded read of the OnlyFood first-item clipping. Own
+branch off main at dca127a (the #75 merge). Local build only on Seth's MacBook Air;
+gates run on the MacinCloud box by hand. This GATE.md replaces #75's.
 
-**Frozen at this commit.** App code is frozen at **90972ad** (35c5e47 plus the review fixes: side-menu wallet prompt copy, source-scan tests dropped, #74 filed). The previous GATE.md (0bdeca9) is superseded. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **5c06e2d** (cdfa739 plus the Copilot review fixes: the drawer relay count hides on OnlyFood as the pill did, the write-only `connectedRelays` list is gone, `FeedTopBarControl` is explicitly `Hashable`). The previous GATE.md (1c686ce) is superseded. This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
 A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 90972ad (one build, 2026-09-10, full build on an emptied shared DerivedData; `wisp` + `wispTests` compiled, `** TEST BUILD SUCCEEDED **`). Free disk
-  56.9 GB before, 54.1 GB after. Total warning lines 697, identical to the first-freeze build at 35c5e47; all are pre-existing Swift 6 diagnostics in files this branch does not touch.
-- Warnings in touched files (`PostCardView.swift`, `ProfileView.swift`,
-  `wisp/ArticleView.swift`, `wisp/RecipeDetailView.swift`, `wisp/ZapRoute.swift`,
-  `wispTests/ZapRouteTests.swift`): **zero**.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 5c06e2d — two builds for the
+  review pass (2026-09-10): the first was green but introduced one warning (a
+  main-actor static method passed as a function value into `Optional.map`), fixed as
+  a closure; the second is the green one. Free disk 53.9 GB before and after; no local
+  Time Machine snapshots. (Earlier freezes: b8b1254 took four builds — issue #76;
+  cdfa739 one.)
+- Warnings in touched files (`MainView.swift`, `SidebarDrawerView.swift`,
+  `DrawerRow.swift`, `AppSettings.swift`, `FeedViewModel.swift`, `wisp/FeedTabRouting.swift`,
+  `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`,
+  `wispTests/FeedStartTests.swift`): **zero new**. `FeedViewModel.swift` carries five
+  pre-existing Swift 6 diagnostics (`SafetyFilter.shared` from a nonisolated context,
+  two async-without-await, one no-async-in-await); the same five appear in the full
+  builds of main-equivalent code at lines 438/696/765/1077, now 423/677/746/1057 —
+  shifted by the deleted lines, none in a changed hunk.
 - pbxproj: no diff (three-dot, `git diff origin/main...HEAD --stat -- wisp.xcodeproj`
-  empty). New files `wisp/ZapRoute.swift`, `wispTests/ZapRouteTests.swift` are
-  self-registering.
+  empty). New files `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`
+  are self-registering.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout fix/article-action-bar-zap && git pull --ff-only
+git fetch origin && git checkout feed/onlyfood-polish && git pull --ff-only
 cp ci_scripts/gate.sh ~/gate.sh && chmod +x ~/gate.sh
-~/gate.sh fix/article-action-bar-zap
+~/gate.sh feed/onlyfood-polish
 ```
 Expected verdict line: `gate: PASS — failure set is exactly the known set (4/4);
-N tests ran on fix/article-action-bar-zap @ <this commit>`, with the four known
-failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the
-three `SafetyTests`, issue #57) and no `NEW` line.
+N tests ran on feed/onlyfood-polish @ <this commit>`, with the four known failures
+(#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
+`SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **830** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 824; the delta is **+6**
-(`ZapRouteTests` 6). If the parsed total is 824 the run was on a stale tree.
+**Count.** This branch has **839** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 830; the delta is **+9**
+(`FeedTopBarPolishTests` 9). The Online Now removal deletes no whole test: its
+coverage was two assertions inside `FeedStartTests/onlyFoodLanding_startTwice_runsSharedSetupOnce`,
+which stays and must still pass. If the parsed total is 830 the run was on a stale tree.
 
-## Gate 2 — the brief's three hermetic gates (subset of Gate 1; name-check the bundle)
+**Hosted gate on the box.** `feedPicker_staysCentred_whateverSitsAtTheEdges` opens a
+real `UIWindow` in the test host and pumps the run loop (the `FeedStickToTopTests`
+pattern). If it fails with "did not lay out", that is the harness, not the bar —
+report the recorded issue text rather than retrying blind.
+
+## Gate 2 — the brief's hermetic gates (subset of Gate 1; name-check the bundle)
 ```sh
 ~/gate.sh --parse "$(ls -td ~/Library/Developer/Xcode/DerivedData/wisp-*/Logs/Test/*.xcresult | head -1)" \
-  | grep -E 'ZapRouteTests|ZapGateTests|RecipeSaveToggleTests'
+  | grep -E 'FeedTopBarPolishTests|FeedTabRoutingTests|FeedStickToTopTests|BottomBarAndActionRowTests|OnlyFood'
 ```
-- ZapSheet's route is the app-root host for both PostCardView and ArticleActionBar:
-  `open_withWallet_handsTheRequestToTheRootHost`,
+- live rail on OnlyFood: `liveRail_rendersOnEveryKind_includingOnlyFood`
+- no online-users or relay-count control on any kind:
+  `topBar_hasNoOnlinePillOrRelayMenu_onAnyKind`
+- drawer relay row shows the count, red at zero: `drawerRelayRow_showsTheCount_redAtZero`;
+  and no value on OnlyFood: `drawerRelayRow_hidesTheCountOnOnlyFood_likeThePillDid`
+- the shared setup block still runs once with the metrics socket gone: `FeedStartTests` (3)
+- Cheffy present iff `CheffyGate.entryVisible()`:
+  `cheffyEntry_presentWhenGateOpen_absentWhenClosed_onEveryKind`,
+  `cheffyButton_rendersAtThe44ptTarget_withAvatarWeightGlyph`
+- picker centred on every kind (hosted, measured): `feedPicker_staysCentred_whateverSitsAtTheEdges`
+- bolt default / explicit bitcoin kept / fiat coin stack:
+  `zapGlyph_defaultsToBolt_onFreshInstall`,
+  `zapGlyph_explicitBitcoinPick_survives_andFiatStillCoinStack`
+- all pre-existing feed, OnlyFood and top-bar gates: every other suite in the grep
+  passes (only the known #4 case fails).
 
-
-  `profileZap_withoutAnEvent_keysTheRequestOnThePubkey`, `open_withoutRootHost_presentsNothing_andDoesNotPrompt`.
-- no-wallet shows the setup prompt, not an empty sheet:
-  `open_withoutWallet_promptsSetup_andPresentsNothing`,
-  `walletReady_needsAStoreWithAConfiguredMode`.
-- watch-only cannot reach the zap control from a recipe:
-  `recipeEngagementBar_watchOnly_isBookmarkOnly`.
-- gating unchanged: every `ZapGateTests` case still passes.
-
-## Gate 3 — MANUAL on device (TestFlight build from this branch)
-With a wallet configured (Spark or NWC), zap from each of the five surfaces. Each
-must open a usable sheet that stays open (keyboard up, amount editable, no flicker):
-1. a recipe (Recipes tab → recipe detail → bolt in the engagement bar)
-2. a feed post (bolt on a kind-1 card)
-3. a long-form article (feed → article → bolt)
-4. a profile (bolt in the header, and the lightning-address row)
-5. a live stream (host zap in the info bar, and a chat-message zap)
-Then with NO wallet configured: recipe and feed-post bolts show the
-"Set up a wallet in the side menu to send zaps" prompt; "Set Up Wallet" lands on the Wallet screen (drawer-only tab).
-Then signed in watch-only (npub): recipe detail shows the bookmark-only bar; no bolt.
+## Gate 3 — MANUAL on device
+1. Launch on OnlyFood with at least one live stream discoverable, then switch to
+   Follows: the live-now rail shows the same pills on both. Screenshot OnlyFood and
+   Follows side by side; both list tops sit at the same offset under the bar.
+2. Top bar on every kind: avatar, (content filter on general kinds), centred picker,
+   Cheffy at the trailing edge; no person-count pill, no relay-count menu.
+3. Tap Cheffy from OnlyFood and from Follows: the Cheffy cover opens both times.
+   (With `cheffyEnabled` off the button is absent.)
+4. Drawer: on a general kind "Feed Relay" shows the connected count (red when 0);
+   on OnlyFood it shows no count (the pill was hidden there too). Tap opens the relay
+   picker on both. No "Online Now" row anywhere. Feed picker → Relay still opens the same
+   picker.
+5. Fresh install: the zap glyph is the bolt. Set Interface → Bitcoin B: the B shows
+   and survives relaunch. Fiat mode: the coin stack, either way.
+6. Item 1 diagnostic (see PR body): after a pull-to-refresh on OnlyFood with no live
+   stream, the first card's avatar and name must sit fully below the bar.
+7. Recipe-publish navigation (this PR changes it): open Cheffy from the FEED side
+   (either kind), publish a recipe. Expect: the app lands on the Recipes tab with the
+   new recipe pushed; Back returns to the Recipes root, not to the feed. Repeat from
+   My Kitchen's Intelligence menu: same result as before.
 
 ## Gate 4 — pbxproj
 `git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty.

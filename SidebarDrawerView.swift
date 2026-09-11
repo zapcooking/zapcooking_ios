@@ -27,6 +27,13 @@ struct SidebarDrawerView: View {
     var onOpenProofOfWork: () -> Void = {}
     var onOpenRelays: () -> Void = {}
     var onOpenMediaServers: () -> Void = {}
+    /// Feed Relay row (feed/onlyfood-polish): the relay-count pill left the
+    /// feed top bar, so the drawer carries the connected count and opens
+    /// `RelayPickerSheet`. Count and closure only — the drawer does not take
+    /// the feed view model.
+    /// `nil` hides the value (OnlyFood — see `DrawerRelayRow.count`).
+    var connectedRelayCount: Int? = nil
+    var onOpenRelayPicker: () -> Void = {}
     /// Settings → About: policy links (privacy, terms, child safety) — the
     /// in-app placement Android uses (drawer → About → Policies).
     var onOpenAbout: () -> Void = {}
@@ -339,6 +346,15 @@ struct SidebarDrawerView: View {
                     onSelectTab(.wallet)
                 }
             }
+            DrawerRow(
+                icon: "network",
+                label: "Feed Relay",
+                trailingValue: connectedRelayCount.map { DrawerRelayRow.value(count: $0) },
+                trailingTint: DrawerRelayRow.tint(count: connectedRelayCount ?? 0)
+            ) {
+                onOpenRelayPicker()
+            }
+            .accessibilityIdentifier("drawer-feed-relay")
             DrawerRow(icon: "list.bullet", label: "Lists") {
                 onOpenLists()
             }

@@ -104,9 +104,6 @@ final class FeedViewModel {
     var profiles: [String: ProfileData] = [:]
     var isLoading = false
     var connectedRelayCount = 0
-    var connectedRelays: [(url: String, authorCount: Int)] = []
-    var globalOnlineCount: Int?
-    var onlineNetworkPubkeys: [String] = []
     var userProfile: ProfileData?
     var currentKind: FeedKind = .follows
     /// Client-side content filter — see `FeedContentFilter`. Defaults to
@@ -138,7 +135,6 @@ final class FeedViewModel {
     private(set) var pendingNewCount: Int = 0
 
     @ObservationIgnored private var seenIds = Set<String>()
-    @ObservationIgnored private var metricsTask: Task<Void, Never>?
     /// Latched by the first `start()` for the VM's lifetime. `.task` re-fires
     /// on tab re-appear and scene reactivation; on the default OnlyFood
     /// landing `events` never fills, so the `events.isEmpty` guard alone no
@@ -150,10 +146,8 @@ final class FeedViewModel {
     @ObservationIgnored private var liveConsumer: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var firstEventDeadline: Task<Void, Never>?
-    @ObservationIgnored private var pruneTask: Task<Void, Never>?
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var sweepSourceId: UUID?
-    @ObservationIgnored private var recentlySeenPubkeys: [String: Int] = [:]
     /// Buffer for events arriving from the live subscription. Drained into
     /// `events` on a debounced flush so a backfill burst produces ~one
     /// observable mutation per frame instead of one per event.
@@ -193,9 +187,6 @@ final class FeedViewModel {
     @ObservationIgnored private let eventStore = EventStore.shared
     @ObservationIgnored private let profileRepo = ProfileRepository.shared
 
-    private static let onlineActivityKinds: Set<Int> = [1, 6, 7, 30023, 20, 21, 22]
-    private static let onlineWindowSeconds = 10 * 60
-
     private static let indexerRelays = RelayDefaults.indexers
 
     /// Kinds queried from a single relay or relay set, matching the Android client.
@@ -221,7 +212,6 @@ final class FeedViewModel {
     /// socket; production uses `.live`. Every closure is main-actor, so the
     /// struct carries no Sendable obligations.
     struct StartupServices {
-        var liveMetrics: @MainActor () -> AsyncStream<Int>
         var startLiveDiscovery: @MainActor (_ pubkey: String) -> Void
         var registerSweepSource: @MainActor (_ source: @escaping @MainActor () -> [NostrEvent]) -> UUID
         var unregisterSweepSource: @MainActor (UUID) -> Void
@@ -231,7 +221,6 @@ final class FeedViewModel {
 
         static var live: StartupServices {
             StartupServices(
-                liveMetrics: { FeedViewModel.liveMetricsStream() },
                 startLiveDiscovery: { FeedViewModel.startLiveDiscovery(pubkey: $0) },
                 registerSweepSource: { MissingProfileWatcher.shared.registerSource($0) },
                 unregisterSweepSource: { MissingProfileWatcher.shared.unregisterSource($0) },
@@ -378,16 +367,11 @@ final class FeedViewModel {
 
         reloadFollowsCache()
 
-        // Everything in this block runs once per VM (see `didStart`).
-        metricsTask?.cancel()
-        metricsTask = Task { [weak self] in
-            guard let stream = self?.services.liveMetrics() else { return }
-            for await count in stream {
-                guard let self else { return }
-                self.globalOnlineCount = count
-            }
-        }
-        startPruneTask()
+        // Everything in this block runs once per VM (see `didStart`): live
+        // discovery, the profile-update bridge, the sweep source, the
+        // relay-set bootstrap and the event-store prune. (The online-presence
+        // metrics socket and its prune timer used to sit here too; Online
+        // Now was removed in feed/onlyfood-polish.)
         startLiveDiscovery()
         subscribeToProfileUpdates()
         registerSweepSource()
@@ -445,7 +429,6 @@ final class FeedViewModel {
                 return (result, seen)
             }.value
 
-            for event in filtered { markActivityIfFollowed(event) }
             seenIds.formUnion(ids)
             updateOldestLoaded(filtered.last?.createdAt)
             events = windowTrimmed(Self.consolidateReposts(filtered))
@@ -509,9 +492,6 @@ final class FeedViewModel {
     }
 
     func stop() {
-        metricsTask?.cancel()
-        pruneTask?.cancel()
-        pruneTask = nil
         profileUpdatesTask?.cancel()
         profileUpdatesTask = nil
         if let id = sweepSourceId {
@@ -1000,7 +980,6 @@ final class FeedViewModel {
                 guard let self else { return }
                 if Task.isCancelled { return }
                 if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
-                self.markActivityIfFollowed(event)
                 guard Self.relayFeedKinds.contains(event.kind) else { continue }
                 guard self.seenIds.insert(event.id).inserted else { continue }
                 self.enqueueLiveEvent(event)
@@ -1302,9 +1281,6 @@ final class FeedViewModel {
         }
 
         connectedRelayCount = queries.count
-        connectedRelays = queries.map { q in
-            (url: q.relayUrl, authorCount: relayToAuthors[q.relayUrl]?.count ?? 0)
-        }
 
         // 5. Persistent subscription: backlog streams from the per-relay REQs (since=…)
         //    and the same sockets keep delivering live events. No re-subscribe needed
@@ -1324,7 +1300,6 @@ final class FeedViewModel {
                 // note — `shouldDrop` fail-closes on the inner author, and this
                 // was the one live path that skipped it.
                 if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
-                self.markActivityIfFollowed(event)
                 guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { continue }
                 guard self.seenIds.insert(event.id).inserted else { continue }
                 self.enqueueLiveEvent(event)
@@ -1332,7 +1307,7 @@ final class FeedViewModel {
         }
     }
 
-    // MARK: - Online presence (followed authors active in the last 10 minutes)
+    // MARK: - Follows cache
 
     private func reloadFollowsCache() {
         followsCache = Set(
@@ -1348,84 +1323,13 @@ final class FeedViewModel {
         return followsCache.contains(event.pubkey)
     }
 
-    private func markActivityIfFollowed(_ event: NostrEvent) {
-        guard Self.onlineActivityKinds.contains(event.kind),
-              followsCache.contains(event.pubkey) else { return }
-        let cutoff = Int(Date().timeIntervalSince1970) - Self.onlineWindowSeconds
-        guard event.createdAt >= cutoff else { return }
-        let prev = recentlySeenPubkeys[event.pubkey] ?? 0
-        if event.createdAt > prev {
-            recentlySeenPubkeys[event.pubkey] = event.createdAt
-            rebuildOnlineList()
-        }
-    }
 
-    private func rebuildOnlineList() {
-        let cutoff = Int(Date().timeIntervalSince1970) - Self.onlineWindowSeconds
-        recentlySeenPubkeys = recentlySeenPubkeys.filter { $0.value >= cutoff }
-        let updated = recentlySeenPubkeys
-            .sorted { $0.value > $1.value }
-            .map(\.key)
-        // Publish only when the ordered list actually changes — during a
-        // backfill burst many followed-author events leave the membership and
-        // order unchanged, and a redundant write re-renders the online-now bar.
-        if updated != onlineNetworkPubkeys {
-            onlineNetworkPubkeys = updated
-        }
-    }
-
-    private func startPruneTask() {
-        pruneTask?.cancel()
-        pruneTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard !Task.isCancelled else { return }
-                self?.rebuildOnlineList()
-            }
-        }
-    }
-
-    /// Refresh the relay-pill list from the latest scoreboard. Call after onboarding finishes.
+    /// Refresh the connected-relay count from the latest scoreboard. Call after onboarding finishes.
     func refreshScoreBoard() {
         guard let board = RelayScoreBoard.load(pubkey: keypair.pubkey) else { return }
-        let top = Array(board.scoredRelays.prefix(20))
-        connectedRelays = top.map { (url: $0.url, authorCount: $0.count) }
-        connectedRelayCount = top.count
+        connectedRelayCount = min(board.scoredRelays.count, 20)
     }
 
-    /// Global online count from nostrarchives' live-metrics socket, one value
-    /// per server frame. Ends when the socket errors; cancelling the consuming
-    /// task terminates the stream, which cancels the producer and closes the
-    /// socket. Same parsing as the former in-VM `fetchOnlineCount()`.
-    nonisolated static func liveMetricsStream() -> AsyncStream<Int> {
-        AsyncStream { continuation in
-            guard let url = URL(string: "wss://api.nostrarchives.com/v1/ws/live-metrics") else {
-                continuation.finish()
-                return
-            }
-            let session = URLSession(configuration: .default)
-            let ws = session.webSocketTask(with: url)
-            ws.resume()
-            let producer = Task {
-                while !Task.isCancelled {
-                    do {
-                        let msg = try await ws.receive()
-                        if case .string(let text) = msg,
-                           let data = text.data(using: .utf8),
-                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let count = obj["online"] as? Int {
-                            continuation.yield(count)
-                        }
-                    } catch {
-                        break
-                    }
-                }
-                ws.cancel(with: .normalClosure, reason: nil)
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in producer.cancel() }
-        }
-    }
 }
 
 nonisolated extension Array {
