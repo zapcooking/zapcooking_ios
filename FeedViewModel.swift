@@ -104,7 +104,6 @@ final class FeedViewModel {
     var profiles: [String: ProfileData] = [:]
     var isLoading = false
     var connectedRelayCount = 0
-    var connectedRelays: [(url: String, authorCount: Int)] = []
     var userProfile: ProfileData?
     var currentKind: FeedKind = .follows
     /// Client-side content filter — see `FeedContentFilter`. Defaults to
@@ -1282,9 +1281,6 @@ final class FeedViewModel {
         }
 
         connectedRelayCount = queries.count
-        connectedRelays = queries.map { q in
-            (url: q.relayUrl, authorCount: relayToAuthors[q.relayUrl]?.count ?? 0)
-        }
 
         // 5. Persistent subscription: backlog streams from the per-relay REQs (since=…)
         //    and the same sockets keep delivering live events. No re-subscribe needed
@@ -1328,12 +1324,10 @@ final class FeedViewModel {
     }
 
 
-    /// Refresh the relay-pill list from the latest scoreboard. Call after onboarding finishes.
+    /// Refresh the connected-relay count from the latest scoreboard. Call after onboarding finishes.
     func refreshScoreBoard() {
         guard let board = RelayScoreBoard.load(pubkey: keypair.pubkey) else { return }
-        let top = Array(board.scoredRelays.prefix(20))
-        connectedRelays = top.map { (url: $0.url, authorCount: $0.count) }
-        connectedRelayCount = top.count
+        connectedRelayCount = min(board.scoredRelays.count, 20)
     }
 
 }

@@ -660,7 +660,10 @@ struct MainView: View {
                 closeDrawer()
                 showMediaServers = true
             },
-            connectedRelayCount: viewModel.connectedRelayCount,
+            connectedRelayCount: DrawerRelayRow.count(
+                kind: viewModel.currentKind,
+                generalConnected: viewModel.connectedRelayCount
+            ),
             onOpenRelayPicker: {
                 closeDrawer()
                 showRelayPicker = true

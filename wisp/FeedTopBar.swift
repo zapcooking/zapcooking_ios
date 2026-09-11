@@ -7,7 +7,7 @@ import SwiftUI
 /// `FeedTopBarPolishTests` can pin "no online-users pill, no relay-count menu,
 /// on any kind" without a SwiftUI host; the layout container keeps the picker
 /// centred on the bar independent of what sits at either edge.
-enum FeedTopBarControl: Equatable, CaseIterable {
+enum FeedTopBarControl: Equatable, Hashable, CaseIterable {
     /// Leading: the avatar that opens the drawer.
     case avatar
     /// Leading, general kinds only: the content-filter cycle. Hidden on the
@@ -63,6 +63,15 @@ struct FeedTopBarFrame<Leading: View, Center: View, Trailing: View>: View {
 /// gave up: the connected count as its trailing value, red at zero exactly
 /// as the pill was.
 enum DrawerRelayRow {
+    /// The count the row shows, or `nil` for no value. The pill was hidden
+    /// on OnlyFood (`FeedViewModel.connectedRelayCount` is the general
+    /// feed's; OnlyFood queries its own fixed set and `start()` never sets
+    /// the count on that landing), so the row hides the value there too
+    /// rather than showing a red 0 for a feed that is connected.
+    static func count(kind: FeedKind, generalConnected: Int) -> Int? {
+        kind == .onlyFood ? nil : generalConnected
+    }
+
     static func value(count: Int) -> String { "\(count)" }
     static func tint(count: Int) -> Color { count > 0 ? Color.wispRepostColor : .red }
 }

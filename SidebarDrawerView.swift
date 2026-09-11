@@ -31,7 +31,8 @@ struct SidebarDrawerView: View {
     /// feed top bar, so the drawer carries the connected count and opens
     /// `RelayPickerSheet`. Count and closure only — the drawer does not take
     /// the feed view model.
-    var connectedRelayCount: Int = 0
+    /// `nil` hides the value (OnlyFood — see `DrawerRelayRow.count`).
+    var connectedRelayCount: Int? = nil
     var onOpenRelayPicker: () -> Void = {}
     /// Settings → About: policy links (privacy, terms, child safety) — the
     /// in-app placement Android uses (drawer → About → Policies).
@@ -348,8 +349,8 @@ struct SidebarDrawerView: View {
             DrawerRow(
                 icon: "network",
                 label: "Feed Relay",
-                trailingValue: DrawerRelayRow.value(count: connectedRelayCount),
-                trailingTint: DrawerRelayRow.tint(count: connectedRelayCount)
+                trailingValue: connectedRelayCount.map { DrawerRelayRow.value(count: $0) },
+                trailingTint: DrawerRelayRow.tint(count: connectedRelayCount ?? 0)
             ) {
                 onOpenRelayPicker()
             }

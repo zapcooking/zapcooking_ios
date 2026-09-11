@@ -76,6 +76,18 @@ struct FeedTopBarPolishTests {
 
     // MARK: - Item 4: drawer Feed Relay row
 
+    /// The pill was hidden on OnlyFood; the general feed's count is not that
+    /// feed's connectivity, so the row shows no value there and the count
+    /// on every general kind.
+    @Test func drawerRelayRow_hidesTheCountOnOnlyFood_likeThePillDid() {
+        #expect(DrawerRelayRow.count(kind: .onlyFood, generalConnected: 0) == nil)
+        #expect(DrawerRelayRow.count(kind: .onlyFood, generalConnected: 9) == nil)
+        for kind in everyKind where kind != .onlyFood {
+            #expect(DrawerRelayRow.count(kind: kind, generalConnected: 0) == 0, "\(kind)")
+            #expect(DrawerRelayRow.count(kind: kind, generalConnected: 4) == 4, "\(kind)")
+        }
+    }
+
     @Test func drawerRelayRow_showsTheCount_redAtZero() {
         #expect(DrawerRelayRow.value(count: 0) == "0")
         #expect(DrawerRelayRow.value(count: 7) == "7")
