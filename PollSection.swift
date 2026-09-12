@@ -34,6 +34,30 @@ struct PollSection: View {
         return "\(m) \(m == 1 ? "minute" : "minutes") left"
     }
 
+    /// Re-pulls the tally on demand. The subscription that fills a poll's counts
+    /// closes after 12 seconds, so anything cast after that isn't on screen until
+    /// something asks again.
+    private var refreshButton: some View {
+        let isRefreshing = tallyRepo.refreshingPollIds.contains(pollEvent.id)
+        return Button {
+            tallyRepo.refresh(pollEvent: pollEvent)
+        } label: {
+            HStack(spacing: 3) {
+                if isRefreshing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+                Text("Refresh")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(isRefreshing)
+        .accessibilityLabel("Refresh poll results")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isZapPoll {
@@ -147,6 +171,8 @@ struct PollSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 8)
+                refreshButton
             }
         }
     }
@@ -234,6 +260,8 @@ struct PollSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 8)
+                refreshButton
             }
         }
     }
