@@ -290,14 +290,21 @@ struct ComposeView: View {
             "No food tag yet",
             isPresented: $showFoodTagConfirm
         ) {
-            Button("Add #\(OnlyFoodCompose.defaultTag)") {
-                viewModel.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag)
-                viewModel.publish()
+            // At the cap the tag can't be added (the toggle is a no-op), so
+            // the one-tap fix is not offered; the user has to free a slot.
+            if !viewModel.suggestedTagsAtCap {
+                Button("Add #\(OnlyFoodCompose.defaultTag)") {
+                    if viewModel.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) {
+                        viewModel.publish()
+                    }
+                }
             }
             Button("Post anyway") { viewModel.publish() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This note won't appear in OnlyFood without a food tag.")
+            Text(viewModel.suggestedTagsAtCap
+                 ? "This note won't appear in OnlyFood without a food tag, and it already has \(OnlyFoodCompose.maxTags) tags. Remove one to add #\(OnlyFoodCompose.defaultTag)."
+                 : "This note won't appear in OnlyFood without a food tag.")
         }
         .alert(
             "Discard this post?",

@@ -37,7 +37,7 @@ nonisolated enum OnlyFoodCompose {
     /// absent: it is not a food tag, so a note carrying only it would still
     /// dead-end.
     static let suggestedTags: [String] = [
-        "foodstr", "food", "cooking", "cookstr", "breakfast", "lunch", "dinner", "coffee",
+        defaultTag, "food", "cooking", "cookstr", "breakfast", "lunch", "dinner", "coffee",
     ]
 
     static let hint = "Tap a tag so this shows up in OnlyFood."

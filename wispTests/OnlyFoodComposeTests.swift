@@ -186,6 +186,25 @@ struct OnlyFoodComposeTests {
         #expect(FoodHashtags.hasFoodTag(kind1(content: vm.content, tTags: vm.hashtags)))
     }
 
+    /// At the cap with no food tag (five non-food tags typed) the one-tap fix
+    /// cannot work: the toggle reports the no-op and leaves the body alone,
+    /// so the composer must not publish on its behalf (the alert hides the
+    /// button in that state).
+    @Test func confirmAddFoodstr_atCapWithNoFoodTag_isRefused() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("a #nostr #bitcoin #zap #sats #stack")
+        #expect(vm.suggestedTagsAtCap)
+        #expect(vm.needsFoodTagConfirm)
+        let before = vm.content
+        #expect(vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) == false)
+        #expect(vm.content == before)
+        #expect(vm.needsFoodTagConfirm)
+        // Off the cap, the same tap works and returns true.
+        vm.updateContent("a #nostr #bitcoin #zap #sats")
+        #expect(vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag))
+        #expect(!vm.needsFoodTagConfirm)
+    }
+
     // MARK: - The row (rendered; PNGs via the git-ignored `wispTests/.zc_snapshot_dir`)
 
     /// The row in the three states the by-hand gate screenshots: no pill

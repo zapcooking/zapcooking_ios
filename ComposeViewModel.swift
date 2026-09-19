@@ -1728,14 +1728,17 @@ final class ComposeViewModel {
     /// Selected → remove every `#tag` token from the body. Unselected →
     /// append it, unless the note is already at the cap (no-op; the pill is
     /// disabled in the row, this is the guard behind it). Goes through
-    /// `updateContent` so the chips and `t` tags re-derive.
-    func toggleSuggestedHashtag(_ tag: String) {
+    /// `updateContent` so the chips and `t` tags re-derive. Returns false
+    /// only for that no-op, so a caller that then publishes can tell.
+    @discardableResult
+    func toggleSuggestedHashtag(_ tag: String) -> Bool {
         if isSuggestedHashtagSelected(tag) {
             updateContent(OnlyFoodCompose.removing(tag: tag, from: content))
         } else {
-            guard !suggestedTagsAtCap else { return }
+            guard !suggestedTagsAtCap else { return false }
             updateContent(OnlyFoodCompose.appending(tag: tag, to: content))
         }
+        return true
     }
 
     /// Composed from OnlyFood (pills present) and nothing in the body is a
