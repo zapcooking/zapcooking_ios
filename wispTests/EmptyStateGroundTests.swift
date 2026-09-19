@@ -55,7 +55,7 @@ struct EmptyStateGroundTests {
             // The hat is the theme primary; the eyes/brow/mouth are Cheffy's
             // fixed ink. Both must land on the canvas — at 2× a 64 pt hat is
             // roughly 4 000 px, the ink features a few hundred.
-            let hat = raster.count(near: Self.rgb(ResolvedThemeProxy.current.primary), tolerance: 8)
+            let hat = raster.count(near: try Self.rgb(ResolvedThemeProxy.current.primary), tolerance: 8)
             let ink = raster.count(near: (0x3A, 0x24, 0x15), tolerance: 8)
             #expect(hat >= 1_200, "\(c.name) hat px \(hat)")
             #expect(ink >= 80, "\(c.name) ink px \(ink)")
@@ -95,7 +95,7 @@ struct EmptyStateGroundTests {
                 #expect(Self.delta(hat, ground) >= 60, "\(label): hat \(hat) on ground \(ground)")
                 #expect(Self.delta(ink, face) >= 90, "\(label): ink \(ink) on face \(face)")
                 // The hat really is the theme primary, so the sample hit the toque.
-                #expect(Self.delta(hat, Self.rgb(ResolvedThemeProxy.current.primary)) <= 4, "\(label): hat \(hat)")
+                #expect(Self.delta(hat, try Self.rgb(ResolvedThemeProxy.current.primary)) <= 4, "\(label): hat \(hat)")
             }
         }
         // Documented worst case so a palette change that softens it shows up here.
@@ -116,9 +116,11 @@ struct EmptyStateGroundTests {
         )
     }
 
-    private static func rgb(_ color: Color) -> (Int, Int, Int) {
+    /// sRGB bytes of a theme colour. A colour that cannot be expressed as RGB
+    /// fails the test outright rather than reading as black.
+    private static func rgb(_ color: Color) throws -> (Int, Int, Int) {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        try #require(UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a), "\(color) has no RGB components")
         return (Int((r * 255).rounded()), Int((g * 255).rounded()), Int((b * 255).rounded()))
     }
 
