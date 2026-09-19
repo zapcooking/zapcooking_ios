@@ -10,12 +10,15 @@ emoji (🍳 📖) and text only — nothing Wisp — so nothing else changes. Ow
 branch off main at 7c56d93 (2.1 (3)). Local build only on Seth's MacBook Air;
 gates run on the MacinCloud box by hand.
 
-**Frozen at this commit.** App code is frozen at **c9459c5**. This GATE.md is
-the only commit after it and is the HEAD commit — `gate.sh` refuses to run
+**Frozen at this commit.** App code is frozen at **f587687** (c9459c5 plus the Copilot
+review fix: the test's colour-to-RGB helper now fails the test instead of reading
+black when conversion fails). The previous GATE.md (0280dd9) is superseded. This
+GATE.md is the only commit after it and is the HEAD commit — `gate.sh` refuses to run
 otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at c9459c5.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at f587687 (the review-fix
+  build was an incremental `xcodebuild test` behind the serial run, green; earlier at c9459c5:).
   Three builds this session (2026-09-19): the first failed on two
   compile errors in the new test file (a `Comment` wrapper, a `nonisolated` helper),
   the second was green, and the two incremental `xcodebuild test` builds behind the
@@ -27,7 +30,7 @@ otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
   Swift 6 diagnostics elsewhere (not comparable to the 538-line full-build baseline).
 - Serial single-suite run on the Air (the C-G exception form,
   `test-without-building -parallel-testing-enabled NO -only-testing:wispTests/EmptyStateGroundTests`):
-  **3/3 pass** (1.9 s of test time on the warm run). The run
+  **3/3 pass** at f587687 (and at c9459c5; 1.9 s of test time on the warm run). The run
   also wrote PNGs of the empty state on the default theme's dark and light grounds and
   on Srcery light (the softest face-vs-ground of the 30): neutral face, toque in the
   theme primary, bolt accent, "No replies yet" in tertiary — all readable on each.
