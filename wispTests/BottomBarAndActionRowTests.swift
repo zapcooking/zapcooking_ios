@@ -35,14 +35,32 @@ struct BottomBarAndActionRowTests {
     }
 
     @Test func feed_usesFlame_andGlyphSizesMatchSpec() {
-        #expect(BottomTab.feed.icon == "flame")
-        #expect(BottomTab.feed.selectedIcon == "flame.fill")
+        #expect(BottomTab.feed.icon == "ZapNavFlame")
+        #expect(BottomTab.feed.selectedIcon == "ZapNavFlameFill")
         #expect(BottomTab.feed.barGlyphSize == 26)
         for tab in BottomTab.bottomBarCases where tab != .feed {
             #expect(tab.barGlyphSize == 24, "\(tab)")
         }
-        #expect(BottomTab.messages.icon == "bubble.left.and.bubble.right")
+        #expect(BottomTab.messages.icon == "ZapNavChat")
         #expect(BottomTab.kitchen.title == "My Kitchen")
+    }
+
+    /// Android's custom nav vectors (flame, utensils, chat, alert) carry the
+    /// bar; Search keeps the SF Symbol magnifier and the drawer-only rows
+    /// keep their symbols.
+    @Test func customGlyphs_coverTheAndroidNavTabs_only() {
+        #expect(Set(BottomTab.bottomBarCases.filter { $0.usesCustomGlyph }) == [.feed, .recipes, .messages, .notifications])
+        for tab in BottomTab.bottomBarCases {
+            if tab.usesCustomGlyph {
+                #expect(tab.icon.hasPrefix("ZapNav"), "\(tab)")
+                #expect(tab.selectedIcon.hasPrefix("ZapNav"), "\(tab)")
+            } else {
+                #expect(UIImage(systemName: tab.icon) != nil, "\(tab)")
+            }
+        }
+        for tab in [BottomTab.kitchen, .wallet] {
+            #expect(!tab.usesCustomGlyph, "\(tab)")
+        }
     }
 
     @Test func unreadDot_isAmberFBBF24() {

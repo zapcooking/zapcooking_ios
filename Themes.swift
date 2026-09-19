@@ -14,10 +14,13 @@ nonisolated enum Themes {
             // not the theme primary. Secondary mirrors Android's custom preset.
             dark: ThemePalette(
                 primary: .hex(0xFFFF5722), secondary: .hex(0xFFFF7A3D),
-                background: .hex(0xFF131215), surface: .hex(0xFF1F1E21),
-                surfaceVariant: .hex(0xFF2B2A2E),
-                onBackground: .hex(0xFFE0E0E0), onSurface: .hex(0xFFE0E0E0),
-                onSurfaceVariant: .hex(0xFF9998A0), outline: .hex(0xFF343338),
+                // Dark blue-grey — web `--color-bg-primary` / Android
+                // Themes.kt zapcooking dark (Tailwind gray-800/900 pair),
+                // not the neutral near-black Wisp shipped.
+                background: .hex(0xFF111827), surface: .hex(0xFF1F2937),
+                surfaceVariant: .hex(0xFF374151),
+                onBackground: .hex(0xFFF3F4F6), onSurface: .hex(0xFFF3F4F6),
+                onSurfaceVariant: .hex(0xFFD1D5DB), outline: .hex(0xFF4B5563),
                 zap: .hex(0xFFFF5722), repost: .hex(0xFF4CAF50),
                 bookmark: .hex(0xFFFF5722), paid: .hex(0xFFFFD54F)
             ),

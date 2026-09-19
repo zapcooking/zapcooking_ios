@@ -1960,8 +1960,7 @@ struct MainView: View {
                         selectedTab = tab
                     }
                 } label: {
-                    Image(systemName: tab == selectedTab ? tab.selectedIcon : tab.icon)
-                        .font(.system(size: tab.barGlyphSize))
+                    tab.glyph(selected: tab == selectedTab)
                         .frame(height: 30)
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .topTrailing) {
@@ -2127,11 +2126,11 @@ enum BottomTab: String, CaseIterable {
 
     var icon: String {
         switch self {
-        case .feed: "flame"
-        case .recipes: "book"
+        case .feed: "ZapNavFlame"
+        case .recipes: "ZapNavRecipes"
         case .search: "magnifyingglass"
-        case .messages: "bubble.left.and.bubble.right"
-        case .notifications: "bell"
+        case .messages: "ZapNavChat"
+        case .notifications: "ZapNavAlert"
         case .kitchen: "fork.knife"
         case .wallet: "creditcard"
         }
@@ -2139,13 +2138,41 @@ enum BottomTab: String, CaseIterable {
 
     var selectedIcon: String {
         switch self {
-        case .feed: "flame.fill"
-        case .recipes: "book.fill"
+        case .feed: "ZapNavFlameFill"
+        case .recipes: "ZapNavRecipes"
         case .search: "magnifyingglass"
-        case .messages: "bubble.left.and.bubble.right.fill"
-        case .notifications: "bell.fill"
+        case .messages: "ZapNavChatFill"
+        case .notifications: "ZapNavAlertFill"
         case .kitchen: "fork.knife"
         case .wallet: "creditcard.fill"
+        }
+    }
+
+    /// Tabs carrying Android's custom nav vectors (flame, utensils, chat,
+    /// alert) as catalog assets. Search stays on the SF Symbol magnifier —
+    /// Android has no search nav vector and the web client uses a magnifier
+    /// too — and the drawer-only rows keep their symbols.
+    var usesCustomGlyph: Bool {
+        switch self {
+        case .feed, .recipes, .messages, .notifications: true
+        case .search, .kitchen, .wallet: false
+        }
+    }
+
+    /// The bar glyph, template-rendered so `foregroundStyle` tints it. Custom
+    /// vectors resize by frame (SF Symbols by font) — both sized to
+    /// `barGlyphSize` so siblings align on the shared 30pt row.
+    @ViewBuilder
+    func glyph(selected: Bool) -> some View {
+        let name = selected ? selectedIcon : icon
+        if usesCustomGlyph {
+            Image(name)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: barGlyphSize)
+        } else {
+            Image(systemName: name)
+                .font(.system(size: barGlyphSize))
         }
     }
 
