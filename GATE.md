@@ -9,13 +9,16 @@ optimistic-insert rule are unchanged. Own branch off main at 9652e49 (the #82
 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
 by hand.
 
-**Frozen at this commit.** App code is frozen at **eac62f1**. This GATE.md is the only
-commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise. A
+**Frozen at this commit.** App code is frozen at **9b19c50** (eac62f1 plus the Copilot
+review fix: the confirm's "Add #foodstr" is hidden at the cap and publishes only when
+the toggle actually added the tag; the pill list references `defaultTag`). The previous
+GATE.md (feca1c4) is superseded. This GATE.md is the only commit after it and is the
+HEAD commit — `gate.sh` refuses to run otherwise. A
 review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
 - Build (iPhone 17 / OS 26.2, incremental behind `xcodebuild test`): **green** at
-  eac62f1. Four builds this session (2026-09-19): one compile fix in the new test
+  9b19c50 and at eac62f1. Four builds this session (2026-09-19): one compile fix in the new test
   file (`Comment` wrappers), one logic fix in `OnlyFoodCompose.removing` (a space
   left after a newline), then green twice. Free disk 19 → 13 GB across the runs
   (the usual transient simulator dip); no local Time Machine snapshots.
@@ -23,7 +26,7 @@ review fix re-opens the freeze: push a fresh GATE.md last.
   `MainView.swift`, `wisp/ComposePresenter.swift`, `wisp/FeedTabRouting.swift`,
   `wisp/HashtagSuggestionRow.swift`, `wisp/OnlyFoodCompose.swift`, the four test
   files): **zero**.
-- Serial runs on the Air (the C-G exception form): `OnlyFoodComposeTests` 12/12,
+- Serial runs on the Air (the C-G exception form): `OnlyFoodComposeTests` 13/13,
   `FeedTabRoutingTests`, `ComposeSeedTests`, `OnlyFoodOwnPublishTests`,
   `FeedTopBarPolishTests` all green (42 tests). PNGs of the row in the three
   by-hand states (no pill, one, at the cap with the rest disabled) examined.
@@ -42,9 +45,9 @@ N tests ran on concern/tag-suggestion-pills @ <this commit>`, with the four know
 failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
 `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **855** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 849; the delta is **+6**
-(`OnlyFoodComposeTests` 12, was 6). If the parsed total is 849 the run was on a
+**Count.** This branch has **856** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 849; the delta is **+7**
+(`OnlyFoodComposeTests` 13, was 6). If the parsed total is 849 the run was on a
 stale tree. `OnlyFoodComposeLiveTests` stays opt-in and skipped.
 
 ## Gate 2 — C-H's seed tests updated (name-check the bundle)
@@ -61,7 +64,8 @@ git grep -n 'prefill' -- wisp/OnlyFoodCompose.swift wisp/FeedTabRouting.swift Ma
   `pill_afterProse_startsATagLine_thenJoinsIt`, `typedTag_selectsPill_andPillRemovesIt`
 - the cap, as the filter counts it: `cap_countsLikeTheFilter_disablesFurtherPills_reenablesOnRemove`,
   `typedOverflow_isFlagged_andMatchesTheFilter`
-- the dead end: `publishConfirm_onlyWhenNoFoodTag_fromOnlyFood`, `confirmAddFoodstr_isTheToggle`
+- the dead end: `publishConfirm_onlyWhenNoFoodTag_fromOnlyFood`, `confirmAddFoodstr_isTheToggle`,
+  `confirmAddFoodstr_atCapWithNoFoodTag_isRefused`
 - the row: `suggestionRow_renders_none_one_cap`
 - `ComposeSeedTests` (5) unchanged in substance — wallet / share seeds still merge.
 - the grep returns nothing: no `prefill` symbol remains on the OnlyFood path.
@@ -78,6 +82,9 @@ git grep -n 'prefill' -- wisp/OnlyFoodCompose.swift wisp/FeedTabRouting.swift Ma
    do not respond; a selected pill still toggles off and frees a slot. Type a
    sixth "#tag" by hand → the count turns red with the "hides notes with more
    than 5 tags" line. Delete it. Screenshot at 5/5.
+   Then clear the body and type five non-food tags ("#nostr #bitcoin #zap #sats
+   #stack"), Publish → the alert offers only Post anyway / Cancel and says to
+   remove a tag to add #foodstr. Cancel.
 4. **General composer**: Follows → FAB: no row, "What's on your mind?", no alert
    on Publish. Recipes → +: the recipe form, unchanged.
 
