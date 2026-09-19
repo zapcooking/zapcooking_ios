@@ -66,9 +66,9 @@ struct PowBadge: View {
     var body: some View {
         Text("PoW \(bits)")
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color.wispPrimary)
+            .foregroundStyle(Color.zapInteractive)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Color.wispPrimary.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+            .background(Color.zapSubtleFill, in: RoundedRectangle(cornerRadius: 4))
     }
 }

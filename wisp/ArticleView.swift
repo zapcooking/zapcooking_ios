@@ -626,7 +626,7 @@ private struct ArticleInlineText: View {
             emojiMap: emojiMap,
             font: italic ? font.withTraits(.traitItalic) : font,
             color: color,
-            linkColor: UIColor(Color.wispPrimary),
+            linkColor: UIColor(Color.zapLink),
             codeBackground: UIColor(Color.wispSurfaceVariant),
             emojiVersion: emojiCache.version
         )

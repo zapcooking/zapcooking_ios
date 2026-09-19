@@ -213,14 +213,15 @@ struct RichInlineTextView: UIViewRepresentable {
     private func buildAttributedString() -> NSAttributedString {
         let baseFont = UIFont.preferredFont(forTextStyle: .callout)
         let baseColor = UIColor.label
-        let primaryColor = UIColor(Color.wispPrimary)
-        // URLs paint with the same accent as @mentions / #hashtags. Used to
-        // be `UIColor.systemBlue` (relying on UITextView's linkTextAttributes
-        // override to repaint to `wispPrimary` at render time), but we
-        // disabled `isSelectable` to fix @mention tap reliability — that
-        // also bypassed the linkTextAttributes pass, so the systemBlue from
-        // the attributed string showed through. Set the accent directly here.
-        let linkColor = primaryColor
+        // Colour hierarchy (ZapColors.swift): @mentions and #hashtags sit at
+        // the interactive tier, URLs one step lower at the link tier, so a
+        // post's own text stays the focus and a zap amount stays the
+        // loudest orange on screen. The colours are set directly on the
+        // attributed string: `isSelectable` is off for @mention tap
+        // reliability, which also bypasses UITextView's `linkTextAttributes`
+        // pass (the old `systemBlue` path).
+        let primaryColor = UIColor(Color.zapInteractive)
+        let linkColor = UIColor(Color.zapLink)
 
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 3

@@ -291,7 +291,7 @@ struct QuotedNoteView: View {
                 Spacer(minLength: 8)
                 Image(systemName: "arrow.clockwise")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.wispPrimary)
+                    .foregroundStyle(Color.zapInteractive)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -396,7 +396,7 @@ struct QuotedNoteView: View {
                             } label: {
                                 Text(contentExpanded ? "Show less" : "Show more")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.wispPrimary)
+                                    .foregroundStyle(Color.zapInteractive)
                             }
                             .buttonStyle(.plain)
                         }

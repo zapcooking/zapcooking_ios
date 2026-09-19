@@ -161,10 +161,10 @@ struct MusicTrackCardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("MUSIC")
                         .font(AppFont.labelSmall)
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.wispPrimary.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                        .background(Color.zapSubtleFill, in: RoundedRectangle(cornerRadius: 4))
 
                     Text(title ?? "Untitled Track")
                         .font(AppFont.scaled(14, weight: .semibold))

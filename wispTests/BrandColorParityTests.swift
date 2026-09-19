@@ -105,8 +105,10 @@ struct BrandColorParityTests {
 
     // MARK: - Contrast
 
-    /// WCAG 2 contrast of the dark primary — link, hashtag and small-label
-    /// text — on each custom dark ground must clear AA for normal text (4.5).
+    /// WCAG 2 contrast of the dark primary — the 100% tier (FAB, selected
+    /// glyph, zap amounts) — on each custom dark ground must clear AA for
+    /// normal text (4.5). The derived interactive / link tiers that links,
+    /// hashtags and mentions now use are measured in `ColorHierarchyTests`.
     @Test func darkPrimary_clearsAA_onEveryCustomDarkGround() throws {
         let dark = Themes.get("custom").dark
         let primary = try Self.argb(dark.primary)
