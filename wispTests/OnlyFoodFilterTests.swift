@@ -94,9 +94,16 @@ struct OnlyFoodFilterTests {
         let t = { (n: Int) in (0..<n).map { ["t", "t\($0)"] } }
         #expect(f.decideKind1(ev("p24", tags: p(24))) == .accept)
         #expect(f.decideKind1(ev("p25", tags: p(25))) == .structuralSpam)
-        #expect(f.decideKind1(ev("t5", tags: t(5))) == .accept)
-        #expect(f.decideKind1(ev("t6", tags: t(6))) == .structuralSpam)
-        #expect(f.decideKind1(ev("c6", content: "#a #b #c #d #e #f")) == .structuralSpam)
+        // #84: the cap is 20 — the 6–20 band is genuine food posts, 100+ is aggregators.
+        let cap = OnlyFoodFilter.maxHashtags
+        #expect(cap == 20)
+        let c = { (n: Int) in (0..<n).map { "#c\($0)" }.joined(separator: " ") }
+        #expect(f.decideKind1(ev("t7", tags: t(7))) == .accept, "the 6–20 band shows")
+        #expect(f.decideKind1(ev("t20", tags: t(cap))) == .accept)
+        #expect(f.decideKind1(ev("t21", tags: t(cap + 1))) == .structuralSpam)
+        #expect(f.decideKind1(ev("c20", content: c(cap))) == .accept)
+        #expect(f.decideKind1(ev("c21", content: c(cap + 1))) == .structuralSpam)
+        #expect(f.decideKind1(ev("t100", tags: t(100))) == .structuralSpam, "aggregators stay blocked")
     }
 
     @Test func wot_isNoOp_whenNetworkNotReady() {

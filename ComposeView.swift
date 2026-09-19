@@ -302,9 +302,7 @@ struct ComposeView: View {
             Button("Post anyway") { viewModel.publish() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(viewModel.suggestedTagsAtCap
-                 ? "This note won't appear in OnlyFood without a food tag, and it already has \(OnlyFoodCompose.maxTags) tags. Remove one to add #\(OnlyFoodCompose.defaultTag)."
-                 : "This note won't appear in OnlyFood without a food tag.")
+            Text(OnlyFoodCompose.noFoodTagMessage(count: viewModel.suggestedTagCount))
         }
         .alert(
             "Discard this post?",

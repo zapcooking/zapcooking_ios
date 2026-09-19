@@ -1323,8 +1323,10 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   / wotFiltered / noFoodTag / notKind1 all 0. All 69 structuralSpam were
   hashtagCap (`max(content #tags, t-tags) > 5`); hellthread (p ≥ 25) was 0.
   Of those 69, ~61 were 100+ t-tag aggregator spam; the 6–20 band includes
-  real food posts (e.g. a `#food #foodstr` photo with 7 tags). Evidence only
-  — cap not raised. Hashtag REQ is **single-relay** (`search.nostrarchives.com`)
+  real food posts (e.g. a `#food #foodstr` photo with 7 tags). That sample
+  is the evidence behind **#84**: `maxHashtags` is now **20** on all three
+  clients in one release window (web `MAX_HASHTAGS`, Android
+  `OnlyFoodFilter.kt`); the composer pills read the constant. Hashtag REQ is **single-relay** (`search.nostrarchives.com`)
   matching Android's hashtag path; Android's extra `nos.lol` / primal /
   nostr.net set is the skipped keyword firehose. Empty (EOSE, 0 accepted) vs
   error (no EOSE) are distinct UI states; a timeout is no longer a stuck

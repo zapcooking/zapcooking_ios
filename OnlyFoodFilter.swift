@@ -41,7 +41,11 @@ nonisolated struct OnlyFoodFilter: Sendable {
     static let futureSkewSeconds = 30
     /// OnlyFood structural spam caps — mirror the web client's FoodstrFeed thresholds.
     static let hellthreadPLimit = 25
-    static let maxHashtags = 5
+    /// Raised 5 → 20 (#84, all three clients in one window). The 3.3 live
+    /// sample rejected 69 of 100 raw events on the old cap: ~61 were 100+
+    /// tag aggregators, the 6–20 band was people tagging generously. The
+    /// natural break is near 20; nothing genuine sat above it.
+    static let maxHashtags = 20
 
     /// App-level OnlyFood blocklist (curation). Applies to ALL users' OnlyFood
     /// feed and is SEPARATE from each user's personal mute list.

@@ -27,21 +27,38 @@ nonisolated enum OnlyFoodCompose {
     /// community's canonical food tag. The confirm's one-tap fix.
     static let defaultTag = "foodstr"
 
-    /// The pills, in order. Every entry is in `FoodHashtags.allSet` (tested),
-    /// so a single tapped pill is enough to reach OnlyFood. Chosen from a
+    /// The pills, in order — the same set in the same order on web
+    /// (`hashtagPills.ts`), iOS and Android (#84): with a scrolling row the
+    /// order is the design, and the same person should not see a different
+    /// menu per device. Every entry is in `FoodHashtags.allSet` (tested), so
+    /// a single tapped pill is enough to reach OnlyFood. The set came from a
     /// 60-day kind-1 count per tag on the OnlyFood relays (2026-09-19,
     /// nos.lol / relay.primal.net, limit 500): foodstr 500/22, food 331/500,
     /// coffee 157/188, cooking 38/0, breakfast 35/2, dinner 20/64, cookstr
-    /// 7/1, lunch 7/0. `cookstr` and `lunch` are thin but are the
-    /// community's own tags. `#gratitude` was proposed and is deliberately
-    /// absent: it is not a food tag, so a note carrying only it would still
-    /// dead-end.
+    /// 7/1, lunch 7/0. `foodstr` leads as the canonical community tag, then
+    /// the specific tags people reach for; `food` goes last despite its
+    /// count because next to `foodstr` it reads as the same choice twice.
+    /// `cookstr` and `lunch` are thin but are the community's own tags.
+    /// `#gratitude` was proposed and is deliberately absent: it is not a
+    /// food tag, so a note carrying only it would still dead-end.
     static let suggestedTags: [String] = [
-        defaultTag, "food", "cooking", "cookstr", "breakfast", "lunch", "dinner", "coffee",
+        defaultTag, "coffee", "cooking", "breakfast", "dinner", "lunch", "cookstr", "food",
     ]
 
     static let hint = "Tap a tag so this shows up in OnlyFood."
     static let placeholder = "What are you cooking?"
+
+    /// The "No food tag yet" confirm's message. Under the cap the one-tap
+    /// fix is offered; at or over it the message says how many tags the
+    /// note really has (`count`, which can exceed the cap when typed) and
+    /// how many to remove so `#foodstr` fits.
+    static func noFoodTagMessage(count: Int) -> String {
+        let base = "This note won't appear in OnlyFood without a food tag"
+        guard count >= maxTags else { return base + "." }
+        let toRemove = count - maxTags + 1
+        let remove = toRemove == 1 ? "Remove one" : "Remove \(toRemove)"
+        return base + ", and it already has \(count) tags. \(remove) to add #\(defaultTag)."
+    }
 
     /// The structural cap, from the filter that applies it.
     static var maxTags: Int { OnlyFoodFilter.maxHashtags }
@@ -88,20 +105,27 @@ nonisolated enum OnlyFoodCompose {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return content }
         let range = NSRange(content.startIndex..<content.endIndex, in: content)
         var out = regex.stringByReplacingMatches(in: content, range: range, withTemplate: "")
-        // A removed token leaves a double space, a space against a newline,
-        // or a space at the very start.
-        out = out.replacingOccurrences(of: "  ", with: " ")
+        // A removed token leaves a run of spaces, a space against a newline,
+        // or a space at the very start. Collapse runs until stable: one pass
+        // turns three spaces into two.
+        while out.contains("  ") { out = out.replacingOccurrences(of: "  ", with: " ") }
         out = out.replacingOccurrences(of: " \n", with: "\n")
         out = out.replacingOccurrences(of: "\n ", with: "\n")
         while out.first == " " { out.removeFirst() }
         return trimmingTrailingWhitespace(out)
     }
 
+    /// A line made only of hashtag tokens as the composer derives them
+    /// (`#` plus 1–64 letters / digits / underscores). `#foodstr,` is not
+    /// one, so a pill after it starts a new paragraph instead of joining
+    /// the punctuation.
     private static func isHashtagLine(_ line: String) -> Bool {
         let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
         guard !tokens.isEmpty else { return false }
-        return tokens.allSatisfy { $0.hasPrefix("#") && $0.count > 1 }
+        return tokens.allSatisfy { $0.wholeMatch(of: hashtagTokenRegex) != nil }
     }
+
+    private static let hashtagTokenRegex = /#[\p{L}\p{N}_]{1,64}/
 
     private static func trimmingTrailingWhitespace(_ s: String) -> String {
         var view = Substring(s)
