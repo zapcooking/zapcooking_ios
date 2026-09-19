@@ -10,7 +10,7 @@ Seth's MacBook Air (Xcode 26.3, iPhone 17 simulator on iOS 26.2, shared
 DerivedData, `-skipPackagePluginValidation`, serial) from the worktree
 `~/Projects/zc-ios-note-review`.
 
-**Frozen at this commit.** App code is frozen at **6058b30** (0d1198d + the merge of main at c7b01e6 + the Copilot review fixes). This GATE.md is the
+**Frozen at this commit.** App code is frozen at **c0b1a2e** (0d1198d + the merge of main at c7b01e6 + the Copilot review fixes 6058b30 + the live-gate dish fixture). This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run
 otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
@@ -123,7 +123,7 @@ Expected: the first prints only comment lines that name what is absent
 header, the service test's `creditsRemaining`-is-ignored case); no code
 symbol, no phase, no copy. The second prints only `FeatureFlags`' pre-existing
 `noteReviewCreditPurchaseEnabled` context (unchanged, still hard `false`,
-pinned by `ZapGateTests.sellNothingFlagsStayOff`). Verified at 6058b30.
+pinned by `ZapGateTests.sellNothingFlagsStayOff`). Verified at c0b1a2e.
 
 ## Gate 4 — LIVE, member key: both modes draft
 ```sh
@@ -137,29 +137,31 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -only-testing:wispTests/NoteReviewLiveTests 2>&1 | grep -E 'NoteReview live:|✘|✔'
 rm wispTests/.note_review_live_enable
 ```
-**BLOCKED on the Air, 2026-09-19:** the Cook+ test key reads
-`{"active":false,"tier":"member"}` — the membership granted on 2026-09-01 has
-lapsed. `member_commentAndRecipeModesBothDraft` got `NOT_MEMBER` (13.0 s to
-the 403). Re-grant the tier on pantry, then rerun; the test prints
-`comment latency=…ms` / `recipe latency=…ms` for the report.
+**Run 1 (2026-09-19, first key):** `NOT_MEMBER` — that key never had a
+membership (`active: false`). **Run 2 (replacement key, `active: true` to
+2027-09-01):** comment drafted in **10.8 s** (172 chars); recipe mode came back
+`NOT_FOOD` in 3.0 s for the produce-collage fixture, which the client mapped to
+the dead end correctly. Fixture switched to a single dish (pizza margherita);
+rerun result in the PR conversation.
 
 ## Gate 5 — LIVE §7.13: publish a drafted reply, verify, delete, key held
 Same command as Gate 4 (`publishDraftedReply_verify_delete_keyHeldUntilGone`).
 An EPHEMERAL key publishes the parent note and the reply to
 `RelayDefaults.defaults`; the member key only signs the NIP-98 draft
 request; both events are re-queried, then deleted with the key held until
-the ids are gone. **Partial on 2026-09-19:** parent published (accepted by
-primal + nos.lol), the draft hit the lapsed-membership gate (685 ms), and
-cleanup ran to completion — delete accepted on nos.lol, primal and
-nostr.net; re-query of the parent id empty. Nothing leaked. The reply half
-runs once Gate 4 is unblocked.
+the ids are gone. **PASSED on the Air, 2026-09-19 (run 2):** parent
+`a7b57fe9…525b` accepted by primal, nos.lol and nostr.net; member draft landed
+in **5.1 s**; reply `5ebe3482…9d4e` posted through the real publisher,
+re-queried on the defaults (`verified=true`); both deleted with the key held —
+delete accepted on all three relays for each id, re-queries empty. Nothing
+leaked. (Run 1 with the non-member key exercised the same cleanup path.)
 
 ## Gate 6 — BY HAND: non-member sees message-only copy
 Seth's device pass. Backed live: `nonMember_isTypedNotMember_andLandsTheMessageOnlyGate`
-**PASSED** on the Air (ephemeral key → typed `NOT_MEMBER` in 10.1 s → view
-model phase `membersOnly`). The sheet renders `Cheffy.membersOnlyMessage`
+**PASSED** on the Air twice (ephemeral key → typed `NOT_MEMBER` in 10.1 s /
+4.5 s → view model phase `membersOnly`). The sheet renders `Cheffy.membersOnlyMessage`
 and Close, identifier `note-review-gated`; no price, invoice, or link-out.
 
 ## Gate 7 — pbxproj
-`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty at 6058b30.
+`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty at c0b1a2e.
 All new files are under `wisp/` / `wispTests/`.
