@@ -36,13 +36,14 @@ final class ComposePresenter {
         request = .quote(event)
     }
 
-    /// A fresh top-level note seeded with `initialText` — the OnlyFood tab's
-    /// FAB (Concern C-H, `OnlyFoodCompose.prefill`). Routed here rather than
-    /// through a tab-local `.sheet` so the composer is hosted from the same
-    /// stable root as the reply / quote sheets. The home tab's FAB keeps its
-    /// own `showCompose` bool for now; folding it in is a separate cleanup.
-    func openNewNote(initialText: String) {
-        request = .newNote(initialText: initialText)
+    /// A fresh top-level note — the OnlyFood tab's FAB, which passes the
+    /// suggestion pills (`OnlyFoodCompose.suggestedTags`) and no seed text:
+    /// nothing is added to the note unless the user taps. Routed here rather
+    /// than through a tab-local `.sheet` so the composer is hosted from the
+    /// same stable root as the reply / quote sheets. The home tab's FAB keeps
+    /// its own `showCompose` bool for now; folding it in is a separate cleanup.
+    func openNewNote(initialText: String = "", suggestedHashtags: [String] = []) {
+        request = .newNote(initialText: initialText, suggestedHashtags: suggestedHashtags)
     }
 
     func openEmojiReaction(onPick: @escaping (PickedEmoji) -> Void) {
@@ -71,8 +72,9 @@ enum ComposeRequest: Identifiable {
     case quote(NostrEvent)
     case emoji(id: UUID, onPick: (PickedEmoji) -> Void)
     case zap(ZapSheetRequest)
-    /// New top-level note with the editor pre-seeded (OnlyFood FAB).
-    case newNote(initialText: String)
+    /// New top-level note, optionally seeded and/or with suggestion pills
+    /// (OnlyFood FAB: no seed, the food pills).
+    case newNote(initialText: String, suggestedHashtags: [String])
 
     var id: String {
         switch self {

@@ -426,8 +426,8 @@ struct MainView: View {
                 ComposeView(keypair: keypair, mode: .reply(parent: parent, root: root))
             case .quote(let event):
                 ComposeView(keypair: keypair, mode: .quote(event))
-            case .newNote(let text):
-                ComposeView(keypair: keypair, initialText: text)
+            case .newNote(let text, let suggestions):
+                ComposeView(keypair: keypair, initialText: text, suggestedHashtags: suggestions)
             case .emoji(_, let onPick):
                 EmojiLibrarySheet(mode: .pickForReaction { picked in
                     onPick(picked)
@@ -714,14 +714,15 @@ struct MainView: View {
         NavigationStack(path: $feedPath) {
             ZStack(alignment: .bottomTrailing) {
                 feedContent
-                // Compose FAB (§8): on OnlyFood, the visible, removable
-                // `#foodstr` seed through the app-level `ComposePresenter`
-                // (Concern C-H); every other kind opens the plain composer.
-                // Same drawer / watch-only gating as before.
+                // Compose FAB (§8): on OnlyFood, the composer with the
+                // tappable food-tag pills through the app-level
+                // `ComposePresenter` (no seed text); every other kind opens
+                // the plain composer. Same drawer / watch-only gating as before.
                 if !drawerOpen && !isWatchOnly {
                     ComposeFAB {
-                        if let prefill = FeedTabRouting.composePrefill(for: viewModel.currentKind) {
-                            composePresenter.openNewNote(initialText: prefill)
+                        let suggestions = FeedTabRouting.composeSuggestions(for: viewModel.currentKind)
+                        if !suggestions.isEmpty {
+                            composePresenter.openNewNote(suggestedHashtags: suggestions)
                         } else {
                             showCompose = true
                         }

@@ -3,9 +3,9 @@ import Testing
 @testable import wisp
 
 /// `ComposeViewModel` seed text (`initialText`) vs. the restored local
-/// autosave. Pre-existing bugs surfaced by Concern C-H, which makes the
-/// seeded composer a routine path instead of the wallet-invoice / share-
-/// extension edge it was: (1) a seed overwrote the restored unsent draft;
+/// autosave (wallet invoice, share-extension text; C-H's OnlyFood seed is
+/// gone — that composer now offers pills and no seed). Pre-existing bugs
+/// surfaced by C-H: (1) a seed overwrote the restored unsent draft;
 /// (2) hashtags were only derived on the next keystroke, so a restored or
 /// seeded body published untouched lost its `t` tags. Hermetic.
 @MainActor
