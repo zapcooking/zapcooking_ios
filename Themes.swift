@@ -4,24 +4,25 @@ nonisolated enum Themes {
     static let all: [ThemePreset] = [
         ThemePreset(
             id: "custom", displayName: "Custom",
+            // Zap Cooking brand primary, the same pair web `src/app.css`
+            // (`--color-primary`) and Android `Themes.kt` ship: #FF5722 dark,
+            // #EC4700 light. `resolveTheme` uses the stored accent
+            // (`AppSettings.defaultAccentARGB` = #FF5722) on the dark side and
+            // this light primary when that accent is the default; zap and
+            // bookmark track primary so every zap surface reads as one hue.
+            // Android's BrandColors.kt amber→orange pair is its FAB gradient,
+            // not the theme primary. Secondary mirrors Android's custom preset.
             dark: ThemePalette(
-                primary: .hex(0xFFF97316), secondary: .hex(0xFFF59E0B),
+                primary: .hex(0xFFFF5722), secondary: .hex(0xFFFF7A3D),
                 background: .hex(0xFF131215), surface: .hex(0xFF1F1E21),
                 surfaceVariant: .hex(0xFF2B2A2E),
                 onBackground: .hex(0xFFE0E0E0), onSurface: .hex(0xFFE0E0E0),
                 onSurfaceVariant: .hex(0xFF9998A0), outline: .hex(0xFF343338),
-                zap: .hex(0xFFF97316), repost: .hex(0xFF4CAF50),
-                bookmark: .hex(0xFFF97316), paid: .hex(0xFFFFD54F)
+                zap: .hex(0xFFFF5722), repost: .hex(0xFF4CAF50),
+                bookmark: .hex(0xFFFF5722), paid: .hex(0xFFFFD54F)
             ),
             light: ThemePalette(
-                // Zap Cooking brand: the Android accent pair is amber-500
-                // (#F59E0B) → orange-500 (#F97316) (BrandColors.kt), fixed
-                // across light/dark. On iOS the light surface is near-white,
-                // so the deeper #EC4700 (build spec §0.5) is used for
-                // primary/zap/bookmark to keep buttons + tinted icons
-                // unambiguously interactive; zap + bookmark track primary so
-                // every "this is a zap surface" hint reads as one hue.
-                primary: .hex(0xFFEC4700), secondary: .hex(0xFFF97316),
+                primary: .hex(0xFFEC4700), secondary: .hex(0xFFFF7A3D),
                 background: .hex(0xFFD8D8D8), surface: .hex(0xFFE8E8E8),
                 surfaceVariant: .hex(0xFFCDCDCD),
                 onBackground: .hex(0xFF1C1B1F), onSurface: .hex(0xFF1C1B1F),

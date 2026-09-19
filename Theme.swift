@@ -50,10 +50,10 @@ nonisolated struct ResolvedTheme: Equatable {
         presetId: "custom",
         isDark: true,
         palette: Themes.get("custom").dark,
-        primary: Color.hex(0xFFFF9800),
-        zap: Color.hex(0xFFFF9800),
-        bookmark: Color.hex(0xFFFF9800),
-        zapAnimation: Color.hex(0xFFFF9800)
+        primary: Color(argb: AppSettings.defaultAccentARGB),
+        zap: Color(argb: AppSettings.defaultAccentARGB),
+        bookmark: Color(argb: AppSettings.defaultAccentARGB),
+        zapAnimation: Color(argb: AppSettings.defaultAccentARGB)
     )
 }
 
@@ -87,10 +87,10 @@ extension AppSettings {
             let raw = Color(argb: accentColorARGB)
             if useDark {
                 primary = raw
-            } else if accentColorARGB == 0xFFFF9800 {
-                // Default accent — use the curated light-primary value
-                // (deeper than a generic 18% darken would produce). The
-                // matching constant lives on `AppSettings.defaultAccentARGB`.
+            } else if accentColorARGB == Self.defaultAccentARGB {
+                // Default accent — the brand pair: #FF5722 dark (the raw
+                // accent above), #EC4700 light (the palette primary; deeper
+                // than a generic 18% darken would produce).
                 primary = palette.primary
             } else {
                 // User-picked accent — darken 18% in HSL space so the
