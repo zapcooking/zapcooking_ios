@@ -196,6 +196,25 @@ struct OnlyFoodComposeTests {
         #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
     }
 
+    /// Copilot on #85: one pass of `"  " → " "` leaves a double space behind
+    /// a triple; the tidy must run until stable.
+    @Test func removing_collapsesRunsOfSpaces() {
+        #expect(OnlyFoodCompose.removing(tag: "foodstr", from: "a   #foodstr   b") == "a b")
+        #expect(OnlyFoodCompose.removing(tag: "foodstr", from: "#foodstr    #coffee") == "#coffee")
+        #expect(OnlyFoodCompose.removing(tag: "foodstr", from: "x\n\n#foodstr   #dinner") == "x\n\n#dinner")
+    }
+
+    /// Copilot on #85: `#foodstr,` is not a hashtag token, so a line of it
+    /// is prose — the next pill starts a paragraph rather than joining the
+    /// punctuation. A real tag line still gathers.
+    @Test func appending_afterPunctuatedTag_startsNewParagraph() {
+        #expect(OnlyFoodCompose.appending(tag: "coffee", to: "#foodstr,") == "#foodstr,\n\n#coffee")
+        #expect(OnlyFoodCompose.appending(tag: "coffee", to: "#foodstr!") == "#foodstr!\n\n#coffee")
+        #expect(OnlyFoodCompose.appending(tag: "coffee", to: "#") == "#\n\n#coffee")
+        #expect(OnlyFoodCompose.appending(tag: "coffee", to: "#foodstr #dinner") == "#foodstr #dinner #coffee")
+        #expect(OnlyFoodCompose.appending(tag: "coffee", to: "brunch\n#foodstr") == "brunch\n#foodstr #coffee")
+    }
+
     // MARK: - The dead end
 
     @Test func publishConfirm_onlyWhenNoFoodTag_fromOnlyFood() {
@@ -220,6 +239,23 @@ struct OnlyFoodComposeTests {
         #expect(vm.content == "made a thing\n\n#foodstr")
         #expect(!vm.needsFoodTagConfirm)
         #expect(FoodHashtags.hasFoodTag(kind1(content: vm.content, tTags: vm.hashtags)))
+    }
+
+    /// Copilot on #85: `atCap` is also true over the cap, so the message
+    /// must say the real count, and how many to remove so #foodstr fits.
+    @Test func noFoodTagMessage_saysTheRealCount() {
+        let cap = OnlyFoodCompose.maxTags
+        #expect(OnlyFoodCompose.noFoodTagMessage(count: 0) == "This note won't appear in OnlyFood without a food tag.")
+        #expect(OnlyFoodCompose.noFoodTagMessage(count: cap - 1) == "This note won't appear in OnlyFood without a food tag.")
+        #expect(OnlyFoodCompose.noFoodTagMessage(count: cap)
+            == "This note won't appear in OnlyFood without a food tag, and it already has \(cap) tags. Remove one to add #foodstr.")
+        #expect(OnlyFoodCompose.noFoodTagMessage(count: cap + 2)
+            == "This note won't appear in OnlyFood without a food tag, and it already has \(cap + 2) tags. Remove 3 to add #foodstr.")
+        // Wired to the real count, not the cap.
+        let vm = onlyFoodComposer()
+        vm.updateContent(nonFoodTags(cap + 2))
+        #expect(vm.suggestedTagsAtCap && vm.suggestedTagsOverCap)
+        #expect(OnlyFoodCompose.noFoodTagMessage(count: vm.suggestedTagCount).contains("has \(cap + 2) tags"))
     }
 
     /// At the cap with no food tag (twenty non-food tags typed) the one-tap

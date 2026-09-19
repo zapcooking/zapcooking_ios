@@ -48,6 +48,18 @@ nonisolated enum OnlyFoodCompose {
     static let hint = "Tap a tag so this shows up in OnlyFood."
     static let placeholder = "What are you cooking?"
 
+    /// The "No food tag yet" confirm's message. Under the cap the one-tap
+    /// fix is offered; at or over it the message says how many tags the
+    /// note really has (`count`, which can exceed the cap when typed) and
+    /// how many to remove so `#foodstr` fits.
+    static func noFoodTagMessage(count: Int) -> String {
+        let base = "This note won't appear in OnlyFood without a food tag"
+        guard count >= maxTags else { return base + "." }
+        let toRemove = count - maxTags + 1
+        let remove = toRemove == 1 ? "Remove one" : "Remove \(toRemove)"
+        return base + ", and it already has \(count) tags. \(remove) to add #\(defaultTag)."
+    }
+
     /// The structural cap, from the filter that applies it.
     static var maxTags: Int { OnlyFoodFilter.maxHashtags }
 
@@ -93,20 +105,27 @@ nonisolated enum OnlyFoodCompose {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return content }
         let range = NSRange(content.startIndex..<content.endIndex, in: content)
         var out = regex.stringByReplacingMatches(in: content, range: range, withTemplate: "")
-        // A removed token leaves a double space, a space against a newline,
-        // or a space at the very start.
-        out = out.replacingOccurrences(of: "  ", with: " ")
+        // A removed token leaves a run of spaces, a space against a newline,
+        // or a space at the very start. Collapse runs until stable: one pass
+        // turns three spaces into two.
+        while out.contains("  ") { out = out.replacingOccurrences(of: "  ", with: " ") }
         out = out.replacingOccurrences(of: " \n", with: "\n")
         out = out.replacingOccurrences(of: "\n ", with: "\n")
         while out.first == " " { out.removeFirst() }
         return trimmingTrailingWhitespace(out)
     }
 
+    /// A line made only of hashtag tokens as the composer derives them
+    /// (`#` plus 1–64 letters / digits / underscores). `#foodstr,` is not
+    /// one, so a pill after it starts a new paragraph instead of joining
+    /// the punctuation.
     private static func isHashtagLine(_ line: String) -> Bool {
         let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
         guard !tokens.isEmpty else { return false }
-        return tokens.allSatisfy { $0.hasPrefix("#") && $0.count > 1 }
+        return tokens.allSatisfy { $0.wholeMatch(of: hashtagTokenRegex) != nil }
     }
+
+    private static let hashtagTokenRegex = /#[\p{L}\p{N}_]{1,64}/
 
     private static func trimmingTrailingWhitespace(_ s: String) -> String {
         var view = Substring(s)
