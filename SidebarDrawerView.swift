@@ -21,6 +21,8 @@ struct SidebarDrawerView: View {
     var onOpenCustomEmojis: () -> Void = {}
     var onOpenLists: () -> Void = {}
     var onOpenPolls: () -> Void = {}
+    /// Memories ("On this day") sheet — the user's own notes 1/2/3 years back.
+    var onOpenMemories: () -> Void = {}
     var onOpenHashtagSets: () -> Void = {}
     var onOpenSocialGraph: () -> Void = {}
     var onOpenSafety: () -> Void = {}
@@ -361,6 +363,10 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "chart.bar", label: "My Polls") {
                 onOpenPolls()
             }
+            DrawerRow(icon: "calendar", label: "Memories") {
+                onOpenMemories()
+            }
+            .accessibilityIdentifier("drawer-memories")
             DrawerRow(icon: "number.square", label: "Hashtag Sets") {
                 onOpenHashtagSets()
             }
