@@ -93,7 +93,14 @@ final class AppSettings {
     /// the granularity for the slider/segmented control in InterfaceSettings.
     static let postUndoTimerOptions: [Int] = [5, 10, 15, 20, 30]
 
-    private static let defaultAccentARGB: Int = 0xFFFF9800
+    /// Brand primary, dark side: web `src/app.css` `html.dark --color-primary`
+    /// and Android `Themes.kt` default `primary` (#FF5722). Light mode with
+    /// this accent resolves to the light brand primary (#EC4700) in
+    /// `resolveTheme`. Was Wisp's #FF9800 until the brand-color-parity concern.
+    nonisolated static let defaultAccentARGB: Int = 0xFFFF5722
+    /// Wisp's default accent. A persisted value equal to it was the old
+    /// default, never a brand choice, so it migrates to `defaultAccentARGB`.
+    nonisolated static let legacyWispAccentARGB: Int = 0xFFFF9800
 
     var largeText: Bool {
         didSet { UserDefaults.standard.set(largeText, forKey: Keys.largeText) }
@@ -215,7 +222,7 @@ final class AppSettings {
         self.themeName = defaults.string(forKey: Keys.themeName) ?? "custom"
         let csRaw = defaults.string(forKey: Keys.colorScheme) ?? ColorSchemePreference.dark.rawValue
         self.colorScheme = ColorSchemePreference(rawValue: csRaw) ?? .dark
-        self.accentColorARGB = defaults.object(forKey: Keys.accentColorARGB) as? Int ?? Self.defaultAccentARGB
+        self.accentColorARGB = Self.loadAccent(defaults.object(forKey: Keys.accentColorARGB) as? Int)
         self.autoLoadMedia = defaults.object(forKey: Keys.autoLoadMedia) as? Bool ?? true
         self.videoAutoplay = defaults.object(forKey: Keys.videoAutoplay) as? Bool ?? true
         self.animateAvatars = defaults.object(forKey: Keys.animateAvatars) as? Bool ?? true
@@ -282,6 +289,13 @@ final class AppSettings {
 
     var accentColor: Color {
         Color(argb: accentColorARGB)
+    }
+
+    /// The accent to start with given what UserDefaults holds: nothing or the
+    /// legacy Wisp default → the brand default; anything else is the user's pick.
+    nonisolated static func loadAccent(_ stored: Int?) -> Int {
+        guard let stored, stored != legacyWispAccentARGB else { return defaultAccentARGB }
+        return stored
     }
 }
 
