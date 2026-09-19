@@ -10,7 +10,7 @@ Seth's MacBook Air (Xcode 26.3, iPhone 17 simulator on iOS 26.2, shared
 DerivedData, `-skipPackagePluginValidation`, serial) from the worktree
 `~/Projects/zc-ios-note-review`.
 
-**Frozen at this commit.** App code is frozen at **0d1198d**. This GATE.md is the
+**Frozen at this commit.** App code is frozen at **6058b30** (0d1198d + the merge of main at c7b01e6 + the Copilot review fixes). This GATE.md is the
 only commit after it and is the HEAD commit — `gate.sh` refuses to run
 otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
@@ -29,16 +29,21 @@ otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
   validates with. `wisp/NoteReviewTrigger.swift` — eligibility (flag ∧ image)
   and the measured 356pt inline threshold. `FeatureFlags.noteReviewEnabled`.
 - `wisp/NoteReviewReplyPublisher.swift` — NIP-10 reply + client tag,
-  `ThreadViewModel`'s relay rule; non-empty accept → posted, empty →
-  postTimeout HOLDING the signed event (retry re-broadcasts the same id),
-  failed only for an empty relay set. `wisp/NoteReviewPreferences.swift` —
+  `ThreadViewModel`'s relay rule behind the `NoteReviewReplyTransport`
+  protocol; non-empty accept → posted, empty → postTimeout HOLDING the signed
+  event (retry re-broadcasts the same id), failed only for an empty relay set.
+  Pinned hermetically by `NoteReviewReplyPublisherTests`. `wisp/NoteReviewPreferences.swift` —
   per-account disclosure booleans, nothing else.
 - `wisp/NoteReviewViewModel.swift`, `wisp/NoteReviewSheet.swift` — the session
   and the sheet; a verified non-member sees `Cheffy.membersOnlyMessage` and a
   Close button only.
 - `PostCardView.swift` — overflow-menu item "Ask Cheffy about this photo"
-  whenever the (inner) note carries an image and the account can sign, and
-  the adaptive inline slot before the expand chevron above the threshold.
+  whenever the (inner) note is a public kind-1 carrying an https image and a
+  loaded key can sign, and the adaptive inline slot before the expand chevron
+  above the threshold. Both route through `ComposePresenter.openNoteReview`
+  so the keyboard-raising sheet is hosted from MainView's stable root
+  (`MainView.swift`, `wisp/ComposePresenter.swift`); the sheet refuses
+  interactive dismissal while posting.
 - Issues filed, NOT fixed here: zapcooking_ios #88 (main's #85 left three
   OnlyFood structural-cap tests expecting the old cap) and zap_cooking_android
   #259 (converge on the web copy).
@@ -62,21 +67,33 @@ GATE_KNOWN_FAILURES="FeedRenderableTests/mentionTaggedNoteFollowsReplyGate OnlyF
 **Result on the Air, 2026-09-19:** build green (three attempts: a Swift 6.2
 frontend crash on a stored-closure default value in the publisher, fixed by an
 explicit `init`; then three isolation warnings in new files, fixed).
-Warnings in touched files at 0d1198d: **zero**. Full serial run:
-**935 passed / 5 failed / 20 skipped / 960 total.** Failures: #4
-`FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` (known), the three
-OnlyFood structural-cap tests above (main's, #88 — reproduced on a second
-serial run), and one `RecipeAuthoredFeedTests/authoredFeed_duplicateCoordinate_newerCreatedAtWins`
-"crashed with signal kill" that **passed on rerun** (simulator one-off, not
-reproducible). The box's #57 SafetyTests trio passes on the Air, as issue #57
+Warnings in touched files at 6058b30: **zero**.
+
+First full serial run (0d1198d): **935 passed / 5 failed / 20 skipped / 960
+total** — #4 (known), the three OnlyFood structural-cap tests above (main's,
+#88, reproduced on a second serial run), and one `RecipeAuthoredFeedTests`
+"signal kill" that passed on rerun.
+
+After the merge of main (Memories #87) and the review fixes (6058b30): **980
+passed / 5 failed / 21 skipped / 1006 total** — the same four known, plus
+`RecipeComposeViewModelTests/addImageBytes_failedUpload_blocksUntilRemoved`
+"timed out waiting for condition" on a 703 s run while the Air was under
+disk pressure (see #91); the branch does not touch recipe compose. A serial
+rerun of that suite was in flight when this file was frozen; its result goes
+in the PR conversation.
+
+**Environmental finding during these runs:** the simulator's test host died at
+launch in `dyld_sim` because the disk had fallen to 6.5 GB — 35 GB of leaked
+`CFNetworkDownload_*.tmp` JPEGs in the wisp app container's `tmp` (issue #91).
+Cleared by hand; the leak resumes with every hosted-window run until fixed. The box's #57 SafetyTests trio passes on the Air, as issue #57
 records. The four failures listed in `GATE_KNOWN_FAILURES` above are the
 Air's post-#85 baseline; a fifth is this concern's.
 
-**Count.** 960 tests ran (main's last full serial run: 860 `@Test` declarations
-at 563e09d); this branch adds **100** (`ImageUrlsTests` 18, `NoteReviewTests`
-23, `NoteReviewTriggerTests` 8, `NoteReviewServiceTests` 18,
-`NoteReviewViewModelTests` 29, `NoteReviewLiveTests` 3 opt-in, plus the
-seven-control width case in `BottomBarAndActionRowTests`).
+**Count.** 1006 tests ran; this branch adds **107** over main (`ImageUrlsTests`
+18, `NoteReviewTests` 23, `NoteReviewTriggerTests` 9, `NoteReviewServiceTests`
+18, `NoteReviewViewModelTests` 29, `NoteReviewReplyPublisherTests` 6,
+`NoteReviewLiveTests` 3 opt-in, plus the seven-control width case in
+`BottomBarAndActionRowTests`).
 
 ## Gate 2 — unit coverage
 Inside Gate 1: the phase machine (every result → phase, including
@@ -106,7 +123,7 @@ Expected: the first prints only comment lines that name what is absent
 header, the service test's `creditsRemaining`-is-ignored case); no code
 symbol, no phase, no copy. The second prints only `FeatureFlags`' pre-existing
 `noteReviewCreditPurchaseEnabled` context (unchanged, still hard `false`,
-pinned by `ZapGateTests.sellNothingFlagsStayOff`). Verified at 0d1198d.
+pinned by `ZapGateTests.sellNothingFlagsStayOff`). Verified at 6058b30.
 
 ## Gate 4 — LIVE, member key: both modes draft
 ```sh
@@ -144,5 +161,5 @@ model phase `membersOnly`). The sheet renders `Cheffy.membersOnlyMessage`
 and Close, identifier `note-review-gated`; no price, invoice, or link-out.
 
 ## Gate 7 — pbxproj
-`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty at 0d1198d.
+`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty at 6058b30.
 All new files are under `wisp/` / `wispTests/`.
