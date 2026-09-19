@@ -7,6 +7,8 @@ import Observation
 final class AppSettings {
     static let shared = AppSettings()
 
+    /// Appearance, and the only theme control left in Interface settings
+    /// now that the accent picker and the selectable presets are gone.
     enum ColorSchemePreference: String, CaseIterable {
         case system, light, dark
     }
@@ -18,60 +20,25 @@ final class AppSettings {
         case stack
     }
 
-    enum ZapIconStyle: String, CaseIterable {
-        case bolt
-        case bitcoin
-
-        /// The default for a user who never picked one. Was `.bitcoin`;
-        /// the bolt is the default since TestFlight 2.1 (2)'s follow-ups.
-        static let `default`: ZapIconStyle = .bolt
-
-        /// What a stored raw value resolves to. `nil` is "never set" — the
-        /// `didSet` on `zapIconStyle` is the only writer of the key, and it
-        /// does not run for the assignment in `init`, so a present key is
-        /// always a deliberate pick from Interface settings and survives the
-        /// default flip. An unknown raw value is treated as unset.
-        static func resolve(stored raw: String?) -> ZapIconStyle {
-            raw.flatMap(ZapIconStyle.init(rawValue:)) ?? .default
-        }
-
-        var symbolName: String {
-            switch self {
-            case .bolt: "bolt.fill"
-            case .bitcoin: "bitcoinsign"
-            }
-        }
-    }
-
-    /// What the zap affordances draw: the coin-stack asset in fiat mode
-    /// (unaffected by the style), otherwise the style's SF Symbol.
-    enum ZapGlyph: Equatable {
-        case coinStack
-        case symbol(String)
-    }
-
-    static func zapGlyph(fiatMode: Bool, style: ZapIconStyle) -> ZapGlyph {
-        fiatMode ? .coinStack : .symbol(style.symbolName)
-    }
+    /// The one zap glyph. Android draws a bolt everywhere and offers no
+    /// choice, so the bitcoinsign alternative and the fiat-mode coin stack
+    /// both went with the Interface settings pickers that fed them.
+    nonisolated static let zapSymbol = "bolt.fill"
 
     private struct Keys {
         static let largeText = "wisp_settings_large_text"
-        static let themeName = "wisp_settings_theme_name"
         static let colorScheme = "wisp_settings_color_scheme"
-        static let accentColorARGB = "wisp_settings_accent_color_argb"
         static let autoLoadMedia = "wisp_settings_auto_load_media"
         static let videoAutoplay = "wisp_settings_video_autoplay"
         static let animateAvatars = "wisp_settings_animate_avatars"
         static let mediaLayoutStyle = "wisp_settings_media_layout_style"
         static let clientTagEnabled = "wisp_settings_client_tag_enabled"
-        static let fiatModeEnabled = "wisp_settings_fiat_mode_enabled"
         static let fiatCurrency = "wisp_settings_fiat_currency"
         static let notificationSoundsEnabled = "wisp_settings_notification_sounds_enabled"
         static let postUndoTimerEnabled = "wisp_settings_post_undo_timer_enabled"
         static let postUndoTimerSeconds = "wisp_settings_post_undo_timer_seconds"
         static let postUndoTimerForReplies = "wisp_settings_post_undo_timer_for_replies"
         static let autoApproveRelayAuth = "wisp_settings_auto_approve_relay_auth"
-        static let zapIconStyle = "wisp_settings_zap_icon_style"
         static let videoLoop = "wisp_settings_video_loop"
         static let autoTranslate = "wisp_settings_auto_translate"
         static let includeRepliesInFeed = "wisp_settings_include_replies_in_feed"
@@ -80,9 +47,6 @@ final class AppSettings {
         }
         static func quickZapAmountSats(for pubkey: String?) -> String {
             pubkey.map { "wisp_settings_quick_zap_amount_sats_\($0)" } ?? "wisp_settings_quick_zap_amount_sats"
-        }
-        static func quickZapAmountFiat(for pubkey: String?) -> String {
-            pubkey.map { "wisp_settings_quick_zap_amount_fiat_\($0)" } ?? "wisp_settings_quick_zap_amount_fiat"
         }
         static func quickZapMessage(for pubkey: String?) -> String {
             pubkey.map { "wisp_settings_quick_zap_message_\($0)" } ?? "wisp_settings_quick_zap_message"
@@ -94,25 +58,16 @@ final class AppSettings {
     static let postUndoTimerOptions: [Int] = [5, 10, 15, 20, 30]
 
     /// Brand primary, dark side: web `src/app.css` `html.dark --color-primary`
-    /// and Android `Themes.kt` default `primary` (#FF5722). Light mode with
-    /// this accent resolves to the light brand primary (#EC4700) in
-    /// `resolveTheme`. Was Wisp's #FF9800 until the brand-color-parity concern.
+    /// and Android `Themes.kt` default `primary` (#FF5722). The light side
+    /// (#EC4700) lives on the `custom` preset's light palette. Was Wisp's
+    /// #FF9800 until the brand-color-parity concern.
     nonisolated static let defaultAccentARGB: Int = 0xFFFF5722
-    /// Wisp's default accent. A persisted value equal to it was the old
-    /// default, never a brand choice, so it migrates to `defaultAccentARGB`.
-    nonisolated static let legacyWispAccentARGB: Int = 0xFFFF9800
 
     var largeText: Bool {
         didSet { UserDefaults.standard.set(largeText, forKey: Keys.largeText) }
     }
-    var themeName: String {
-        didSet { UserDefaults.standard.set(themeName, forKey: Keys.themeName) }
-    }
     var colorScheme: ColorSchemePreference {
         didSet { UserDefaults.standard.set(colorScheme.rawValue, forKey: Keys.colorScheme) }
-    }
-    var accentColorARGB: Int {
-        didSet { UserDefaults.standard.set(accentColorARGB, forKey: Keys.accentColorARGB) }
     }
     var autoLoadMedia: Bool {
         didSet { UserDefaults.standard.set(autoLoadMedia, forKey: Keys.autoLoadMedia) }
@@ -129,9 +84,9 @@ final class AppSettings {
     var clientTagEnabled: Bool {
         didSet { UserDefaults.standard.set(clientTagEnabled, forKey: Keys.clientTagEnabled) }
     }
-    var fiatModeEnabled: Bool {
-        didSet { UserDefaults.standard.set(fiatModeEnabled, forKey: Keys.fiatModeEnabled) }
-    }
+    /// Currency for the wallet dashboard's fiat display (tap the balance to
+    /// cycle sats → fiat → hidden) and the transaction rows. There is no
+    /// app-wide fiat mode any more — zap and post surfaces are always sats.
     var fiatCurrency: String {
         didSet { UserDefaults.standard.set(fiatCurrency, forKey: Keys.fiatCurrency) }
     }
@@ -157,9 +112,6 @@ final class AppSettings {
     var autoApproveRelayAuth: Bool {
         didSet { UserDefaults.standard.set(autoApproveRelayAuth, forKey: Keys.autoApproveRelayAuth) }
     }
-    var zapIconStyle: ZapIconStyle {
-        didSet { UserDefaults.standard.set(zapIconStyle.rawValue, forKey: Keys.zapIconStyle) }
-    }
     var videoLoop: Bool {
         didSet { UserDefaults.standard.set(videoLoop, forKey: Keys.videoLoop) }
     }
@@ -180,29 +132,19 @@ final class AppSettings {
     }
     /// When true, a single tap of the zap button on a post sends the configured
     /// amount immediately. Long-press still opens the zap composer. Surfaces in
-    /// settings as "Instant zaps" while in bitcoin mode and "Instant payments"
-    /// while in fiat mode. Disabled by default — the previous behaviour
-    /// (tap → composer) is preserved unless the user opts in.
+    /// settings as "Instant zaps". Disabled by default — the previous
+    /// behaviour (tap → composer) is preserved unless the user opts in.
     var quickZapEnabled: Bool {
         didSet {
             let pk = NostrKey.load()?.pubkey
             UserDefaults.standard.set(quickZapEnabled, forKey: Keys.quickZapEnabled(for: pk))
         }
     }
-    /// Instant-zap amount in sats, used when `fiatModeEnabled` is false.
+    /// Instant-zap amount in sats.
     var quickZapAmountSats: Int64 {
         didSet {
             let pk = NostrKey.load()?.pubkey
             UserDefaults.standard.set(quickZapAmountSats, forKey: Keys.quickZapAmountSats(for: pk))
-        }
-    }
-    /// Instant-payment amount in `fiatCurrency` major units (e.g. 1.00 USD),
-    /// used when `fiatModeEnabled` is true. Converted to sats at fire time via
-    /// `ExchangeRateCache.fiatToSats`.
-    var quickZapAmountFiat: Double {
-        didSet {
-            let pk = NostrKey.load()?.pubkey
-            UserDefaults.standard.set(quickZapAmountFiat, forKey: Keys.quickZapAmountFiat(for: pk))
         }
     }
     /// Optional default message included on an instant zap / payment. Empty
@@ -219,17 +161,14 @@ final class AppSettings {
     private init() {
         let defaults = UserDefaults.standard
         self.largeText = defaults.object(forKey: Keys.largeText) as? Bool ?? false
-        self.themeName = defaults.string(forKey: Keys.themeName) ?? "custom"
         let csRaw = defaults.string(forKey: Keys.colorScheme) ?? ColorSchemePreference.dark.rawValue
         self.colorScheme = ColorSchemePreference(rawValue: csRaw) ?? .dark
-        self.accentColorARGB = Self.loadAccent(defaults.object(forKey: Keys.accentColorARGB) as? Int)
         self.autoLoadMedia = defaults.object(forKey: Keys.autoLoadMedia) as? Bool ?? true
         self.videoAutoplay = defaults.object(forKey: Keys.videoAutoplay) as? Bool ?? true
         self.animateAvatars = defaults.object(forKey: Keys.animateAvatars) as? Bool ?? true
         let layoutRaw = defaults.string(forKey: Keys.mediaLayoutStyle) ?? MediaLayoutStyle.grid.rawValue
         self.mediaLayoutStyle = MediaLayoutStyle(rawValue: layoutRaw) ?? .grid
         self.clientTagEnabled = defaults.object(forKey: Keys.clientTagEnabled) as? Bool ?? true
-        self.fiatModeEnabled = defaults.object(forKey: Keys.fiatModeEnabled) as? Bool ?? false
         self.fiatCurrency = defaults.string(forKey: Keys.fiatCurrency) ?? "USD"
         self.notificationSoundsEnabled = defaults.object(forKey: Keys.notificationSoundsEnabled) as? Bool ?? true
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
@@ -237,7 +176,6 @@ final class AppSettings {
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
         self.postUndoTimerForReplies = defaults.object(forKey: Keys.postUndoTimerForReplies) as? Bool ?? false
         self.autoApproveRelayAuth = defaults.object(forKey: Keys.autoApproveRelayAuth) as? Bool ?? true
-        self.zapIconStyle = ZapIconStyle.resolve(stored: defaults.string(forKey: Keys.zapIconStyle))
         self.videoLoop = defaults.object(forKey: Keys.videoLoop) as? Bool ?? true
         self.autoTranslate = defaults.object(forKey: Keys.autoTranslate) as? Bool ?? false
         self.includeRepliesInFeed = defaults.object(forKey: Keys.includeRepliesInFeed) as? Bool ?? false
@@ -245,13 +183,11 @@ final class AppSettings {
         self.quickZapEnabled = defaults.object(forKey: Keys.quickZapEnabled(for: qzPubkey)) as? Bool ?? false
         let storedQuickInt = defaults.integer(forKey: Keys.quickZapAmountSats(for: qzPubkey))
         self.quickZapAmountSats = storedQuickInt > 0 ? Int64(storedQuickInt) : 21
-        let storedQuickFiat = defaults.double(forKey: Keys.quickZapAmountFiat(for: qzPubkey))
-        self.quickZapAmountFiat = storedQuickFiat > 0 ? storedQuickFiat : 0.10
         self.quickZapMessage = defaults.string(forKey: Keys.quickZapMessage(for: qzPubkey)) ?? ""
     }
 
     /// Load per-account instant-zap settings from UserDefaults. Falls back to
-    /// defaults (21 sats / 0.10 fiat / disabled / no message) when no value
+    /// defaults (21 sats / disabled / no message) when no value
     /// has been stored for this pubkey yet. Call on every account switch so
     /// each account's preferences are isolated.
     func loadQuickZapSettings(for pubkey: String) {
@@ -259,43 +195,25 @@ final class AppSettings {
         quickZapEnabled = defaults.object(forKey: Keys.quickZapEnabled(for: pubkey)) as? Bool ?? false
         let storedSats = defaults.integer(forKey: Keys.quickZapAmountSats(for: pubkey))
         quickZapAmountSats = storedSats > 0 ? Int64(storedSats) : 21
-        let storedFiat = defaults.double(forKey: Keys.quickZapAmountFiat(for: pubkey))
-        quickZapAmountFiat = storedFiat > 0 ? storedFiat : 0.10
         quickZapMessage = defaults.string(forKey: Keys.quickZapMessage(for: pubkey)) ?? ""
     }
 
-    /// SF Symbol name for the zap icon. Only valid when `fiatModeEnabled` is false.
-    /// Use `zapImage` for rendering — it handles the fiat coin stack automatically.
-    var zapSymbolName: String {
-        zapIconStyle.symbolName
-    }
+    /// SF Symbol name for the zap icon — always the bolt.
+    nonisolated var zapSymbolName: String { Self.zapSymbol }
 
-    /// The correct zap icon for the current mode. Fiat mode renders the coin stack asset;
-    /// otherwise uses the user's bolt / bitcoin SF Symbol preference.
-    var zapImage: Image {
-        switch Self.zapGlyph(fiatMode: fiatModeEnabled, style: zapIconStyle) {
-        case .coinStack: Image("CoinStack")
-        case .symbol(let name): Image(systemName: name)
-        }
-    }
+    /// The zap icon, ready to render.
+    nonisolated var zapImage: Image { Image(systemName: Self.zapSymbol) }
 
+    /// What the window's interface style is pinned to. `nil` for System
+    /// hands it back to the device — and `resolveTheme` reads the same
+    /// device value, so the palette and the system chrome (home indicator,
+    /// status bar) always agree whichever option is chosen.
     var preferredColorScheme: ColorScheme? {
         switch colorScheme {
         case .system: return nil
-        case .light: return .light
-        case .dark: return .dark
+        case .light:  return .light
+        case .dark:   return .dark
         }
-    }
-
-    var accentColor: Color {
-        Color(argb: accentColorARGB)
-    }
-
-    /// The accent to start with given what UserDefaults holds: nothing or the
-    /// legacy Wisp default → the brand default; anything else is the user's pick.
-    nonisolated static func loadAccent(_ stored: Int?) -> Int {
-        guard let stored, stored != legacyWispAccentARGB else { return defaultAccentARGB }
-        return stored
     }
 }
 

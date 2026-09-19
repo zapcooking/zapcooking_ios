@@ -3,21 +3,16 @@ import Foundation
 @MainActor
 enum CurrencyFormatter {
     /// Compact representation used inline (e.g. zap counts on a post action bar).
-    /// Returns "21k", "1.2M" for sats; "$12.34" for fiat.
+    /// Returns "21k", "1.2M". Always sats — the app-wide fiat mode is gone;
+    /// the wallet's own fiat display goes through `walletFiat` instead.
     static func short(sats: Int64) -> String {
-        if let fiat = fiatRendered(sats: sats) {
-            return fiat
-        }
-        return formatSatsShort(sats)
+        formatSatsShort(sats)
     }
 
     /// Full representation used in detailed surfaces (invoice screen, wallet balance).
-    /// Returns "21,000 sats" or e.g. "$12.34".
+    /// Returns "21,000 sats".
     static func full(sats: Int64) -> String {
-        if let fiat = fiatRendered(sats: sats) {
-            return fiat
-        }
-        return formatSatsFull(sats)
+        formatSatsFull(sats)
     }
 
     // MARK: - Sats helpers
@@ -52,20 +47,9 @@ enum CurrencyFormatter {
 
     // MARK: - Fiat helpers
 
-    /// Returns nil when fiat mode is off OR there is no cached rate available yet.
-    private static func fiatRendered(sats: Int64) -> String? {
-        let settings = AppSettings.shared
-        guard settings.fiatModeEnabled else { return nil }
-        guard let amount = ExchangeRateCache.shared.satsToFiat(sats, currency: settings.fiatCurrency) else {
-            return nil
-        }
-        let currency = ExchangeRateService.currency(for: settings.fiatCurrency)
-        return render(amount: amount, currency: currency)
-    }
-
-    /// Renders `sats` as a fiat string for the wallet screen's own fiat mode,
-    /// independent of the app-wide `fiatModeEnabled` setting. Returns nil when
-    /// no exchange rate is cached for the selected currency yet.
+    /// Renders `sats` as a fiat string for the wallet screen's own fiat
+    /// display. Returns nil when no exchange rate is cached for the selected
+    /// currency yet.
     static func walletFiat(sats: Int64) -> String? {
         let settings = AppSettings.shared
         guard let amount = ExchangeRateCache.shared.satsToFiat(sats, currency: settings.fiatCurrency) else {
@@ -123,15 +107,6 @@ final class ExchangeRateCache {
     func satsToFiat(_ sats: Int64, currency code: String) -> Double? {
         guard let btcPrice = rates[code.uppercased()] else { return nil }
         return Double(sats) / 100_000_000.0 * btcPrice
-    }
-
-    /// Inverse of `satsToFiat` — convert a fiat amount in the currency's
-    /// major unit (dollars, euros, etc.) into sats. Returns nil when no
-    /// rate is cached. Used by the zap sheet's custom amount input in fiat
-    /// mode where the user types `1.50` for a $1.50 zap.
-    func fiatToSats(_ majorAmount: Double, currency code: String) -> Int64? {
-        guard let btcPrice = rates[code.uppercased()] else { return nil }
-        return Int64((majorAmount / btcPrice * 100_000_000.0).rounded())
     }
 
     func updateFromService() async {

@@ -1618,21 +1618,10 @@ struct PostCardView: View {
         }
     }
 
-    /// Resolve the instant-zap amount in sats, taking fiat mode into account.
-    /// In bitcoin mode this is just `quickZapAmountSats`. In fiat mode the
-    /// configured `quickZapAmountFiat` major-unit value is converted via the
-    /// current exchange rate; returns nil when the rate cache hasn't loaded
-    /// yet, which falls the caller back to the composer sheet.
+    /// The configured instant-zap amount, or nil when it is unset — which
+    /// falls the caller back to the composer sheet.
     private func resolvedInstantZapSats() -> Int64? {
-        if settings.fiatModeEnabled {
-            guard settings.quickZapAmountFiat > 0 else { return nil }
-            guard let sats = ExchangeRateCache.shared.fiatToSats(
-                settings.quickZapAmountFiat,
-                currency: settings.fiatCurrency
-            ), sats > 0 else { return nil }
-            return sats
-        }
-        return settings.quickZapAmountSats > 0 ? settings.quickZapAmountSats : nil
+        settings.quickZapAmountSats > 0 ? settings.quickZapAmountSats : nil
     }
 
     /// Fire a one-tap zap of `amountSats` to the displayed post's author.

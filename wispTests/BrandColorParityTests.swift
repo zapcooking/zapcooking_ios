@@ -4,10 +4,10 @@ import Testing
 import UIKit
 @testable import wisp
 
-/// Brand-color parity: the iOS accent is the same pair web `src/app.css`
+/// Brand-color parity: the iOS primary is the same pair web `src/app.css`
 /// (`--color-primary`) and Android `Themes.kt` ship — #EC4700 light,
-/// #FF5722 dark — routed through the one token set (`AppSettings`
-/// default accent → `resolveTheme` → `ResolvedThemeProxy` → `Color.wisp*`).
+/// #FF5722 dark — routed through the one token set (`Themes.light` /
+/// `Themes.dark` → `resolveTheme` → `ResolvedThemeProxy` → `Color.wisp*`).
 /// Also pins what must not move (repost green, paid amber, the unread
 /// dot) and measures the dark primary's WCAG contrast on every custom
 /// dark ground, since links, hashtags and small labels are set in it.
@@ -24,43 +24,41 @@ struct BrandColorParityTests {
 
     // MARK: - The token
 
-    @Test func defaultAccent_isBrandDark_andLegacyWispMigrates() {
+    @Test func defaultAccent_isBrandDark() {
         #expect(AppSettings.defaultAccentARGB == Self.brandDark)
-        #expect(AppSettings.legacyWispAccentARGB == Self.wispOrange)
-        #expect(AppSettings.loadAccent(nil) == Self.brandDark)
-        #expect(AppSettings.loadAccent(Self.wispOrange) == Self.brandDark)
-        // A deliberate pick survives.
-        #expect(AppSettings.loadAccent(0xFF3366CC) == 0xFF3366CC)
     }
 
-    @Test func customPalette_andFallbackTheme_areTheBrandPair() throws {
-        let custom = Themes.get("custom")
-        #expect(try Self.argb(custom.dark.primary) == Self.brandDark)
-        #expect(try Self.argb(custom.dark.zap) == Self.brandDark)
-        #expect(try Self.argb(custom.dark.bookmark) == Self.brandDark)
-        #expect(try Self.argb(custom.light.primary) == Self.brandLight)
-        #expect(try Self.argb(custom.light.zap) == Self.brandLight)
-        #expect(try Self.argb(custom.light.bookmark) == Self.brandLight)
+    /// Appearance is the only theme control left: System, Light, Dark.
+    /// The accent picker and the fifteen selectable presets are gone, so
+    /// there is exactly one palette pair to choose a side of.
+    @Test func appearance_isTheOnlyThemeControl() {
+        #expect(AppSettings.ColorSchemePreference.allCases == [.system, .light, .dark])
+    }
+
+    @Test func palettes_andFallbackTheme_areTheBrandPair() throws {
+        #expect(try Self.argb(Themes.dark.primary) == Self.brandDark)
+        #expect(try Self.argb(Themes.dark.zap) == Self.brandDark)
+        #expect(try Self.argb(Themes.dark.bookmark) == Self.brandDark)
+        #expect(try Self.argb(Themes.light.primary) == Self.brandLight)
+        #expect(try Self.argb(Themes.light.zap) == Self.brandLight)
+        #expect(try Self.argb(Themes.light.bookmark) == Self.brandLight)
         #expect(try Self.argb(ResolvedTheme.default.primary) == Self.brandDark)
         #expect(try Self.argb(ResolvedTheme.default.zap) == Self.brandDark)
     }
 
-    /// The live resolution path with the default accent: dark uses the raw
-    /// accent, light the palette primary — both brand.
-    @Test func resolveTheme_customDefaultAccent_yieldsBrandPair() throws {
+    /// The live resolution path. Light and Dark pin the side and ignore the
+    /// device; System follows it. The window's interface style comes from
+    /// the same preference, so the palette and the system chrome (home
+    /// indicator, status bar) can never disagree.
+    @Test func resolveTheme_yieldsBrandPair_onEveryAppearance() throws {
         let settings = AppSettings.shared
-        let saved = (settings.themeName, settings.colorScheme, settings.accentColorARGB)
-        defer {
-            settings.themeName = saved.0
-            settings.colorScheme = saved.1
-            settings.accentColorARGB = saved.2
-        }
-        settings.themeName = "custom"
-        settings.accentColorARGB = AppSettings.defaultAccentARGB
+        let saved = settings.colorScheme
+        defer { settings.colorScheme = saved }
 
         settings.colorScheme = .dark
         let dark = settings.resolveTheme(systemColorScheme: .light)
         #expect(dark.isDark)
+        #expect(settings.preferredColorScheme == .dark)
         #expect(try Self.argb(dark.primary) == Self.brandDark)
         #expect(try Self.argb(dark.zap) == Self.brandDark)
         #expect(try Self.argb(dark.bookmark) == Self.brandDark)
@@ -68,15 +66,22 @@ struct BrandColorParityTests {
         settings.colorScheme = .light
         let light = settings.resolveTheme(systemColorScheme: .dark)
         #expect(!light.isDark)
+        #expect(settings.preferredColorScheme == .light)
         #expect(try Self.argb(light.primary) == Self.brandLight)
         #expect(try Self.argb(light.zap) == Self.brandLight)
         #expect(try Self.argb(light.bookmark) == Self.brandLight)
 
-        // Nothing in the app resolves Wisp's orange any more.
+        // System hands the choice to the device, and the window follows.
         settings.colorScheme = .system
-        for scheme in [ColorScheme.dark, .light] {
-            #expect(try Self.argb(settings.resolveTheme(systemColorScheme: scheme).primary) != Self.wispOrange)
-        }
+        #expect(settings.preferredColorScheme == nil)
+        #expect(settings.resolveTheme(systemColorScheme: .dark).isDark)
+        #expect(!settings.resolveTheme(systemColorScheme: .light).isDark)
+        // No device answer yet (the very first resolve) falls to dark.
+        #expect(settings.resolveTheme(systemColorScheme: nil).isDark)
+
+        // Nothing in the app resolves Wisp's orange any more.
+        #expect(try Self.argb(dark.primary) != Self.wispOrange)
+        #expect(try Self.argb(light.primary) != Self.wispOrange)
     }
 
     /// `Color.accentColor` / UIKit's tint (the emoji reaction picker's
@@ -92,15 +97,11 @@ struct BrandColorParityTests {
     // MARK: - What must not move
 
     @Test func semanticColors_unchanged() throws {
-        let custom = Themes.get("custom")
-        #expect(try Self.argb(custom.dark.repost) == 0xFF4CAF50)
-        #expect(try Self.argb(custom.light.repost) == 0xFF2E7D32)
-        #expect(try Self.argb(custom.dark.paid) == 0xFFFFD54F)
-        #expect(try Self.argb(custom.light.paid) == 0xFFC9A000)
-        #expect(try Self.argb(BottomTab.unreadDotColor) == 0xFFFBBF24)
-        // The curated presets keep their own primaries; only the brand preset moved.
-        #expect(try Self.argb(Themes.get("nord").dark.primary) == 0xFF88C0D0)
-        #expect(try Self.argb(Themes.get("dracula").light.primary) == 0xFFD05090)
+        #expect(try Self.argb(Themes.dark.repost) == 0xFF4CAF50)
+        #expect(try Self.argb(Themes.light.repost) == 0xFF2E7D32)
+        #expect(try Self.argb(Themes.dark.paid) == 0xFFFFD54F)
+        #expect(try Self.argb(Themes.light.paid) == 0xFFC9A000)
+        #expect(try Self.argb(BottomTab.unreadDotColor(isDark: true)) == 0xFFFBBF24)
     }
 
     // MARK: - Contrast
@@ -111,8 +112,8 @@ struct BrandColorParityTests {
     /// token (#374151, Themes.kt) where the same orange measures 3.26 —
     /// parity wins there, so it's held to the AA large-text floor (3.0)
     /// instead of quietly drifting the shared token.
-    @Test func darkPrimary_clearsAA_onEveryCustomDarkGround() throws {
-        let dark = Themes.get("custom").dark
+    @Test func darkPrimary_clearsAA_onEveryDarkGround() throws {
+        let dark = Themes.dark
         let primary = try Self.argb(dark.primary)
         for (name, ground) in [("background", dark.background), ("surface", dark.surface)] {
             let ratio = Self.contrast(primary, try Self.argb(ground))
@@ -124,15 +125,26 @@ struct BrandColorParityTests {
         #expect(ratio >= 3.0, "surfaceVariant: \(String(format: "%.2f", ratio))")
     }
 
+    /// The bottom-bar unread dot has to read as an alert on whatever ground
+    /// it lands on. Amber-400 measures 1.17:1 on the light ground —
+    /// invisible — so light mode uses amber-700, and both sides are held to
+    /// the 3:1 WCAG non-text floor.
+    @Test func unreadDot_clears3to1_onBothGrounds() throws {
+        for (name, palette, isDark) in [("dark", Themes.dark, true), ("light", Themes.light, false)] {
+            let dot = try Self.argb(BottomTab.unreadDotColor(isDark: isDark))
+            let ratio = Self.contrast(dot, try Self.argb(palette.background))
+            #expect(ratio >= 3.0, "\(name): \(String(format: "%.2f", ratio))")
+        }
+    }
+
     // MARK: - Renders (evidence for the by-hand gate)
 
     @Test func brandCarriers_render_onDarkAndLightGrounds() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let custom = Themes.get("custom")
-        for (name, palette, isDark) in [("dark", custom.dark, true), ("light", custom.light, false)] {
+        for (name, palette, isDark) in [("dark", Themes.dark, true), ("light", Themes.light, false)] {
             ResolvedThemeProxy.update(ResolvedTheme(
-                presetId: "custom", isDark: isDark, palette: palette,
+                isDark: isDark, palette: palette,
                 primary: palette.primary, zap: palette.zap, bookmark: palette.bookmark, zapAnimation: palette.zap
             ))
             let expected = try Self.argb(palette.primary)

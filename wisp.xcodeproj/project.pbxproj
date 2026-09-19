@@ -194,7 +194,6 @@
 		4CFF21040000000000000302 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21030000000000000302 /* Theme.swift */; };
 		4CFF21060000000000000303 /* Themes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21050000000000000303 /* Themes.swift */; };
 		4CFF21080000000000000304 /* AppFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21070000000000000304 /* AppFont.swift */; };
-		4CFF210A0000000000000305 /* ColorPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21090000000000000305 /* ColorPickerView.swift */; };
 		4CFF210C0000000000000306 /* InterfaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210B0000000000000306 /* InterfaceSettingsView.swift */; };
 		4CFF210E0000000000000307 /* ExchangeRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210D0000000000000307 /* ExchangeRateService.swift */; };
 		4CFF21100000000000000308 /* CurrencyFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210F0000000000000308 /* CurrencyFormatter.swift */; };
@@ -556,7 +555,6 @@
 		4CFF21030000000000000302 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4CFF21050000000000000303 /* Themes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Themes.swift; sourceTree = "<group>"; };
 		4CFF21070000000000000304 /* AppFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFont.swift; sourceTree = "<group>"; };
-		4CFF21090000000000000305 /* ColorPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPickerView.swift; sourceTree = "<group>"; };
 		4CFF210B0000000000000306 /* InterfaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfaceSettingsView.swift; sourceTree = "<group>"; };
 		4CFF210D0000000000000307 /* ExchangeRateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExchangeRateService.swift; sourceTree = "<group>"; };
 		4CFF210F0000000000000308 /* CurrencyFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyFormatter.swift; sourceTree = "<group>"; };
@@ -890,7 +888,6 @@
 				4CFF21030000000000000302 /* Theme.swift */,
 				4CFF21050000000000000303 /* Themes.swift */,
 				4CFF21070000000000000304 /* AppFont.swift */,
-				4CFF21090000000000000305 /* ColorPickerView.swift */,
 				4CFF210B0000000000000306 /* InterfaceSettingsView.swift */,
 				4CFF210D0000000000000307 /* ExchangeRateService.swift */,
 				4CFF210F0000000000000308 /* CurrencyFormatter.swift */,
@@ -1414,7 +1411,6 @@
 				4CFF21040000000000000302 /* Theme.swift in Sources */,
 				4CFF21060000000000000303 /* Themes.swift in Sources */,
 				4CFF21080000000000000304 /* AppFont.swift in Sources */,
-				4CFF210A0000000000000305 /* ColorPickerView.swift in Sources */,
 				4CFF210C0000000000000306 /* InterfaceSettingsView.swift in Sources */,
 				4CFF210E0000000000000307 /* ExchangeRateService.swift in Sources */,
 				4CFF21100000000000000308 /* CurrencyFormatter.swift in Sources */,

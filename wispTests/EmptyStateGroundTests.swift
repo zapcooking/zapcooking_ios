@@ -36,15 +36,12 @@ struct EmptyStateGroundTests {
 
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let custom = Themes.get("custom")
-        let srcery = Themes.get("srcery")
-        let cases: [(name: String, preset: ThemePreset, palette: ThemePalette, isDark: Bool)] = [
-            ("custom-dark", custom, custom.dark, true),
-            ("custom-light", custom, custom.light, false),
-            ("srcery-light", srcery, srcery.light, false), // softest face-vs-ground of the 30
+        let cases: [(name: String, palette: ThemePalette, isDark: Bool)] = [
+            ("dark", Themes.dark, true),
+            ("light", Themes.light, false),
         ]
         for c in cases {
-            ResolvedThemeProxy.update(Self.theme(preset: c.preset, palette: c.palette, isDark: c.isDark))
+            ResolvedThemeProxy.update(Self.theme(palette: c.palette, isDark: c.isDark))
             let raster = try #require(Self.render(
                 NoRepliesEmptyState()
                     .frame(width: 320)
@@ -73,10 +70,10 @@ struct EmptyStateGroundTests {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
         var softestFace = (delta: 255, ground: "")
-        for preset in Themes.all {
-            for (isDark, palette) in [(true, preset.dark), (false, preset.light)] {
-                let label = "\(preset.id) \(isDark ? "dark" : "light")"
-                ResolvedThemeProxy.update(Self.theme(preset: preset, palette: palette, isDark: isDark))
+        do {
+            for (isDark, palette) in [(true, Themes.dark), (false, Themes.light)] {
+                let label = isDark ? "dark" : "light"
+                ResolvedThemeProxy.update(Self.theme(palette: palette, isDark: isDark))
                 let raster = try #require(Self.render(
                     ZStack {
                         palette.background
@@ -104,14 +101,12 @@ struct EmptyStateGroundTests {
 
     // MARK: - Helpers
 
-    /// What `AppSettings.resolveTheme` yields for the preset with the
-    /// default accent: the palette primary everywhere except the custom
-    /// theme's dark side, which uses the raw default accent.
-    private static func theme(preset: ThemePreset, palette: ThemePalette, isDark: Bool) -> ResolvedTheme {
-        let primary = (preset.id == "custom" && isDark) ? ResolvedTheme.default.primary : palette.primary
-        return ResolvedTheme(
-            presetId: preset.id, isDark: isDark, palette: palette,
-            primary: primary, zap: palette.zap, bookmark: palette.bookmark,
+    /// What `AppSettings.resolveTheme` yields for a palette: every colour
+    /// straight off it, now that the accent override is gone.
+    private static func theme(palette: ThemePalette, isDark: Bool) -> ResolvedTheme {
+        ResolvedTheme(
+            isDark: isDark, palette: palette,
+            primary: palette.primary, zap: palette.zap, bookmark: palette.bookmark,
             zapAnimation: palette.zap
         )
     }

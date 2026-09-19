@@ -180,66 +180,20 @@ struct ZapSheet: View {
         return ZapType.allCases.filter { $0 != .private }
     }
 
-    /// Big amount shown in the hero. While typing custom in fiat mode the
-    /// digit string is interpreted register-style (rightmost two digits are
-    /// cents), e.g. "21" → "$0.21", "2100" → "$21.00". Outside fiat mode it
-    /// mirrors the raw input. When not typing: fiat-rendered in fiat mode,
-    /// grouped sats in non-fiat mode.
+    /// Big amount shown in the hero. While typing a custom amount it mirrors
+    /// the raw digits; otherwise it is the grouped sat value. Always sats —
+    /// the app-wide fiat mode and its register-style cents input are gone.
     private var heroAmountText: String {
         if isCustom && !customAmountText.isEmpty {
-            if settings.fiatModeEnabled {
-                return ZapSheet.formatRegisterCents(
-                    digits: customAmountText,
-                    currencyCode: settings.fiatCurrency
-                )
-            }
             return customAmountText
         }
-        if settings.fiatModeEnabled { return CurrencyFormatter.short(sats: amountSats) }
         return CurrencyFormatter.formatNumber(amountSats)
     }
 
-    /// Format a digit-only string as `$X.XX` register-style — last two
-    /// digits are cents, everything before them is whole dollars. Used by
-    /// the hero (live preview) and by the seed function so a previously
-    /// chosen preset's sat value seeds back as the equivalent cents string
-    /// on hero tap.
-    private static func formatRegisterCents(digits: String, currencyCode: String) -> String {
-        let cents = Int64(digits) ?? 0
-        let dollars = Double(cents) / 100.0
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        formatter.usesGroupingSeparator = true
-        formatter.groupingSeparator = ","
-        let body = formatter.string(from: NSNumber(value: dollars)) ?? String(format: "%.2f", dollars)
-        let currency = ExchangeRateService.currency(for: currencyCode)
-        return "\(currency.symbol)\(body)"
-    }
-
-    /// Cents-as-digits seed for the custom amount field. Converts the
-    /// current sats amount through the cached rate, rounds to the nearest
-    /// cent, and returns the digit string with no separator (e.g. 1234
-    /// cents → "1234"). Empty for zero or when no rate is cached.
-    private static func seedCustomText(
-        amountSats: Int64,
-        fiatMode: Bool,
-        fiatCurrency: String
-    ) -> String {
-        guard fiatMode else { return amountSats > 0 ? String(amountSats) : "" }
-        guard amountSats > 0,
-              let dollars = ExchangeRateCache.shared.satsToFiat(amountSats, currency: fiatCurrency)
-        else { return "" }
-        let cents = Int64((dollars * 100.0).rounded())
-        return cents > 0 ? String(cents) : ""
-    }
-
-    /// Register-style sanitiser: digits only. Decimals are dropped because
-    /// the field is interpreted as integer cents — the user types `2100`
-    /// to mean `$21.00` rather than typing the decimal themselves.
-    private static func sanitizeFiatInput(_ text: String) -> String {
-        text.filter(\.isNumber)
+    /// Seed for the custom amount field — the current sats amount as digits,
+    /// empty for zero.
+    private static func seedCustomText(amountSats: Int64) -> String {
+        amountSats > 0 ? String(amountSats) : ""
     }
 
     var body: some View {
@@ -262,8 +216,7 @@ struct ZapSheet: View {
 
                         // Hidden TextField anchored to the focus state so
                         // tapping the hero (or onAppear) raises the keyboard.
-                        // Fiat mode reads the register-style cents digits;
-                        // non-fiat reads raw sats. The field has no visible
+                        // Reads raw sats. The field has no visible
                         // footprint — it lives outside the visible layer at
                         // zero size.
                         hiddenAmountField
@@ -340,17 +293,11 @@ struct ZapSheet: View {
                 EditPresetsSheet(presetsRaw: $presetsRaw, settings: settings)
             }
             .confirmationDialog(
-                settings.fiatModeEnabled
-                    ? "Send \(CurrencyFormatter.short(sats: amountSats))?"
-                    : "Zap \(CurrencyFormatter.formatNumber(amountSats)) sats?",
+                "Zap \(CurrencyFormatter.formatNumber(amountSats)) sats?",
                 isPresented: $showLargeZapConfirm,
                 titleVisibility: .visible
             ) {
-                Button(
-                    settings.fiatModeEnabled
-                        ? "Send \(CurrencyFormatter.short(sats: amountSats))"
-                        : "Zap \(CurrencyFormatter.formatNumber(amountSats)) sats"
-                ) {
+                Button("Zap \(CurrencyFormatter.formatNumber(amountSats)) sats") {
                     performSend()
                 }
                 Button("Cancel", role: .cancel) {}
@@ -371,13 +318,7 @@ struct ZapSheet: View {
                 // formatted `amountSats` value and the keyboard is up;
                 // the first keystroke replaces the seed because
                 // customAmountText is "" at that point.
-                if settings.fiatModeEnabled {
-                    if let sats = ExchangeRateCache.shared
-                        .fiatToSats(settings.quickZapAmountFiat, currency: settings.fiatCurrency),
-                       sats > 0 {
-                        amountSats = sats
-                    }
-                } else if settings.quickZapAmountSats > 0 {
+                if settings.quickZapAmountSats > 0 {
                     amountSats = settings.quickZapAmountSats
                 }
                 isCustom = true
@@ -476,11 +417,7 @@ struct ZapSheet: View {
         Button {
             isCustom = true
             if customAmountText.isEmpty {
-                customAmountText = ZapSheet.seedCustomText(
-                    amountSats: amountSats,
-                    fiatMode: settings.fiatModeEnabled,
-                    fiatCurrency: settings.fiatCurrency
-                )
+                customAmountText = ZapSheet.seedCustomText(amountSats: amountSats)
             }
             amountFocused = true
         } label: {
@@ -492,11 +429,9 @@ struct ZapSheet: View {
                     .animation(.easeInOut(duration: 0.15), value: amountSats)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
-                if !settings.fiatModeEnabled {
-                    Text("sats")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.wispZapColor.opacity(0.8))
-                }
+                Text("sats")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.wispZapColor.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
         }
@@ -557,11 +492,7 @@ struct ZapSheet: View {
             Button {
                 isCustom = true
                 if customAmountText.isEmpty {
-                    customAmountText = ZapSheet.seedCustomText(
-                        amountSats: amountSats,
-                        fiatMode: settings.fiatModeEnabled,
-                        fiatCurrency: settings.fiatCurrency
-                    )
+                    customAmountText = ZapSheet.seedCustomText(amountSats: amountSats)
                 }
                 amountFocused = true
             } label: {
@@ -599,49 +530,28 @@ struct ZapSheet: View {
 
     // MARK: - Hidden amount field
 
-    @ViewBuilder
     private var hiddenAmountField: some View {
-        if settings.fiatModeEnabled {
-            let fiatBinding = Binding<String>(
-                get: { customAmountText },
-                set: { newValue in
-                    let digits = ZapSheet.sanitizeFiatInput(newValue)
-                    customAmountText = digits
-                    if let cents = Int64(digits), cents > 0 {
-                        amountSats = ExchangeRateCache.shared
-                            .fiatToSats(Double(cents) / 100.0, currency: settings.fiatCurrency) ?? amountSats
-                        hasTypedAmount = true
-                    } else if hasTypedAmount {
-                        // User backspaced the field after typing — collapse
-                        // to zero so the Zap button disables and the hero
-                        // reads "0", matching what's on screen.
-                        amountSats = 0
-                    }
-                    // Pre-typing empty values are SwiftUI's initial bind
-                    // commit on focus; leave amountSats at its seed.
+        let satsBinding = Binding<String>(
+            get: { customAmountText },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                customAmountText = digits
+                if let n = Int64(digits), n > 0 {
+                    amountSats = n
+                    hasTypedAmount = true
+                } else if hasTypedAmount {
+                    // User backspaced the field after typing — collapse to
+                    // zero so the Zap button disables and the hero reads
+                    // "0", matching what's on screen. Pre-typing empty
+                    // values are SwiftUI's initial bind commit on focus;
+                    // those leave amountSats at its seed.
+                    amountSats = 0
                 }
-            )
-            TextField("Amount", text: fiatBinding)
-                .keyboardType(.numberPad)
-                .focused($amountFocused)
-        } else {
-            let satsBinding = Binding<String>(
-                get: { customAmountText },
-                set: { newValue in
-                    let digits = newValue.filter(\.isNumber)
-                    customAmountText = digits
-                    if let n = Int64(digits), n > 0 {
-                        amountSats = n
-                        hasTypedAmount = true
-                    } else if hasTypedAmount {
-                        amountSats = 0
-                    }
-                }
-            )
-            TextField("Amount in sats", text: satsBinding)
-                .keyboardType(.numberPad)
-                .focused($amountFocused)
-        }
+            }
+        )
+        return TextField("Amount in sats", text: satsBinding)
+            .keyboardType(.numberPad)
+            .focused($amountFocused)
     }
 
     // MARK: - Message field
@@ -725,7 +635,7 @@ struct ZapSheet: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(settings.quickZapEnabled ? Color.wispZapColor : Color.secondary)
                     .frame(width: 18)
-                Text(settings.fiatModeEnabled ? "Instant payments" : "Instant zaps")
+                Text("Instant zaps")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 0)
@@ -781,9 +691,7 @@ struct ZapSheet: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 18, height: 18)
-                    Text(settings.fiatModeEnabled
-                         ? "Send \(CurrencyFormatter.short(sats: amountSats))"
-                         : "Zap \(CurrencyFormatter.formatNumber(amountSats)) sats")
+                    Text("Zap \(CurrencyFormatter.formatNumber(amountSats)) sats")
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
@@ -875,8 +783,7 @@ private struct EditPresetsSheet: View {
                 // Instant-zap enable + explanation. Selecting which preset
                 // fires happens inline per-row below.
                 Section {
-                    Toggle(settings.fiatModeEnabled ? "Instant payments" : "Instant zaps",
-                           isOn: $instantEnabled)
+                    Toggle("Instant zaps", isOn: $instantEnabled)
                         .tint(Color.wispZapColor)
                     Text("Long-press the bolt to send the selected preset instantly.")
                         .font(.caption)

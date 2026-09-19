@@ -63,13 +63,15 @@ struct BottomBarAndActionRowTests {
         }
     }
 
-    @Test func unreadDot_isAmberFBBF24() {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        #expect(UIColor(BottomTab.unreadDotColor).getRed(&r, green: &g, blue: &b, alpha: &a))
-        #expect(abs(r - 0xFB / 255) < 0.01)
-        #expect(abs(g - 0xBF / 255) < 0.01)
-        #expect(abs(b - 0x24 / 255) < 0.01)
-        #expect(a == 1)
+    @Test func unreadDot_isAmber400OnDark_amber700OnLight() {
+        for (isDark, hex) in [(true, (0xFB, 0xBF, 0x24)), (false, (0xB4, 0x53, 0x09))] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            #expect(UIColor(BottomTab.unreadDotColor(isDark: isDark)).getRed(&r, green: &g, blue: &b, alpha: &a))
+            #expect(abs(r - CGFloat(hex.0) / 255) < 0.01, "isDark \(isDark)")
+            #expect(abs(g - CGFloat(hex.1) / 255) < 0.01, "isDark \(isDark)")
+            #expect(abs(b - CGFloat(hex.2) / 255) < 0.01, "isDark \(isDark)")
+            #expect(a == 1)
+        }
     }
 
     // MARK: - §6 action row

@@ -392,7 +392,7 @@ struct SidebarDrawerView: View {
 
     private var settingsItems: some View {
         VStack(spacing: 0) {
-            DrawerRow(icon: "paintbrush", label: "Interface", indented: true) {
+            DrawerRow(icon: "paintpalette", label: "Interface", indented: true) {
                 onOpenInterface()
             }
             DrawerRow(icon: "server.rack", label: "Relays", indented: true) { onOpenRelays() }

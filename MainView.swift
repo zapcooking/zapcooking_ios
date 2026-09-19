@@ -73,6 +73,7 @@ struct MainView: View {
     @State private var showCookingUtilitiesSheet = false
     @State private var cookingTimers = CookingTimerStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.theme) private var theme
     /// Set on `.background`, consumed on the next `.active` — see the
     /// `scenePhase` handler.
     @State private var wasBackgrounded = false
@@ -1966,7 +1967,7 @@ struct MainView: View {
                         .overlay(alignment: .topTrailing) {
                             if hasUnreadBadge(tab) {
                                 Circle()
-                                    .fill(BottomTab.unreadDotColor)
+                                    .fill(BottomTab.unreadDotColor(isDark: theme.isDark))
                                     .frame(width: 8, height: 8)
                                     .offset(x: -10, y: 2)
                             }
@@ -2115,10 +2116,22 @@ enum BottomTab: String, CaseIterable {
     /// Destinations reachable only from the drawer.
     static let drawerOnlyCases: [BottomTab] = allCases.filter { !bottomBarCases.contains($0) }
 
-    /// Unread dot — brand amber-400 (`#FBBF24`), lighter than the tinted
-    /// nav icons so it reads as an alert rather than blending in (Android
-    /// `UnreadDotColor`).
-    static let unreadDotColor = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+    /// Unread dot on dark grounds — brand amber-400 (`#FBBF24`), lighter
+    /// than the tinted nav icons so it reads as an alert rather than
+    /// blending in (Android `UnreadDotColor`).
+    static let unreadDotColorDark = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+
+    /// Unread dot on light grounds — amber-700 (`#B45309`). Amber-400 is a
+    /// near-white-on-white 1.2:1 against the light backgrounds the presets
+    /// ship (the brand light ground is #D8D8D8) and the dot all but
+    /// vanished; the deeper amber holds the same hue while clearing the
+    /// 3:1 WCAG non-text floor on every light palette.
+    static let unreadDotColorLight = Color(red: 0xB4 / 255, green: 0x53 / 255, blue: 0x09 / 255)
+
+    /// The unread dot for the ground it is drawn on.
+    static func unreadDotColor(isDark: Bool) -> Color {
+        isDark ? unreadDotColorDark : unreadDotColorLight
+    }
 
     /// Bar glyph point size: 24pt, Feed 26pt (Android 21dp with the flame
     /// bumped to 24dp — the flame reads small next to its siblings).
