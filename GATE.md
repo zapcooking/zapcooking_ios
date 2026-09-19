@@ -17,12 +17,11 @@ GATE.md is the only commit after it and is the HEAD commit — `gate.sh` refuses
 otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at f587687 (the review-fix
-  build was an incremental `xcodebuild test` behind the serial run, green; earlier at c9459c5:).
-  Three builds this session (2026-09-19): the first failed on two
-  compile errors in the new test file (a `Comment` wrapper, a `nonisolated` helper),
-  the second was green, and the two incremental `xcodebuild test` builds behind the
-  serial run below were green. Free disk 15 GB before and after; one transient dip
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at f587687 and at c9459c5.
+  Four builds this session (2026-09-19): the first failed on two compile errors in
+  the new test file (a `Comment` wrapper, a `nonisolated` helper); the second was
+  green; the incremental `xcodebuild test` builds behind the serial runs below,
+  including the one for the review fix, were green. Free disk 15 GB before and after; one transient dip
   to 8.9 GB while the simulator booted, back to 17 GB within a minute; no local
   Time Machine snapshots.
 - Warnings in touched files (`wisp/ThreadView.swift`, `wisp/NoRepliesEmptyState.swift`,
