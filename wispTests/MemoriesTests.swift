@@ -491,6 +491,41 @@ struct MemoriesTests {
         #expect(MemoriesView.yearLabel(2) == "2 years ago")
     }
 
+    /// Copilot (PR #87): a refresh tapped during the initial load must not run
+    /// a second relay round, and the older load must not overwrite anything.
+    @Test func viewModel_refreshDuringInitialLoad_isIgnored_andLoadStillLands() async {
+        let (defaults, cleanup) = freshDefaults(); defer { cleanup() }
+        let log = FetchLog()
+        let pk = Self.pk
+        let repo = makeRepo(defaults: defaults, log: log, delayMs: 80) { req in
+            let note = NostrEvent(id: "n\(req.window.yearsAgo)", pubkey: pk, kind: 1, createdAt: req.window.since + 1, tags: [], content: "hi", sig: "")
+            return MemoriesFetchResult(events: [note], resolvedVia: .eose)
+        }
+        let vm = MemoriesViewModel(pubkey: pk, repo: repo)
+        async let load: Void = vm.load()
+        try? await Task.sleep(for: .milliseconds(10))
+        #expect(vm.busy)
+        await vm.refresh()                       // no-op while loading
+        #expect(!vm.refreshing)
+        await load
+        #expect(vm.loaded && !vm.busy)
+        #expect(vm.groups.flatMap(\.events).count == 3)
+        #expect(log.count == 3, "one relay round, not two")
+    }
+
+    @Test func viewModel_loadDuringRefresh_isIgnored() async {
+        let (defaults, cleanup) = freshDefaults(); defer { cleanup() }
+        let log = FetchLog()
+        let repo = makeRepo(defaults: defaults, log: log, delayMs: 80) { _ in MemoriesFetchResult(events: [], resolvedVia: .eose) }
+        let vm = MemoriesViewModel(pubkey: Self.pk, repo: repo)
+        async let refresh: Void = vm.refresh()
+        try? await Task.sleep(for: .milliseconds(10))
+        await vm.load()                          // no-op while refreshing
+        await refresh
+        #expect(vm.loaded && vm.allEmpty && !vm.busy)
+        #expect(log.count == 3)
+    }
+
     @Test func viewModel_refreshNoticeOnlyWhenNotAuthoritative() async {
         let (defaults, cleanup) = freshDefaults(); defer { cleanup() }
         let log = FetchLog()

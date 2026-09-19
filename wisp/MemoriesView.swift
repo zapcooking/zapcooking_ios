@@ -65,7 +65,7 @@ struct MemoriesView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
-                    .disabled(viewModel.refreshing)
+                    .disabled(viewModel.busy)
                     .accessibilityLabel("Refresh memories")
                 }
             }
@@ -102,10 +102,26 @@ struct MemoriesView: View {
                 .font(AppFont.bodyMedium)
                 .foregroundStyle(Color.wispOnSurfaceVariant)
                 .multilineTextAlignment(.center)
+            // A failed refresh on an empty day must say so here too, not
+            // only above the list.
+            if let notice = viewModel.refreshNotice {
+                refreshNoticeView(notice)
+            }
             Spacer()
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func refreshNoticeView(_ notice: String) -> some View {
+        Text(notice)
+            .font(AppFont.bodySmall)
+            .foregroundStyle(Color.wispOnSurfaceVariant)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.wispSurfaceVariant.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityIdentifier("memories-refresh-notice")
     }
 
     private var list: some View {
@@ -122,16 +138,9 @@ struct MemoriesView: View {
                 .padding(16)
 
                 if let notice = viewModel.refreshNotice {
-                    Text(notice)
-                        .font(AppFont.bodySmall)
-                        .foregroundStyle(Color.wispOnSurfaceVariant)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.wispSurfaceVariant.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    refreshNoticeView(notice)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 4)
-                        .accessibilityIdentifier("memories-refresh-notice")
                 }
 
                 ForEach(viewModel.groups, id: \.yearsAgo) { group in

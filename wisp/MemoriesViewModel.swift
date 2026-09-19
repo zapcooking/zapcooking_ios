@@ -23,6 +23,11 @@ final class MemoriesViewModel {
     @ObservationIgnored private let repo: MemoriesRepository
     let pubkey: String
 
+    /// Bumped by every load/refresh; a completion applies its result only if
+    /// it is still the newest operation, so an older cache-first load can
+    /// never land on top of a newer authoritative refresh (Copilot, PR #87).
+    @ObservationIgnored private var generation = 0
+
     /// `repo` defaults to the shared instance; resolved inside the initializer
     /// because a default-argument expression is evaluated nonisolated.
     init(pubkey: String, repo: MemoriesRepository? = nil) {
@@ -32,20 +37,34 @@ final class MemoriesViewModel {
 
     var allEmpty: Bool { loaded && groups.allSatisfy { $0.events.isEmpty } }
 
+    /// One relay operation at a time: a load while a load or refresh is in
+    /// flight is a no-op (the running one will populate `groups`).
+    var busy: Bool { loading || refreshing }
+
     func load() async {
+        guard !busy else { return }
+        generation += 1
+        let mine = generation
         loading = true
-        defer { loading = false }
+        defer { if mine == generation { loading = false } }
         let result = await repo.getMemoriesCached(pubkey: pubkey)
+        guard mine == generation else { return }
         groups = result
         loaded = true
     }
 
+    /// Ignored while the initial load (or another refresh) is in flight —
+    /// the toolbar button is disabled in that state too — so the two can
+    /// never run concurrently and double the relay round.
     func refresh() async {
-        guard !refreshing else { return }
+        guard !busy else { return }
+        generation += 1
+        let mine = generation
         refreshing = true
         refreshNotice = nil
-        defer { refreshing = false }
+        defer { if mine == generation { refreshing = false } }
         let (fresh, refreshed) = await repo.refreshMemories(pubkey: pubkey)
+        guard mine == generation else { return }
         if refreshed {
             groups = fresh
             loaded = true

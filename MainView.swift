@@ -1444,6 +1444,17 @@ struct MainView: View {
         }
     }
 
+    /// The Memories teaser for the top slot of either feed body. Independent
+    /// of feed contents, so it is mounted in the non-list states too (an empty
+    /// or fully-filtered feed must still expose it — Copilot, PR #87); the card
+    /// itself renders nothing on a day with no memories.
+    @ViewBuilder
+    private var memoriesTeaser: some View {
+        if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
+            MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
+        }
+    }
+
     // MARK: - OnlyFood body (moved from the deleted OnlyFoodFeedView)
 
     /// Four states plus the list: loading, relay miss, WoT hid everything,
@@ -1457,11 +1468,11 @@ struct MainView: View {
         case .loading:
             onlyFoodLoadingState
         case .relayMiss:
-            onlyFoodErrorState
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodErrorState }
         case .wotHidden(let count):
-            onlyFoodWotHiddenState(count: count)
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodWotHiddenState(count: count) }
         case .empty:
-            onlyFoodEmptyState
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodEmptyState }
         case .list:
             onlyFoodList
         }
@@ -1576,9 +1587,7 @@ struct MainView: View {
                     // Memories teaser, same slot on both bodies
                     // (`FeedTabRouting.showsMemoriesTeaser` — the OnlyFood
                     // inconsistency is deliberate and documented there).
-                    if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
-                        MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
-                    }
+                    memoriesTeaser
                     ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
                         PostCardView(
                             event: event,
@@ -1687,21 +1696,25 @@ struct MainView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.filteredEvents.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "text.bubble")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary)
-                    Text(emptyStateTitle)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    Text(emptyStateSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    emptyStateExtraAction
+                // Empty / fully-filtered feed still exposes the teaser.
+                VStack(spacing: 0) {
+                    memoriesTeaser
+                    VStack(spacing: 16) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                        Text(emptyStateTitle)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text(emptyStateSubtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        emptyStateExtraAction
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { feedProxy in
                 ScrollView {
@@ -1728,9 +1741,7 @@ struct MainView: View {
                             )
                         }
                         // Memories teaser (`FeedTabRouting.showsMemoriesTeaser`).
-                        if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
-                            MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
-                        }
+                        memoriesTeaser
                         // Iterating events directly with `id: \.id` keeps row
                         // identity stable when the array shifts (new posts
                         // prepended). The previous `Array(events.enumerated())`
