@@ -1,21 +1,21 @@
-# GATE — concern/tag-suggestion-pills
-C-H's automatic "#foodstr\n\n" prefill in the OnlyFood composer is gone; nothing
-is added to a note unless the user taps. In its place a row of tappable tag pills
-(`HashtagSuggestionRow`) under the editor, OnlyFood composer only; a live "n/20
-tags" count and pill disabling at the §7.3 cap, counted exactly as
-`OnlyFoodFilter` counts; a publish confirm when no food-set tag is present
-("Add #foodstr" is a tap). **#84 rides along:** `OnlyFoodFilter.maxHashtags` is
-**20** (was 5 — the 3.3 live sample's 6–20 band was genuine food posts, 100+ was
-aggregators) and the pills are the cross-platform set in the cross-platform order
-(`foodstr, coffee, cooking, breakfast, dinner, lunch, cookstr, food`). Since the
-eight pills now fit under the cap together, the cap is only reachable by typing.
-`FoodHashtags` and the optimistic-insert rule are unchanged. Own branch off main
-at 9652e49 (the #82 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
+# GATE — concern/tag-suggestion-pills (PR #85: #84 on top of the merged pills)
+The pills themselves merged as #83 (0a5f6ee). This branch is rebased onto that
+merge and carries **#84**: `OnlyFoodFilter.maxHashtags` is **20** (was 5 — the
+3.3 live sample's 6–20 band was genuine food posts, 100+ was aggregators) and the
+pills are the cross-platform set in the cross-platform order (`foodstr, coffee,
+cooking, breakfast, dinner, lunch, cookstr, food`). Since the eight pills now fit
+under the cap together, the cap is only reachable by typing. Plus the three
+Copilot findings on #85: the "No food tag yet" message says the note's real tag
+count (it can exceed the cap when typed) and how many to remove
+(`OnlyFoodCompose.noFoodTagMessage`); `removing` collapses runs of spaces until
+stable; `isHashtagLine` accepts only real hashtag tokens, so a pill after
+`#foodstr,` starts a paragraph. `FoodHashtags` and the optimistic-insert rule are
+unchanged. Off main at 0a5f6ee (the #83 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
 by hand.
 
-**Frozen at this commit.** App code is frozen at **d096290** (9b19c50 — the
-Copilot review fix — plus #84: cap 20, pill reorder, tests re-pinned). The previous
-GATE.md (4cc69c0) is superseded. This GATE.md is the only commit after it and is the
+**Frozen at this commit.** App code is frozen at **f2172da** (9701cd6, #84 rebased
+onto main, plus the Copilot fixes). The previous GATE.md (4c895e7, before the
+rebase) is superseded. This GATE.md is the only commit after it and is the
 HEAD commit — `gate.sh` refuses to run otherwise. A
 review fix re-opens the freeze: push a fresh GATE.md last.
 
@@ -29,10 +29,11 @@ review fix re-opens the freeze: push a fresh GATE.md last.
   `MainView.swift`, `OnlyFoodFilter.swift`, `wisp/ComposePresenter.swift`,
   `wisp/FeedTabRouting.swift`, `wisp/HashtagSuggestionRow.swift`,
   `wisp/OnlyFoodCompose.swift`, the five test files): **zero**.
-- #84 (2026-09-19): `build-for-testing` **green** at d096290; zero new
-  warnings (the eight Swift 6 concurrency lines in `OnlyFoodFilter.swift` at
-  94–105 pre-exist at 90–101 — stash-build proven the same day). Suites not run
-  on the Air (the no-local-test rule) — Gate 1 on the box is the proof.
+- #84 (2026-09-19): `build-for-testing` **green** at d096290 (pre-rebase) and at
+  f2172da; zero new warnings (the eight Swift 6 concurrency lines in
+  `OnlyFoodFilter.swift` at 94–105 pre-exist at 90–101 — stash-build proven the
+  same day). Suites not run on the Air (the no-local-test rule) — Gate 1 on the
+  box is the proof.
 - Serial runs on the Air (the C-G exception form): `OnlyFoodComposeTests` 13/13,
   `FeedTabRoutingTests`, `ComposeSeedTests`, `OnlyFoodOwnPublishTests`,
   `FeedTopBarPolishTests` all green (42 tests). PNGs of the row in the three
@@ -52,10 +53,13 @@ N tests ran on concern/tag-suggestion-pills @ <this commit>`, with the four know
 failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
 `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **857** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 849; the delta is **+8**
-(`OnlyFoodComposeTests` 14, was 6 — #84 added
-`suggestedTags_matchTheCrossPlatformSetAndOrder`). If the parsed total is 849 the run was on a
+**Count.** This branch has **860** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main (0a5f6ee, with #83) has 856;
+the delta is **+4** (`OnlyFoodComposeTests` 17, was 13 — #84 added
+`suggestedTags_matchTheCrossPlatformSetAndOrder`; the Copilot fixes added
+`removing_collapsesRunsOfSpaces`, `appending_afterPunctuatedTag_startsNewParagraph`,
+`noFoodTagMessage_saysTheRealCount`). If the parsed total is 856 the run was on
+main's tree. If the parsed total is 849 the run was on a
 stale tree. `OnlyFoodComposeLiveTests` stays opt-in and skipped.
 
 ## Gate 2 — C-H's seed tests updated (name-check the bundle)
@@ -71,6 +75,8 @@ git grep -n 'prefill' -- wisp/OnlyFoodCompose.swift wisp/FeedTabRouting.swift Ma
   `suggestedTags_matchTheCrossPlatformSetAndOrder` (#84 order, pinned literally)
 - the cap is 20 (#84): `OnlyFoodFilterTests/structuralSpam_boundaries` — 7 and 20
   t-tags accept, 21 and 100 reject, same on the content side
+- the Copilot fixes: `removing_collapsesRunsOfSpaces`,
+  `appending_afterPunctuatedTag_startsNewParagraph`, `noFoodTagMessage_saysTheRealCount`
 - toggle: `pill_tapAppends_secondTapRemoves_bodyIsTruth`,
   `pill_afterProse_startsATagLine_thenJoinsIt`, `typedTag_selectsPill_andPillRemovesIt`
 - the cap, as the filter counts it: `cap_countsLikeTheFilter_disablesFurtherPills_reenablesOnRemove`,
@@ -97,7 +103,9 @@ git grep -n 'prefill' -- wisp/OnlyFoodCompose.swift wisp/FeedTabRouting.swift Ma
    slot. Type a 21st "#tag" by hand → the count turns red with the "hides notes
    with more than 20 tags" line. Delete it. Screenshot at 20/20.
    Then clear the body and type twenty non-food tags, Publish → the alert offers
-   only Post anyway / Cancel and says to remove a tag to add #foodstr. Cancel.
+   only Post anyway / Cancel and says "already has 20 tags. Remove one". Add two
+   more, Publish → "already has 22 tags. Remove 3". Cancel. Type "#foodstr," on
+   its own line, tap #coffee → it lands on a new paragraph, not after the comma.
 4. **General composer**: Follows → FAB: no row, "What's on your mind?", no alert
    on Publish. Recipes → +: the recipe form, unchanged.
 
