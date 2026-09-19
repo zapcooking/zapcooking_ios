@@ -3,7 +3,7 @@ import Testing
 @testable import wisp
 
 /// Live gate for Concern C-H — a kind-1 note composed the way the OnlyFood
-/// FAB composes it (editor seeded with `OnlyFoodCompose.prefill`) is
+/// FAB composes it (the suggestion pills, one tapped, no seed) is
 /// published, comes back through the OnlyFood `#t` filter, passes the
 /// feed's own accept chain, and is then deleted with the key held until the
 /// id is confirmed gone (§7.13).
@@ -50,15 +50,18 @@ struct OnlyFoodComposeLiveTests {
         let relays = RelayDefaults.defaults
         let searchRelay = OnlyFoodFeedViewModel.searchRelay
 
-        // Phase 1 — the composer, seeded exactly as the OnlyFood FAB seeds it,
-        // then typed into below the seed. The `t` tags are the composer's own
-        // derivation from the body (same regex path the publish pipeline
-        // uses), plus the client tag.
+        // Phase 1 — the composer exactly as the OnlyFood FAB opens it (the
+        // pills, no seed), typed into, then one pill tapped. The `t` tags are
+        // the composer's own derivation from the body (same regex path the
+        // publish pipeline uses), plus the client tag.
         UserDefaults.standard.removeObject(forKey: "compose_autosave_new_\(keypair.pubkey)")
-        let vm = ComposeViewModel(keypair: keypair, initialText: OnlyFoodCompose.prefill)
-        #expect(vm.hashtags == ["foodstr"], "seed must derive the food tag before any keystroke")
-        vm.updateContent(vm.content + "\(marker). Ephemeral key, safe to ignore.")
+        let vm = ComposeViewModel(keypair: keypair, suggestedHashtags: OnlyFoodCompose.suggestedTags)
+        #expect(vm.hashtags.isEmpty, "nothing is added until the user taps")
+        vm.updateContent("\(marker). Ephemeral key, safe to ignore.")
+        #expect(vm.needsFoodTagConfirm)
+        vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag)
         #expect(vm.hashtags == ["foodstr"])
+        #expect(!vm.needsFoodTagConfirm)
         var tags = vm.hashtags.map { ["t", $0] }
         if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
         let event = try await Signer.sign(keypair: keypair, kind: 1, tags: tags, content: vm.content)

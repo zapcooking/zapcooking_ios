@@ -29,6 +29,7 @@ struct ComposeView: View {
     @State private var showDraftsSheet = false
     @State private var photosPickerMaxCount: Int = 8
     @State private var showAccountPicker = false
+    @State private var showFoodTagConfirm = false
 
     /// Draft to load on first appear. Nil for `.new` and `.reply`/`.quote` composers.
     /// Loaded from `.task` rather than `init` to defeat SwiftUI's State preservation
@@ -54,10 +55,12 @@ struct ComposeView: View {
         _viewModel = State(initialValue: ComposeViewModel(keypair: keypair, mode: .new))
     }
 
-    init(keypair: Keypair, initialText: String) {
+    init(keypair: Keypair, initialText: String, suggestedHashtags: [String] = []) {
         self.initialDraft = nil
         self.pendingAttachmentProviders = []
-        _viewModel = State(initialValue: ComposeViewModel(keypair: keypair, initialText: initialText))
+        _viewModel = State(initialValue: ComposeViewModel(
+            keypair: keypair, initialText: initialText, suggestedHashtags: suggestedHashtags
+        ))
     }
 
     init(keypair: Keypair, pendingAttachmentProviders: [NSItemProvider]) {
@@ -102,6 +105,10 @@ struct ComposeView: View {
                             }
 
                             quoteContextHeader
+
+                            if !viewModel.suggestedHashtags.isEmpty {
+                                HashtagSuggestionRow(viewModel: viewModel)
+                            }
 
                             actionsRow
 
@@ -279,6 +286,26 @@ struct ComposeView: View {
         // "Keep Editing" button renders as an explicit choice. iOS 26
         // hides the cancel button on confirmation dialogs presented over
         // sheets, leaving only Save Draft / Discard visible.
+        .alert(
+            "No food tag yet",
+            isPresented: $showFoodTagConfirm
+        ) {
+            // At the cap the tag can't be added (the toggle is a no-op), so
+            // the one-tap fix is not offered; the user has to free a slot.
+            if !viewModel.suggestedTagsAtCap {
+                Button("Add #\(OnlyFoodCompose.defaultTag)") {
+                    if viewModel.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) {
+                        viewModel.publish()
+                    }
+                }
+            }
+            Button("Post anyway") { viewModel.publish() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(viewModel.suggestedTagsAtCap
+                 ? "This note won't appear in OnlyFood without a food tag, and it already has \(OnlyFoodCompose.maxTags) tags. Remove one to add #\(OnlyFoodCompose.defaultTag)."
+                 : "This note won't appear in OnlyFood without a food tag.")
+        }
         .alert(
             "Discard this post?",
             isPresented: $showCancelConfirm
@@ -1018,7 +1045,11 @@ struct ComposeView: View {
                 let inFlight = viewModel.isPublishing || viewModel.isMining
                 let isInactive = !viewModel.canPublish
                 Button {
-                    viewModel.publish()
+                    if viewModel.needsFoodTagConfirm {
+                        showFoodTagConfirm = true
+                    } else {
+                        viewModel.publish()
+                    }
                 } label: {
                     Group {
                         // Only flag mining once the miner has reported real
@@ -1094,7 +1125,9 @@ struct ComposeView: View {
     private var placeholderText: String {
         if viewModel.pollEnabled { return "Ask a question…" }
         switch viewModel.mode {
-        case .new: return viewModel.galleryMode ? "Add a caption…" : "What's on your mind?"
+        case .new:
+            if viewModel.galleryMode { return "Add a caption…" }
+            return viewModel.suggestedHashtags.isEmpty ? "What's on your mind?" : OnlyFoodCompose.placeholder
         case .reply: return "Write your reply…"
         case .quote: return "Add a comment…"
         }

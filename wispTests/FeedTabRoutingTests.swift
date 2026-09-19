@@ -197,10 +197,10 @@ struct FeedTabRoutingTests {
 
     // MARK: - Compose FAB prefill (§8)
 
-    @Test func composePrefill_isFoodstrOnOnlyFoodOnly() {
-        #expect(FeedTabRouting.composePrefill(for: .onlyFood) == OnlyFoodCompose.prefill)
-        #expect(FeedTabRouting.composePrefill(for: .follows) == nil)
-        #expect(FeedTabRouting.composePrefill(for: .extendedNetwork) == nil)
-        #expect(FeedTabRouting.composePrefill(for: .relay(url: "wss://nos.lol")) == nil)
+    @Test func composeSuggestions_areTheFoodPillsOnOnlyFoodOnly() {
+        #expect(FeedTabRouting.composeSuggestions(for: .onlyFood) == OnlyFoodCompose.suggestedTags)
+        #expect(FeedTabRouting.composeSuggestions(for: .follows).isEmpty)
+        #expect(FeedTabRouting.composeSuggestions(for: .extendedNetwork).isEmpty)
+        #expect(FeedTabRouting.composeSuggestions(for: .relay(url: "wss://nos.lol")).isEmpty)
     }
 }

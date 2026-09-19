@@ -82,14 +82,15 @@ enum FeedTabRouting {
         return true
     }
 
-    /// Compose FAB seed (§8): the visible, removable `#foodstr` prefill on
-    /// OnlyFood; `nil` means the plain note composer.
-    static func composePrefill(for kind: FeedKind) -> String? {
+    /// Compose FAB (§8): the tappable food-tag pills on OnlyFood; empty means
+    /// the plain note composer. No seed text on any kind — nothing is added to
+    /// a note unless the user taps a pill.
+    static func composeSuggestions(for kind: FeedKind) -> [String] {
         switch kind {
         case .onlyFood:
-            return OnlyFoodCompose.prefill
+            return OnlyFoodCompose.suggestedTags
         case .follows, .relay, .relaySet, .extendedNetwork:
-            return nil
+            return []
         }
     }
 

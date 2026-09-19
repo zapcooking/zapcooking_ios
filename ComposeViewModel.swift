@@ -34,6 +34,10 @@ final class ComposeViewModel {
     var attachments: [ComposeAttachment] = []
     var mentions: [InsertedMention] = []
     var hashtags: [String] = []
+    /// Tappable hashtag suggestions under the editor (the OnlyFood
+    /// composer: `OnlyFoodCompose.suggestedTags`). Empty for every other
+    /// composer. Non-empty also switches on the no-food-tag publish confirm.
+    let suggestedHashtags: [String]
 
     // MARK: - Poll state (NIP-88 / NIP-69)
 
@@ -115,10 +119,11 @@ final class ComposeViewModel {
 
     // MARK: - Init
 
-    init(keypair: Keypair, mode: ComposeMode = .new, initialText: String = "") {
+    init(keypair: Keypair, mode: ComposeMode = .new, initialText: String = "", suggestedHashtags: [String] = []) {
         self.keypair = keypair
         self.signingKeypair = keypair
         self.mode = mode
+        self.suggestedHashtags = suggestedHashtags
         // If we're composing a reply to a rumor the user already has marked
         // private, force the privacy toggle on and lock it. This keeps the
         // whole chain encrypted — a public reply mid-chain would leak the
@@ -1705,6 +1710,43 @@ final class ComposeViewModel {
         if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
 
         return tags
+    }
+
+    // MARK: - Suggestion pills (OnlyFood composer)
+
+    /// A pill is selected when its tag is in the derived hashtags, whatever
+    /// put it there — typed or tapped.
+    func isSuggestedHashtagSelected(_ tag: String) -> Bool {
+        hashtags.contains(tag.lowercased())
+    }
+
+    /// The §7.3 count as the filter applies it to this body.
+    var suggestedTagCount: Int { OnlyFoodCompose.tagCount(content: content, hashtags: hashtags) }
+    var suggestedTagsAtCap: Bool { OnlyFoodCompose.atCap(content: content, hashtags: hashtags) }
+    var suggestedTagsOverCap: Bool { OnlyFoodCompose.overCap(content: content, hashtags: hashtags) }
+
+    /// Selected → remove every `#tag` token from the body. Unselected →
+    /// append it, unless the note is already at the cap (no-op; the pill is
+    /// disabled in the row, this is the guard behind it). Goes through
+    /// `updateContent` so the chips and `t` tags re-derive. Returns false
+    /// only for that no-op, so a caller that then publishes can tell.
+    @discardableResult
+    func toggleSuggestedHashtag(_ tag: String) -> Bool {
+        if isSuggestedHashtagSelected(tag) {
+            updateContent(OnlyFoodCompose.removing(tag: tag, from: content))
+        } else {
+            guard !suggestedTagsAtCap else { return false }
+            updateContent(OnlyFoodCompose.appending(tag: tag, to: content))
+        }
+        return true
+    }
+
+    /// Composed from OnlyFood (pills present) and nothing in the body is a
+    /// food tag: the note would not appear in the feed it was written from.
+    /// The composer asks before publishing; "Add #foodstr" is a tap, so
+    /// nothing is added on its own.
+    var needsFoodTagConfirm: Bool {
+        !suggestedHashtags.isEmpty && !OnlyFoodCompose.reachesOnlyFood(hashtags: hashtags)
     }
 
     private func recomputeHashtags() {

@@ -1,9 +1,13 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import wisp
 
-/// Concern C-H — the OnlyFood composer seed and its interaction with the
-/// composer's hashtag derivation and the §7.3 structural cap. Hermetic.
+/// The OnlyFood composer's suggestion pills, replacing C-H's `#foodstr`
+/// prefill: nothing is added to a note unless the user taps; a pill toggles
+/// the tag in the body; the §7.3 structural cap is enforced exactly as
+/// `OnlyFoodFilter` counts it; publishing with no food tag asks first.
+/// Hermetic.
 @MainActor
 struct OnlyFoodComposeTests {
 
@@ -15,6 +19,13 @@ struct OnlyFoodComposeTests {
 
     private func autosaveKey(_ kp: Keypair) -> String { "compose_autosave_new_\(kp.pubkey)" }
 
+    /// A fresh OnlyFood composer: no draft, the pills, no seed.
+    private func onlyFoodComposer() -> ComposeViewModel {
+        let kp = freshKeypair()
+        UserDefaults.standard.removeObject(forKey: autosaveKey(kp))
+        return ComposeViewModel(keypair: kp, suggestedHashtags: OnlyFoodCompose.suggestedTags)
+    }
+
     private func kind1(content: String, tTags: [String]) -> NostrEvent {
         NostrEvent(
             id: "e1", pubkey: String(repeating: "a", count: 64), kind: 1, createdAt: 1,
@@ -23,66 +34,226 @@ struct OnlyFoodComposeTests {
         )
     }
 
-    @Test func seed_isFoodstrOnItsOwnLine_andInTheFeedSet() {
-        #expect(OnlyFoodCompose.defaultTag == "foodstr")
-        #expect(OnlyFoodCompose.prefill == "#foodstr\n\n")
-        #expect(FoodHashtags.allSet.contains(OnlyFoodCompose.defaultTag))
-        #expect(FoodHashtags.all.first == OnlyFoodCompose.defaultTag)
-    }
+    // MARK: - The set
 
-    @Test func seed_countsAsExactlyOneContentHashtag() {
-        #expect(OnlyFoodFilter.countContentHashtags(OnlyFoodCompose.prefill) == 1)
-        #expect(OnlyFoodFilter.countContentHashtags(OnlyFoodCompose.prefill + "dinner tonight") == 1)
-    }
-
-    /// The seed costs one of the five the cap allows: seed + 4 typed tags
-    /// passes, seed + 5 typed tags is structural spam. Typing `#foodstr` a
-    /// second time dedups on the `t` side but still counts on the content
-    /// side (`max(content #tags, t-tags)`), so it is not free.
-    @Test func seed_plusFourUserTags_passesCap_plusFiveFails() {
-        let four = OnlyFoodCompose.prefill + "soup #soup #stew #dinner #homemade"
-        let five = four + " #cooking"
-        let dupe = OnlyFoodCompose.prefill + "#foodstr #soup #stew #dinner #homemade"
-        func tags(_ content: String) -> [String] {
-            let vm = ComposeViewModel(keypair: freshKeypair(), initialText: content)
-            return vm.hashtags
+    @Test func suggestedTags_allReachOnlyFood_noDuplicates_foodstrFirst() {
+        let tags = OnlyFoodCompose.suggestedTags
+        #expect(tags.first == OnlyFoodCompose.defaultTag)
+        #expect(Set(tags).count == tags.count)
+        for tag in tags {
+            #expect(FoodHashtags.allSet.contains(tag), "\(tag) is not a food tag — a note with only it dead-ends")
+            #expect(tag == tag.lowercased(), Comment(rawValue: tag))
         }
-        #expect(tags(four).count == 5)
-        #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: four, tTags: tags(four))))
-        #expect(tags(five).count == 6)
-        #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: five, tTags: tags(five))))
-        #expect(tags(dupe) == ["foodstr", "soup", "stew", "dinner", "homemade"])
-        #expect(OnlyFoodFilter.countContentHashtags(dupe) == 6)
-        #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: dupe, tTags: tags(dupe))))
+        // Proposed and deliberately absent: not in the food set.
+        #expect(!tags.contains("gratitude"))
+        #expect(!FoodHashtags.allSet.contains("gratitude"))
+        // Every pill fits under the cap on its own; the whole row can't.
+        #expect(tags.count > OnlyFoodCompose.maxTags, "the cap must be reachable from the pills")
     }
 
-    /// The composer opens with the tag already derived — chip visible and
-    /// `t` tag ready — without waiting for a keystroke.
-    @Test func composer_seededWithPrefill_derivesFoodstrImmediately() {
-        let kp = freshKeypair()
-        UserDefaults.standard.removeObject(forKey: autosaveKey(kp))
-        let vm = ComposeViewModel(keypair: kp, initialText: OnlyFoodCompose.prefill)
-        #expect(vm.content == OnlyFoodCompose.prefill)
-        #expect(vm.hashtags == ["foodstr"])
-    }
+    // MARK: - No seed
 
-    /// Removable: deleting the seed text drops the chip and the tag.
-    @Test func composer_removingSeed_dropsTheTag() {
-        let kp = freshKeypair()
-        UserDefaults.standard.removeObject(forKey: autosaveKey(kp))
-        let vm = ComposeViewModel(keypair: kp, initialText: OnlyFoodCompose.prefill)
-        vm.updateContent("just soup tonight")
+    @Test func onlyFoodComposer_opensEmpty_nothingAutoAdded() {
+        let vm = onlyFoodComposer()
+        #expect(vm.content.isEmpty)
         #expect(vm.hashtags.isEmpty)
+        #expect(vm.suggestedHashtags == OnlyFoodCompose.suggestedTags)
+        #expect(!vm.canPublish)
+        #expect(FeedTabRouting.composeSuggestions(for: .onlyFood) == OnlyFoodCompose.suggestedTags)
+        for kind in [FeedKind.follows, .extendedNetwork, .relay(url: "wss://nos.lol")] {
+            #expect(FeedTabRouting.composeSuggestions(for: kind).isEmpty, "\(kind)")
+        }
     }
 
-    @Test func presenter_newNoteRequest_carriesSeed() {
+    @Test func generalComposer_hasNoPills_noConfirm() {
+        let kp = freshKeypair()
+        UserDefaults.standard.removeObject(forKey: autosaveKey(kp))
+        let vm = ComposeViewModel(keypair: kp)
+        #expect(vm.suggestedHashtags.isEmpty)
+        vm.updateContent("just a thought")
+        #expect(!vm.needsFoodTagConfirm)
+    }
+
+    // MARK: - Toggle
+
+    @Test func pill_tapAppends_secondTapRemoves_bodyIsTruth() {
+        let vm = onlyFoodComposer()
+        vm.toggleSuggestedHashtag("foodstr")
+        #expect(vm.content == "#foodstr")
+        #expect(vm.hashtags == ["foodstr"])
+        #expect(vm.isSuggestedHashtagSelected("foodstr"))
+        #expect(vm.canPublish)
+
+        vm.toggleSuggestedHashtag("foodstr")
+        #expect(vm.content.isEmpty)
+        #expect(vm.hashtags.isEmpty)
+        #expect(!vm.isSuggestedHashtagSelected("foodstr"))
+    }
+
+    @Test func pill_afterProse_startsATagLine_thenJoinsIt() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("ramen night ")
+        vm.toggleSuggestedHashtag("foodstr")
+        #expect(vm.content == "ramen night\n\n#foodstr")
+        vm.toggleSuggestedHashtag("dinner")
+        #expect(vm.content == "ramen night\n\n#foodstr #dinner")
+        #expect(vm.hashtags == ["foodstr", "dinner"])
+        // Removing the middle one closes the gap.
+        vm.toggleSuggestedHashtag("foodstr")
+        #expect(vm.content == "ramen night\n\n#dinner")
+        vm.toggleSuggestedHashtag("dinner")
+        #expect(vm.content == "ramen night")
+    }
+
+    /// A typed tag selects its pill; the pill then removes the typed token
+    /// wherever it sits and tidies the space.
+    @Test func typedTag_selectsPill_andPillRemovesIt() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("Sunday #breakfast at home #Breakfast")
+        #expect(vm.isSuggestedHashtagSelected("breakfast"))
+        vm.toggleSuggestedHashtag("breakfast")
+        #expect(vm.content == "Sunday at home")
+        #expect(!vm.isSuggestedHashtagSelected("breakfast"))
+        // A longer tag sharing the prefix is left alone.
+        vm.updateContent("#breakfastclub #lunch")
+        vm.toggleSuggestedHashtag("lunch")
+        #expect(vm.content == "#breakfastclub")
+    }
+
+    // MARK: - The cap
+
+    @Test func cap_countsLikeTheFilter_disablesFurtherPills_reenablesOnRemove() {
+        let vm = onlyFoodComposer()
+        let pills = OnlyFoodCompose.suggestedTags
+        for tag in pills.prefix(OnlyFoodCompose.maxTags) { vm.toggleSuggestedHashtag(tag) }
+        #expect(vm.hashtags.count == OnlyFoodCompose.maxTags)
+        #expect(vm.suggestedTagCount == OnlyFoodCompose.maxTags)
+        #expect(vm.suggestedTagsAtCap)
+        #expect(!vm.suggestedTagsOverCap)
+        // A sixth pill is a no-op (the row disables it; this is the guard behind it).
+        let sixth = pills[OnlyFoodCompose.maxTags]
+        vm.toggleSuggestedHashtag(sixth)
+        #expect(vm.hashtags.count == OnlyFoodCompose.maxTags)
+        #expect(!vm.isSuggestedHashtagSelected(sixth))
+        // What would be published passes the filter's own rule.
+        #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
+        // Free a slot: the sixth becomes addable.
+        vm.toggleSuggestedHashtag(pills[0])
+        #expect(!vm.suggestedTagsAtCap)
+        vm.toggleSuggestedHashtag(sixth)
+        #expect(vm.isSuggestedHashtagSelected(sixth))
+        #expect(vm.suggestedTagsAtCap)
+    }
+
+    /// Typing past the cap is flagged, not prevented — the pills can't push
+    /// a note over, but the keyboard can, and a duplicate typed tag counts
+    /// on the content side (`max(content #tags, t-tags)`).
+    @Test func typedOverflow_isFlagged_andMatchesTheFilter() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("#soup #stew #dinner #homemade #cooking #foodstr")
+        #expect(vm.suggestedTagsOverCap)
+        #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
+        vm.updateContent("#foodstr #foodstr #soup #stew #dinner #homemade")
+        #expect(vm.hashtags.count == 5)
+        #expect(vm.suggestedTagCount == 6)
+        #expect(vm.suggestedTagsOverCap)
+        #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
+    }
+
+    // MARK: - The dead end
+
+    @Test func publishConfirm_onlyWhenNoFoodTag_fromOnlyFood() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("made a thing")
+        #expect(vm.needsFoodTagConfirm)
+        vm.updateContent("made a thing #nostr")
+        #expect(vm.needsFoodTagConfirm, "a non-food tag does not reach OnlyFood")
+        vm.toggleSuggestedHashtag("cooking")
+        #expect(!vm.needsFoodTagConfirm)
+        vm.toggleSuggestedHashtag("cooking")
+        vm.updateContent("made a thing #sourdough #baking")
+        #expect(!vm.needsFoodTagConfirm, "a typed food-set tag counts too")
+    }
+
+    /// The confirm's "Add #foodstr" is the pill toggle — a tap, and it
+    /// leaves the note reachable and under the cap.
+    @Test func confirmAddFoodstr_isTheToggle() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("made a thing")
+        vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag)
+        #expect(vm.content == "made a thing\n\n#foodstr")
+        #expect(!vm.needsFoodTagConfirm)
+        #expect(FoodHashtags.hasFoodTag(kind1(content: vm.content, tTags: vm.hashtags)))
+    }
+
+    /// At the cap with no food tag (five non-food tags typed) the one-tap fix
+    /// cannot work: the toggle reports the no-op and leaves the body alone,
+    /// so the composer must not publish on its behalf (the alert hides the
+    /// button in that state).
+    @Test func confirmAddFoodstr_atCapWithNoFoodTag_isRefused() {
+        let vm = onlyFoodComposer()
+        vm.updateContent("a #nostr #bitcoin #zap #sats #stack")
+        #expect(vm.suggestedTagsAtCap)
+        #expect(vm.needsFoodTagConfirm)
+        let before = vm.content
+        #expect(vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) == false)
+        #expect(vm.content == before)
+        #expect(vm.needsFoodTagConfirm)
+        // Off the cap, the same tap works and returns true.
+        vm.updateContent("a #nostr #bitcoin #zap #sats")
+        #expect(vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag))
+        #expect(!vm.needsFoodTagConfirm)
+    }
+
+    // MARK: - The row (rendered; PNGs via the git-ignored `wispTests/.zc_snapshot_dir`)
+
+    /// The row in the three states the by-hand gate screenshots: no pill
+    /// tapped, one tapped, at the cap. Measured: the selected pills are
+    /// filled with the theme primary, the count reads as the filter counts.
+    @Test func suggestionRow_renders_none_one_cap() throws {
+        let vm = onlyFoodComposer()
+        let states: [(String, Int)] = [("none", 0), ("one", 1), ("cap", OnlyFoodCompose.maxTags)]
+        var previous = 0
+        for (name, taps) in states {
+            for tag in OnlyFoodCompose.suggestedTags[previous..<taps] { vm.toggleSuggestedHashtag(tag) }
+            previous = taps
+            let renderer = ImageRenderer(content:
+                HashtagSuggestionRow(viewModel: vm)
+                    .frame(width: 390)
+                    .background(Color.wispBackground)
+            )
+            renderer.scale = 2
+            let image = try #require(renderer.uiImage)
+            #expect(image.size.width >= 390, Comment(rawValue: name))
+            #expect(vm.suggestedTagCount == taps, Comment(rawValue: name))
+            #expect(vm.suggestedTagsAtCap == (taps == OnlyFoodCompose.maxTags), Comment(rawValue: name))
+            if let dir = Self.snapshotDirectory, let data = image.pngData() {
+                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                try? data.write(to: URL(fileURLWithPath: dir).appendingPathComponent("tag-pills-\(name).png"))
+            }
+        }
+    }
+
+    nonisolated private static var snapshotDirectory: String? {
+        let fileURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent(".zc_snapshot_dir")
+        guard let raw = try? String(contentsOf: fileURL, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: - Routing
+
+    @Test func presenter_newNoteRequest_carriesPillsAndNoSeed() {
         let presenter = ComposePresenter()
-        presenter.openNewNote(initialText: OnlyFoodCompose.prefill)
-        guard case .newNote(let text)? = presenter.request else {
+        presenter.openNewNote(suggestedHashtags: OnlyFoodCompose.suggestedTags)
+        guard case .newNote(let text, let tags)? = presenter.request else {
             Issue.record("expected .newNote, got \(String(describing: presenter.request))")
             return
         }
-        #expect(text == OnlyFoodCompose.prefill)
+        #expect(text.isEmpty)
+        #expect(tags == OnlyFoodCompose.suggestedTags)
         #expect(presenter.request?.id == "new-note")
     }
 }
