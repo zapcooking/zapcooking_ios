@@ -1,101 +1,108 @@
-# GATE — feed/onlyfood-polish
-Unified feed follow-ups from TestFlight 2.1 (2) device testing, six items on one
-surface: the live-now rail on OnlyFood (§2.3 reversed), the online-users pill and
-relay-count menu removed from the feed top bar (and Online Now removed from the app
-altogether, presence tracking included), a Feed Relay row in the drawer, a Cheffy entry in the bar's trailing slot, the bolt as the
-zap-glyph default, and the bounded read of the OnlyFood first-item clipping. Own
-branch off main at dca127a (the #75 merge). Local build only on Seth's MacBook Air;
-gates run on the MacinCloud box by hand. This GATE.md replaces #75's.
+# GATE — concern/cheffy-empty-states
+The last Wisp mascot illustration out of the app. C-J moved the eight `WispLogo`
+sites to `ZcLogo`; the thread view's "No replies yet" empty state used a
+different asset, `NoReplies.imageset` (a dashed Wisp-flame outline, eff92c6),
+which that grep could not see. It now draws `CheffyIcon` in the **neutral**
+expression at 64 pt through a small `NoRepliesEmptyState` view; both Wisp
+imagesets (`NoReplies`, the dead `WispLogo`) are deleted from the catalog. The
+sweep of every other empty, placeholder and error state found SF Symbols,
+emoji (🍳 📖) and text only — nothing Wisp — so nothing else changes. Own
+branch off main at 7c56d93 (2.1 (3)). Local build only on Seth's MacBook Air;
+gates run on the MacinCloud box by hand.
 
-**Frozen at this commit.** App code is frozen at **5c06e2d** (cdfa739 plus the Copilot review fixes: the drawer relay count hides on OnlyFood as the pill did, the write-only `connectedRelays` list is gone, `FeedTopBarControl` is explicitly `Hashable`). The previous GATE.md (1c686ce) is superseded. This GATE.md is the
-only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
-A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **f587687** (c9459c5 plus the Copilot
+review fix: the test's colour-to-RGB helper now fails the test instead of reading
+black when conversion fails). The previous GATE.md (0280dd9) is superseded. This
+GATE.md is the only commit after it and is the HEAD commit — `gate.sh` refuses to run
+otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- `build-for-testing` (iPhone 17 / OS 26.2): **green** at 5c06e2d — two builds for the
-  review pass (2026-09-10): the first was green but introduced one warning (a
-  main-actor static method passed as a function value into `Optional.map`), fixed as
-  a closure; the second is the green one. Free disk 53.9 GB before and after; no local
-  Time Machine snapshots. (Earlier freezes: b8b1254 took four builds — issue #76;
-  cdfa739 one.)
-- Warnings in touched files (`MainView.swift`, `SidebarDrawerView.swift`,
-  `DrawerRow.swift`, `AppSettings.swift`, `FeedViewModel.swift`, `wisp/FeedTabRouting.swift`,
-  `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`,
-  `wispTests/FeedStartTests.swift`): **zero new**. `FeedViewModel.swift` carries five
-  pre-existing Swift 6 diagnostics (`SafetyFilter.shared` from a nonisolated context,
-  two async-without-await, one no-async-in-await); the same five appear in the full
-  builds of main-equivalent code at lines 438/696/765/1077, now 423/677/746/1057 —
-  shifted by the deleted lines, none in a changed hunk.
+- `build-for-testing` (iPhone 17 / OS 26.2): **green** at f587687 and at c9459c5.
+  Four builds this session (2026-09-19): the first failed on two compile errors in
+  the new test file (a `Comment` wrapper, a `nonisolated` helper); the second was
+  green; the incremental `xcodebuild test` builds behind the serial runs below,
+  including the one for the review fix, were green. Free disk 15 GB before and after; one transient dip
+  to 8.9 GB while the simulator booted, back to 17 GB within a minute; no local
+  Time Machine snapshots.
+- Warnings in touched files (`wisp/ThreadView.swift`, `wisp/NoRepliesEmptyState.swift`,
+  `wispTests/EmptyStateGroundTests.swift`): **zero**. Incremental totals were 402 and 436 lines, all pre-existing
+  Swift 6 diagnostics elsewhere (not comparable to the 538-line full-build baseline).
+- Serial single-suite run on the Air (the C-G exception form,
+  `test-without-building -parallel-testing-enabled NO -only-testing:wispTests/EmptyStateGroundTests`):
+  **3/3 pass** at f587687 (and at c9459c5; 1.9 s of test time on the warm run). The run
+  also wrote PNGs of the empty state on the default theme's dark and light grounds and
+  on Srcery light (the softest face-vs-ground of the 30): neutral face, toque in the
+  theme primary, bolt accent, "No replies yet" in tertiary — all readable on each.
 - pbxproj: no diff (three-dot, `git diff origin/main...HEAD --stat -- wisp.xcodeproj`
-  empty). New files `wisp/FeedTopBar.swift`, `wispTests/FeedTopBarPolishTests.swift`
-  are self-registering.
+  empty). New files `wisp/NoRepliesEmptyState.swift` and
+  `wispTests/EmptyStateGroundTests.swift` are self-registering; the imageset
+  deletions are inside the `Assets.xcassets` folder reference.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout feed/onlyfood-polish && git pull --ff-only
+git fetch origin && git checkout concern/cheffy-empty-states && git pull --ff-only
 cp ci_scripts/gate.sh ~/gate.sh && chmod +x ~/gate.sh
-~/gate.sh feed/onlyfood-polish
+~/gate.sh concern/cheffy-empty-states
 ```
 Expected verdict line: `gate: PASS — failure set is exactly the known set (4/4);
-N tests ran on feed/onlyfood-polish @ <this commit>`, with the four known failures
-(#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
+N tests ran on concern/cheffy-empty-states @ <this commit>`, with the four known
+failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
 `SafetyTests`, issue #57) and no `NEW` line.
 
-**Count.** This branch has **839** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 830; the delta is **+9**
-(`FeedTopBarPolishTests` 9). The Online Now removal deletes no whole test: its
-coverage was two assertions inside `FeedStartTests/onlyFoodLanding_startTwice_runsSharedSetupOnce`,
-which stays and must still pass. If the parsed total is 830 the run was on a stale tree.
+**Count.** This branch has **842** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main has 839; the delta is **+3**
+(`EmptyStateGroundTests` 3). If the parsed total is 839 the run was on a stale tree.
 
-**Hosted gate on the box.** `feedPicker_staysCentred_whateverSitsAtTheEdges` opens a
-real `UIWindow` in the test host and pumps the run loop (the `FeedStickToTopTests`
-pattern). If it fails with "did not lay out", that is the harness, not the bar —
-report the recorded issue text rather than retrying blind.
+**Rendering on the box.** All three new tests draw through `ImageRenderer` in the
+hosted app process (the `FeedTopBarPolishTests/cheffyButton_rendersAtThe44ptTarget`
+pattern) and read pixels back; none opens a window or a socket.
 
 ## Gate 2 — the brief's hermetic gates (subset of Gate 1; name-check the bundle)
 ```sh
 ~/gate.sh --parse "$(ls -td ~/Library/Developer/Xcode/DerivedData/wisp-*/Logs/Test/*.xcresult | head -1)" \
-  | grep -E 'FeedTopBarPolishTests|FeedTabRoutingTests|FeedStickToTopTests|BottomBarAndActionRowTests|OnlyFood'
+  | grep -E 'EmptyStateGroundTests|CheffyTests'
 ```
-- live rail on OnlyFood: `liveRail_rendersOnEveryKind_includingOnlyFood`
-- no online-users or relay-count control on any kind:
-  `topBar_hasNoOnlinePillOrRelayMenu_onAnyKind`
-- drawer relay row shows the count, red at zero: `drawerRelayRow_showsTheCount_redAtZero`;
-  and no value on OnlyFood: `drawerRelayRow_hidesTheCountOnOnlyFood_likeThePillDid`
-- the shared setup block still runs once with the metrics socket gone: `FeedStartTests` (3)
-- Cheffy present iff `CheffyGate.entryVisible()`:
-  `cheffyEntry_presentWhenGateOpen_absentWhenClosed_onEveryKind`,
-  `cheffyButton_rendersAtThe44ptTarget_withAvatarWeightGlyph`
-- picker centred on every kind (hosted, measured): `feedPicker_staysCentred_whateverSitsAtTheEdges`
-- bolt default / explicit bitcoin kept / fiat coin stack:
-  `zapGlyph_defaultsToBolt_onFreshInstall`,
-  `zapGlyph_explicitBitcoinPick_survives_andFiatStillCoinStack`
-- all pre-existing feed, OnlyFood and top-bar gates: every other suite in the grep
-  passes (only the known #4 case fails).
+- no Wisp illustration asset in the built app (`NoReplies`, `WispLogo` both absent;
+  `ZcLogo` present): `builtApp_carriesNoWispIllustrationAsset`
+- the thread empty state is Cheffy, neutral, 64 pt, and its hat (theme primary)
+  and ink both land on the canvas on light and dark grounds:
+  `noRepliesEmptyState_drawsNeutralCheffy_onLightAndDarkGround`
+- the C-J ground check, measured: on all 15 presets × light/dark, Cheffy's face
+  sits ≥ 30/255 off the ground, the hat ≥ 60, the ink ≥ 90 off the face
+  (softest face-vs-ground is Srcery light at 34): `cheffy_readsOnEveryThemeGround_lightAndDark`
+- `CheffyTests` (the SVG parser and copy pools behind `CheffyIcon`): unchanged, all pass.
 
-## Gate 3 — MANUAL on device
-1. Launch on OnlyFood with at least one live stream discoverable, then switch to
-   Follows: the live-now rail shows the same pills on both. Screenshot OnlyFood and
-   Follows side by side; both list tops sit at the same offset under the bar.
-2. Top bar on every kind: avatar, (content filter on general kinds), centred picker,
-   Cheffy at the trailing edge; no person-count pill, no relay-count menu.
-3. Tap Cheffy from OnlyFood and from Follows: the Cheffy cover opens both times.
-   (With `cheffyEnabled` off the button is absent.)
-4. Drawer: on a general kind "Feed Relay" shows the connected count (red when 0);
-   on OnlyFood it shows no count (the pill was hidden there too). Tap opens the relay
-   picker on both. No "Online Now" row anywhere. Feed picker → Relay still opens the same
-   picker.
-5. Fresh install: the zap glyph is the bolt. Set Interface → Bitcoin B: the B shows
-   and survives relaunch. Fiat mode: the coin stack, either way.
-6. Item 1 diagnostic (see PR body): after a pull-to-refresh on OnlyFood with no live
-   stream, the first card's avatar and name must sit fully below the bar.
-7. Recipe-publish navigation (this PR changes it): open Cheffy from the FEED side
-   (either kind), publish a recipe. Expect: the app lands on the Recipes tab with the
-   new recipe pushed; Back returns to the Recipes root, not to the feed. Repeat from
-   My Kitchen's Intelligence menu: same result as before.
+## Gate 3 — BY HAND on device: four empty states, screenshot each
+Light and dark once each (Interface → theme); every state below is a
+dead end, so none should show an excited face and none should show the Wisp flame.
+1. **Thread, no replies**: open any note with no replies (a fresh post of your own
+   is the quickest). Under the focal: Cheffy, neutral face, 64 pt, "No replies yet"
+   in tertiary. The face, toque and eyes all read on the ground; there is no ring
+   or handle to vanish.
+2. **Notifications, empty**: fresh or watch-only account → bell-slash symbol,
+   "No notifications". Unchanged; confirms no Wisp there.
+3. **DMs, empty**: Messages with no conversations → double-bubble symbol,
+   "No messages yet". Unchanged.
+4. **OnlyFood, genuine empty** (relay reachable, nothing accepted — e.g. WoT on
+   with a fresh graph): 🍳, "No food posts yet". And the relay-miss copy
+   ("Couldn't reach the food feed") with the network off. Both unchanged.
+Optional fifth: My Kitchen → Saved with no bookmarks → 📖, "Start saving recipes".
 
-## Gate 4 — pbxproj
+## Gate 4 — grep: no Wisp illustration asset referenced
+```sh
+git grep -nE 'Image\("(NoReplies|WispLogo)"|WispLogo|wisp_logo|no_replies|NoReplies\.imageset' -- . ':!GATE.md'
+```
+Expect exactly two hits, neither an image reference: the doc comment in
+`wisp/NoRepliesEmptyState.swift` naming the deleted asset and C-J's sweep, and the
+`["NoReplies", "WispLogo"]` literal in `wispTests/EmptyStateGroundTests.swift` (the
+test that asserts both are absent from the bundle). No `Image("…")` hit.
+```sh
+ls wisp/Assets.xcassets
+```
+Expect no `NoReplies.imageset`, no `WispLogo.imageset`.
+
+## Gate 5 — pbxproj
 `git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty.
 
 ## Results
