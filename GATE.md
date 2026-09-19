@@ -1,127 +1,138 @@
-# GATE — concern/tag-suggestion-pills (PR #85: #84 on top of the merged pills)
-The pills themselves merged as #83 (0a5f6ee). This branch is rebased onto that
-merge and carries **#84**: `OnlyFoodFilter.maxHashtags` is **20** (was 5 — the
-3.3 live sample's 6–20 band was genuine food posts, 100+ was aggregators) and the
-pills are the cross-platform set in the cross-platform order (`foodstr, coffee,
-cooking, breakfast, dinner, lunch, cookstr, food`). Since the eight pills now fit
-under the cap together, the cap is only reachable by typing. Plus the three
-Copilot findings on #85: the "No food tag yet" message says the note's real tag
-count (it can exceed the cap when typed) and how many to remove
-(`OnlyFoodCompose.noFoodTagMessage`); `removing` collapses runs of spaces until
-stable; `isHashtagLine` accepts only real hashtag tokens, so a pill after
-`#foodstr,` starts a paragraph. `FoodHashtags` and the optimistic-insert rule are
-unchanged. Off main at 0a5f6ee (the #83 merge). Local build only on Seth's MacBook Air; gates run on the MacinCloud box
-by hand.
+# GATE — concern/memories (Memories, "On this day")
+Port of Android `MemoriesRepository` / `MemoriesCard` / `MemoriesScreen` /
+`MemoriesViewModel`. Read-only — no new event kind, nothing published, so
+§7.13's live-write protocol does not apply. Off main at 563e09d (#85).
+Local build only on Seth's MacBook Air; gates run on the MacinCloud box by hand.
 
-**Frozen at this commit.** App code is frozen at **f2172da** (9701cd6, #84 rebased
-onto main, plus the Copilot fixes). The previous GATE.md (4c895e7, before the
-rebase) is superseded. This GATE.md is the only commit after it and is the
-HEAD commit — `gate.sh` refuses to run otherwise. A
-review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **8b54a67**. This GATE.md is the
+only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
+A review fix re-opens the freeze: push a fresh GATE.md last.
+
+## What landed
+- `wisp/Memories.swift` — pure top-level helpers (`memoryWindows` with the
+  Feb 29 → Feb 28 fallback, in the user's time zone; `isMemoryReply`, the
+  corrected NIP-10 predicate — case-insensitive `mention`, id-less `e` tags
+  ignored; `shouldCacheMemories`; `memoriesLocalDateKey`), `MemoriesStore`
+  (`memories_v1_<pubkey>` / `memories_dismissed_<pubkey>`, injected defaults),
+  `MemoriesRelay` (`RelayDefaults.defaults` ∪ `nostr.wine`, 2026-09-19 retention
+  measurement in the comment; 8s connect + 10/12/14s EOSE + 4s grace; limit 50),
+  `MemoriesSubSeq` (process-wide, §7.2; CLOSE only the opened subId, §7.5),
+  `MemoriesRepository` (cache-first, refresh, per-day dismissal, in-flight
+  coalescing).
+- **The cache rule:** cache only when EVERY window resolved via EOSE; an EOSE'd
+  empty window is cacheable, a timed-out one is not; a stored partial reads as
+  a miss.
+- `wisp/MemoriesCard.swift` — teaser under the live rail in BOTH feed bodies via
+  `FeedTabRouting.showsMemoriesTeaser` (the OnlyFood inconsistency is deliberate
+  and documented there). `wisp/MemoriesView.swift` + `MemoriesViewModel.swift` —
+  the full screen, drawer row next to My Polls, presented as a sheet.
+- Related issues filed, NOT fixed here: zapcooking_ios #86 (shared NIP-10
+  predicates; answers "would the fix make #4 pass" — no) and
+  zap_cooking_android #258 (primal is a dead archive slot).
 
 ## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- Build (iPhone 17 / OS 26.2, `build-for-testing`, shared DerivedData): see the
-  #84 line below. Earlier: **green** at 9b19c50 and at eac62f1. Four builds this session (2026-09-19): one compile fix in the new test
-  file (`Comment` wrappers), one logic fix in `OnlyFoodCompose.removing` (a space
-  left after a newline), then green twice. Free disk 19 → 13 GB across the runs
-  (the usual transient simulator dip); no local Time Machine snapshots.
-- Warnings in touched files (`ComposeView.swift`, `ComposeViewModel.swift`,
-  `MainView.swift`, `OnlyFoodFilter.swift`, `wisp/ComposePresenter.swift`,
-  `wisp/FeedTabRouting.swift`, `wisp/HashtagSuggestionRow.swift`,
-  `wisp/OnlyFoodCompose.swift`, the five test files): **zero**.
-- #84 (2026-09-19): `build-for-testing` **green** at d096290 (pre-rebase) and at
-  f2172da; zero new warnings (the eight Swift 6 concurrency lines in
-  `OnlyFoodFilter.swift` at 94–105 pre-exist at 90–101 — stash-build proven the
-  same day). Suites not run on the Air (the no-local-test rule) — Gate 1 on the
-  box is the proof.
-- Serial runs on the Air (the C-G exception form): `OnlyFoodComposeTests` 13/13,
-  `FeedTabRoutingTests`, `ComposeSeedTests`, `OnlyFoodOwnPublishTests`,
-  `FeedTopBarPolishTests` all green (42 tests). PNGs of the row in the three
-  by-hand states (no pill, one, at the cap with the rest disabled) examined.
-- pbxproj: no diff (three-dot). `wisp/HashtagSuggestionRow.swift` is
-  self-registering.
+- `build-for-testing` (iPhone 17 / OS 26.2, shared DerivedData,
+  `-skipPackagePluginValidation`): **green** three times on 2026-09-19 — first
+  build green at once; two more to clear Swift 6 isolation warnings in the new
+  files. Warnings in touched files (`MainView.swift`, `SidebarDrawerView.swift`,
+  `wisp/FeedTabRouting.swift`, the four `Memories*` files, the two test files):
+  **zero** at 8b54a67. Free disk 13 → 12 GB across the runs (below the 15 GB
+  floor going in; incremental builds only, no DerivedData eviction needed).
+- Serial run on the Air (the C-G exception form, `-parallel-testing-enabled NO`,
+  `-only-testing:wispTests/MemoriesTests -only-testing:wispTests/MemoriesLiveTests`
+  with the enable file touched): **37/37 passed** in 32.6 s. The live gate
+  (jb55, default author) reported: 1y 2025-09-19 → 2 events EOSE; 2y 2024-09-19
+  → 5 events EOSE; 3y 2023-09-19 → 3 events EOSE; total 10, cacheable, 10 s.
+- pbxproj: no diff (three-dot). Xcode had the project open and kept re-sorting
+  two `FeatureFlags.swift` lines in the working tree; reverted before every
+  build and before the commit — the committed tree carries no project change.
+- Gate 4 (by hand) is Seth's device pass; the Simulator cannot be driven from a
+  Claude session.
 
 ## Gate 1 — hermetic, serial (MacinCloud)
 ```sh
 cd /Users/user301940/Development/zapcooking_ios
-git fetch origin && git checkout concern/tag-suggestion-pills && git pull --ff-only
+git fetch origin && git checkout concern/memories && git pull --ff-only
 cp ci_scripts/gate.sh ~/gate.sh && chmod +x ~/gate.sh
-~/gate.sh concern/tag-suggestion-pills
+~/gate.sh concern/memories
 ```
 Expected verdict line: `gate: PASS — failure set is exactly the known set (4/4);
-N tests ran on concern/tag-suggestion-pills @ <this commit>`, with the four known
-failures (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
-`SafetyTests`, issue #57) and no `NEW` line.
+N tests ran on concern/memories @ <this commit>`, with the four known failures
+(#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
+`SafetyTests`, issue #57) and no `NEW` line. `MemoriesLiveTests` is `.enabled(if:)`
+off unless the enable file exists, so it does not run here.
 
-**Count.** This branch has **860** `@Test` declarations (`git grep -cE
-'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main (0a5f6ee, with #83) has 856;
-the delta is **+4** (`OnlyFoodComposeTests` 17, was 13 — #84 added
-`suggestedTags_matchTheCrossPlatformSetAndOrder`; the Copilot fixes added
-`removing_collapsesRunsOfSpaces`, `appending_afterPunctuatedTag_startsNewParagraph`,
-`noFoodTagMessage_saysTheRealCount`). If the parsed total is 856 the run was on
-main's tree. If the parsed total is 849 the run was on a
-stale tree. `OnlyFoodComposeLiveTests` stays opt-in and skipped.
+**Count.** This branch has **897** `@Test` declarations (`git grep -cE
+'^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main (563e09d) has 860; the delta
+is **+37** (`MemoriesTests` 36, `MemoriesLiveTests` 1).
 
-## Gate 2 — C-H's seed tests updated (name-check the bundle)
+## Gate 2 — unit coverage for the four pure helpers
+Covered inside Gate 1 by `MemoriesTests`: windows (Jan 1, Dec 31, Feb 29 → Feb 28
+in 2023/2022/2021, Feb 28 stays Feb 28, NY vs Tokyo day boundaries), the reply
+predicate (root/reply/unmarked/relay-hint/unknown marker → reply; `mention`,
+`Mention`, `MENTION`, `q` quotes, bare `["e"]`, `["e", ""]` → not a reply; mention
++ reply → reply; two control assertions pin the shared helper's current wrong
+behaviour for #86), the cache rule (all-EOSE cacheable even when empty; any
+timeout — including the frozen-3-year case and a timeout WITH events — refused;
+empty list refused), the date key (padding, time zone). Plus the store round
+trip, stored-partial-as-miss, per-day dismissal, and the repository's gating with
+an injected fetch (complete cached → one relay round per day; partial returned
+but not cached → re-fetched next open; refresh keeps the cache when not
+authoritative; concurrent opens coalesce; subIds unique across instances).
+
+To run only this suite on the box:
 ```sh
-~/gate.sh --parse "$(ls -td ~/Library/Developer/Xcode/DerivedData/wisp-*/Logs/Test/*.xcresult | head -1)" \
-  | grep -E 'OnlyFoodComposeTests|OnlyFoodFilterTests|FeedTabRoutingTests|ComposeSeedTests'
-git grep -n 'prefill' -- wisp/OnlyFoodCompose.swift wisp/FeedTabRouting.swift MainView.swift
+cd /Users/user301940/Development/zapcooking_ios
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/MemoriesTests
 ```
-- no seed: `onlyFoodComposer_opensEmpty_nothingAutoAdded`,
-  `generalComposer_hasNoPills_noConfirm`, `presenter_newNoteRequest_carriesPillsAndNoSeed`,
-  `FeedTabRoutingTests/composeSuggestions_areTheFoodPillsOnOnlyFoodOnly`
-- the set: `suggestedTags_allReachOnlyFood_noDuplicates_foodstrFirst`,
-  `suggestedTags_matchTheCrossPlatformSetAndOrder` (#84 order, pinned literally)
-- the cap is 20 (#84): `OnlyFoodFilterTests/structuralSpam_boundaries` — 7 and 20
-  t-tags accept, 21 and 100 reject, same on the content side
-- the Copilot fixes: `removing_collapsesRunsOfSpaces`,
-  `appending_afterPunctuatedTag_startsNewParagraph`, `noFoodTagMessage_saysTheRealCount`
-- toggle: `pill_tapAppends_secondTapRemoves_bodyIsTruth`,
-  `pill_afterProse_startsATagLine_thenJoinsIt`, `typedTag_selectsPill_andPillRemovesIt`
-- the cap, as the filter counts it: `cap_countsLikeTheFilter_disablesFurtherPills_reenablesOnRemove`,
-  `typedOverflow_isFlagged_andMatchesTheFilter`
-- the dead end: `publishConfirm_onlyWhenNoFoodTag_fromOnlyFood`, `confirmAddFoodstr_isTheToggle`,
-  `confirmAddFoodstr_atCapWithNoFoodTag_isRefused`
-- the row: `suggestionRow_renders_none_one_cap`
-- `ComposeSeedTests` (5) unchanged in substance — wallet / share seeds still merge.
-- the grep returns nothing: no `prefill` symbol remains on the OnlyFood path.
 
-## Gate 3 — BY HAND on device: compose from OnlyFood, screenshot each
-1. **No pill tapped**: OnlyFood → FAB. Editor empty, placeholder "What are you
-   cooking?", the row under it: hint, eight pills in the order foodstr, coffee,
-   cooking, breakfast, dinner, lunch, cookstr, food, "0/20 tags". Type a line, tap
-   Publish → the "No food tag yet" alert with Add #foodstr / Post anyway / Cancel.
-   Cancel. Screenshot the composer and the alert.
-2. **One pill**: tap #foodstr → it fills, "#foodstr" appears on its own line under
-   the text, the chip row shows it, "1/20 tags". Tap it again → gone from the body
-   and the count. Tap it once more. Screenshot.
-3. **All pills, then the cap**: tap the other seven → "8/20 tags", nothing dims
-   (the whole row fits under the cap). Clear the body, type eighteen tags by hand
-   ("#a1 #a2 … #a18"), tap #foodstr and #coffee → "20/20 tags", the six remaining
-   pills dim and do not respond; a selected pill still toggles off and frees a
-   slot. Type a 21st "#tag" by hand → the count turns red with the "hides notes
-   with more than 20 tags" line. Delete it. Screenshot at 20/20.
-   Then clear the body and type twenty non-food tags, Publish → the alert offers
-   only Post anyway / Cancel and says "already has 20 tags. Remove one". Add two
-   more, Publish → "already has 22 tags. Remove 3". Cancel. Type "#foodstr," on
-   its own line, tap #coffee → it lands on a new paragraph, not after the comma.
-4. **General composer**: Follows → FAB: no row, "What's on your mind?", no alert
-   on Publish. Recipes → +: the recipe form, unchanged.
+## Gate 3 — LIVE, read-only (MacinCloud)
+No §7.13 protocol: the gate only READs kind-1 history for a public author and
+publishes nothing. Default author is jb55 (`32e18276…`, posts most days since
+2022). To run it against your own key instead, put your hex pubkey in the
+`MEMORIES_LIVE_PUBKEY` variable below (hosted tests do not receive `TEST_RUNNER_`
+env, so the enable is the file; the pubkey override IS read from the
+environment when present — if it does not reach the process the default author
+runs, which still satisfies the gate).
+```sh
+cd /Users/user301940/Development/zapcooking_ios
+touch wispTests/.memories_live_enable
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/MemoriesLiveTests \
+  -resultBundlePath ~/memories-live.xcresult 2>&1 | grep -E 'MEMORIES_LIVE|✔|✘'
+rm -f wispTests/.memories_live_enable
+```
+Expected: three `MEMORIES_LIVE window=…` lines, one per window, each with an
+`events=N` count and `resolved=EOSE` or `resolved=TIMEOUT`; the test passes when
+all three windows are present, at least one resolved via EOSE, and the total
+event count is > 0. Report the three lines in the PR. On the Air today: 2 / 5 / 3
+events, all EOSE, 10 s.
 
-## Gate 4 — BY HAND: a pill-tagged note reaches OnlyFood
-From OnlyFood, compose "test <time>", tap #foodstr, Publish (let the undo timer
-run). Expect: the note appears at the top of OnlyFood at once (optimistic insert,
-rule unchanged), survives a pull-to-refresh, and shows in the web /community feed.
-Then (#84) compose "test <time>" with all eight pills tapped (8 tags): it must also
-appear in OnlyFood after a pull-to-refresh — on the old cap it would have been
-hidden. The web feed shows it only once frontend#742 ships; note which.
-Hermetic mirror, opt-in on the box: `OnlyFoodComposeLiveTests` (see its header for
-the enable file / env) publishes from an ephemeral key with one pill tapped and
-checks the insert.
+## Gate 4 — by hand (Seth's device)
+1. Sign in with an account that has notes on today's date 1–3 years back (or
+   set the device date). Open the feed: the Memories teaser sits under the
+   live rail, on OnlyFood and on Follows alike, with "N notes · YYYY, YYYY".
+2. Tap the card body → the Memories sheet opens, grouped "1 year ago / 2 years
+   ago / 3 years ago" with the date under each; a tap on a note dismisses the
+   sheet and pushes the thread on the feed stack.
+3. Tap ✕ → the card is replaced by "Memories hidden · Undo" for 5 s, then
+   disappears. Switch feed kind and back, background and foreground, kill and
+   relaunch: it stays hidden for the rest of the day.
+4. Drawer → Memories (next to My Polls) opens the same sheet; Refresh re-queries
+   relays and, if a window times out, shows "Couldn't refresh — showing cached
+   memories." while keeping the list.
+5. Next calendar day the teaser returns.
 
-## Gate 5 — pbxproj
-`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty.
-
-## Results
-Pending — recorded in the PR description after Seth's run.
+## Gate 5 — no pbxproj diff (three-dot)
+```sh
+git diff origin/main...HEAD --stat -- wisp.xcodeproj
+```
+Expected: no output. New files are under `wisp/` and `wispTests/` and
+self-register.
