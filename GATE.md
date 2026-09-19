@@ -4,9 +4,15 @@ Port of Android `MemoriesRepository` / `MemoriesCard` / `MemoriesScreen` /
 §7.13's live-write protocol does not apply. Off main at 563e09d (#85).
 Local build only on Seth's MacBook Air; gates run on the MacinCloud box by hand.
 
-**Frozen at this commit.** App code is frozen at **8b54a67**. This GATE.md is the
-only commit after it and is the HEAD commit — `gate.sh` refuses to run otherwise.
-A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **c97025b** (8b54a67 plus the
+Copilot review fixes: `MemoriesViewModel` serializes load/refresh with a
+generation guard and the Refresh button is disabled while busy; the refresh
+notice also shows in the empty state; the teaser is mounted in the empty /
+fully-filtered general feed and OnlyFood's relayMiss / wotHidden / empty states,
+not only inside the two lists). The previous GATE.md (54d443d) is superseded.
+This GATE.md is the only commit after c97025b and is the HEAD commit — `gate.sh`
+refuses to run otherwise. A review fix re-opens the freeze: push a fresh
+GATE.md last.
 
 ## What landed
 - `wisp/Memories.swift` — pure top-level helpers (`memoryWindows` with the
@@ -40,7 +46,9 @@ A review fix re-opens the freeze: push a fresh GATE.md last.
   floor going in; incremental builds only, no DerivedData eviction needed).
 - Serial run on the Air (the C-G exception form, `-parallel-testing-enabled NO`,
   `-only-testing:wispTests/MemoriesTests -only-testing:wispTests/MemoriesLiveTests`
-  with the enable file touched): **37/37 passed** in 32.6 s. The live gate
+  with the enable file touched): **37/37 passed** in 32.6 s at 8b54a67; after the
+  review fixes, `build-for-testing` green again at c97025b (zero warnings in
+  touched files) and `MemoriesTests` **38/38** serial. The live gate
   (jb55, default author) reported: 1y 2025-09-19 → 2 events EOSE; 2y 2024-09-19
   → 5 events EOSE; 3y 2023-09-19 → 3 events EOSE; total 10, cacheable, 10 s.
 - pbxproj: no diff (three-dot). Xcode had the project open and kept re-sorting
@@ -62,9 +70,9 @@ N tests ran on concern/memories @ <this commit>`, with the four known failures
 `SafetyTests`, issue #57) and no `NEW` line. `MemoriesLiveTests` is `.enabled(if:)`
 off unless the enable file exists, so it does not run here.
 
-**Count.** This branch has **897** `@Test` declarations (`git grep -cE
+**Count.** This branch has **899** `@Test` declarations (`git grep -cE
 '^[[:space:]]*@Test' -- 'wispTests/*.swift'`); main (563e09d) has 860; the delta
-is **+37** (`MemoriesTests` 36, `MemoriesLiveTests` 1).
+is **+39** (`MemoriesTests` 38, `MemoriesLiveTests` 1).
 
 ## Gate 2 — unit coverage for the four pure helpers
 Covered inside Gate 1 by `MemoriesTests`: windows (Jan 1, Dec 31, Feb 29 → Feb 28
@@ -119,15 +127,18 @@ events, all EOSE, 10 s.
 1. Sign in with an account that has notes on today's date 1–3 years back (or
    set the device date). Open the feed: the Memories teaser sits under the
    live rail, on OnlyFood and on Follows alike, with "N notes · YYYY, YYYY".
+   It is also there when the feed itself is empty (a fresh account with no
+   follows, or OnlyFood's "No food posts yet" / relay-miss / WoT-hidden states).
 2. Tap the card body → the Memories sheet opens, grouped "1 year ago / 2 years
    ago / 3 years ago" with the date under each; a tap on a note dismisses the
    sheet and pushes the thread on the feed stack.
 3. Tap ✕ → the card is replaced by "Memories hidden · Undo" for 5 s, then
    disappears. Switch feed kind and back, background and foreground, kill and
    relaunch: it stays hidden for the rest of the day.
-4. Drawer → Memories (next to My Polls) opens the same sheet; Refresh re-queries
-   relays and, if a window times out, shows "Couldn't refresh — showing cached
-   memories." while keeping the list.
+4. Drawer → Memories (next to My Polls) opens the same sheet; Refresh is
+   disabled until the first load lands, then re-queries relays and, if a
+   window times out, shows "Couldn't refresh — showing cached memories." while
+   keeping the list (or in the empty state).
 5. Next calendar day the teaser returns.
 
 ## Gate 5 — no pbxproj diff (three-dot)
