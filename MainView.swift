@@ -55,6 +55,7 @@ struct MainView: View {
     @State private var showHashtagSets = false
     @State private var showLists = false
     @State private var showPolls = false
+    @State private var showMemories = false
     @State private var showCompose = false
     @State private var showRecipeCompose = false
     @State private var showSousChef = false
@@ -535,6 +536,25 @@ struct MainView: View {
                 }
             })
         }
+        .sheet(isPresented: $showMemories) {
+            // Same hand-off as PollsView: dismiss, then push the typed route
+            // on the feed stack once the sheet is gone.
+            MemoriesView(pubkey: keypair.pubkey, onRoute: { route in
+                showMemories = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    switch route {
+                    case .thread(let eventId, let authorPubkey):
+                        feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: authorPubkey))
+                    case .profile(let pubkey):
+                        feedPath.append(ProfileRoute(pubkey: pubkey))
+                    case .hashtag(let tag):
+                        feedPath.append(HashtagFeedRoute(tag: tag))
+                    }
+                    selectedTab = .feed
+                }
+            })
+        }
         .onChange(of: pipCoordinator.restoreRequest) { _, request in
             guard let request else { return }
             switch request {
@@ -635,6 +655,10 @@ struct MainView: View {
             onOpenPolls: {
                 closeDrawer()
                 showPolls = true
+            },
+            onOpenMemories: {
+                closeDrawer()
+                showMemories = true
             },
             onOpenHashtagSets: {
                 closeDrawer()
@@ -1420,6 +1444,17 @@ struct MainView: View {
         }
     }
 
+    /// The Memories teaser for the top slot of either feed body. Independent
+    /// of feed contents, so it is mounted in the non-list states too (an empty
+    /// or fully-filtered feed must still expose it — Copilot, PR #87); the card
+    /// itself renders nothing on a day with no memories.
+    @ViewBuilder
+    private var memoriesTeaser: some View {
+        if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
+            MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
+        }
+    }
+
     // MARK: - OnlyFood body (moved from the deleted OnlyFoodFeedView)
 
     /// Four states plus the list: loading, relay miss, WoT hid everything,
@@ -1433,11 +1468,11 @@ struct MainView: View {
         case .loading:
             onlyFoodLoadingState
         case .relayMiss:
-            onlyFoodErrorState
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodErrorState }
         case .wotHidden(let count):
-            onlyFoodWotHiddenState(count: count)
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodWotHiddenState(count: count) }
         case .empty:
-            onlyFoodEmptyState
+            VStack(spacing: 0) { memoriesTeaser; onlyFoodEmptyState }
         case .list:
             onlyFoodList
         }
@@ -1549,6 +1584,10 @@ struct MainView: View {
                             }
                         )
                     }
+                    // Memories teaser, same slot on both bodies
+                    // (`FeedTabRouting.showsMemoriesTeaser` — the OnlyFood
+                    // inconsistency is deliberate and documented there).
+                    memoriesTeaser
                     ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
                         PostCardView(
                             event: event,
@@ -1657,21 +1696,25 @@ struct MainView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.filteredEvents.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "text.bubble")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary)
-                    Text(emptyStateTitle)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    Text(emptyStateSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    emptyStateExtraAction
+                // Empty / fully-filtered feed still exposes the teaser.
+                VStack(spacing: 0) {
+                    memoriesTeaser
+                    VStack(spacing: 16) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                        Text(emptyStateTitle)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text(emptyStateSubtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        emptyStateExtraAction
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { feedProxy in
                 ScrollView {
@@ -1697,6 +1740,8 @@ struct MainView: View {
                                 }
                             )
                         }
+                        // Memories teaser (`FeedTabRouting.showsMemoriesTeaser`).
+                        memoriesTeaser
                         // Iterating events directly with `id: \.id` keeps row
                         // identity stable when the array shifts (new posts
                         // prepended). The previous `Array(events.enumerated())`

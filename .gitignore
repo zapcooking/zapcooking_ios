@@ -46,4 +46,5 @@ wispTests/.group_auth_member_nsec
 wispTests/.zc_member_nsec
 wispTests/.zc_snapshot_dir
 wispTests/.cheffy_live_enable
+wispTests/.memories_live_enable
 wispTests/.note_review_live_enable
