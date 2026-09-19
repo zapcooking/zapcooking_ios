@@ -51,9 +51,12 @@ struct NoteReviewLiveTests {
         return Keypair(privkey: Hex.encode(priv), pubkey: Hex.encode(pub))
     }
 
-    /// A stable, publicly hosted food photo with an image extension (passes
-    /// `ImageUrls.isImageUrl` and the server's identical check).
-    private static let foodPhoto = "https://upload.wikimedia.org/wikipedia/commons/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg"
+    /// A stable, publicly hosted photo of ONE dish with an image extension
+    /// (passes `ImageUrls.isImageUrl` and the server's identical check).
+    /// Recipe mode is food-only: the first fixture, a produce collage
+    /// ("Good Food Display"), drafted a comment fine but came back
+    /// `NOT_FOOD` in recipe mode on 2026-09-19 — a dish, not a display.
+    private static let foodPhoto = "https://upload.wikimedia.org/wikipedia/commons/a/a3/Eq_it-na_pizza-margherita_sep2005_sml.jpg"
 
     private static func parentStub(content: String) -> NostrEvent {
         NostrEvent(
