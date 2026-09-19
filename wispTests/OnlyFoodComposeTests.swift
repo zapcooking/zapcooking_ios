@@ -34,7 +34,21 @@ struct OnlyFoodComposeTests {
         )
     }
 
+    /// `n` typed tags that are not in the food set, so the cap can be
+    /// reached (and passed) from the keyboard: since #84 the cap (20) is
+    /// above the pill count (8), so the pills alone can never fill it.
+    private func nonFoodTags(_ n: Int) -> String {
+        (0..<n).map { "#zc\($0)" }.joined(separator: " ")
+    }
+
     // MARK: - The set
+
+    /// #84: the same eight in the same order on web, iOS and Android.
+    @Test func suggestedTags_matchTheCrossPlatformSetAndOrder() {
+        #expect(OnlyFoodCompose.suggestedTags == [
+            "foodstr", "coffee", "cooking", "breakfast", "dinner", "lunch", "cookstr", "food",
+        ])
+    }
 
     @Test func suggestedTags_allReachOnlyFood_noDuplicates_foodstrFirst() {
         let tags = OnlyFoodCompose.suggestedTags
@@ -47,8 +61,10 @@ struct OnlyFoodComposeTests {
         // Proposed and deliberately absent: not in the food set.
         #expect(!tags.contains("gratitude"))
         #expect(!FoodHashtags.allSet.contains("gratitude"))
-        // Every pill fits under the cap on its own; the whole row can't.
-        #expect(tags.count > OnlyFoodCompose.maxTags, "the cap must be reachable from the pills")
+        // #84: the whole row fits under the cap, so tapping every pill never
+        // makes a note the filter would hide.
+        #expect(OnlyFoodCompose.maxTags == 20)
+        #expect(tags.count <= OnlyFoodCompose.maxTags, "every pill must be tappable together")
     }
 
     // MARK: - No seed
@@ -122,26 +138,38 @@ struct OnlyFoodComposeTests {
 
     // MARK: - The cap
 
+    /// The whole row fits under the cap (#84), so the row alone never
+    /// disables anything — taps every pill, then reaches the cap by typing.
     @Test func cap_countsLikeTheFilter_disablesFurtherPills_reenablesOnRemove() {
         let vm = onlyFoodComposer()
         let pills = OnlyFoodCompose.suggestedTags
-        for tag in pills.prefix(OnlyFoodCompose.maxTags) { vm.toggleSuggestedHashtag(tag) }
-        #expect(vm.hashtags.count == OnlyFoodCompose.maxTags)
-        #expect(vm.suggestedTagCount == OnlyFoodCompose.maxTags)
+        let cap = OnlyFoodCompose.maxTags
+        for tag in pills { vm.toggleSuggestedHashtag(tag) }
+        #expect(vm.hashtags.count == pills.count)
+        #expect(!vm.suggestedTagsAtCap, "all eight pills together stay under the cap")
+        #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
+
+        // Typed filler up to one short of the cap, then one pill lands on it.
+        vm.updateContent(nonFoodTags(cap - 1))
+        #expect(vm.suggestedTagCount == cap - 1)
+        #expect(!vm.suggestedTagsAtCap)
+        vm.toggleSuggestedHashtag(pills[0])
+        #expect(vm.hashtags.count == cap)
+        #expect(vm.suggestedTagCount == cap)
         #expect(vm.suggestedTagsAtCap)
         #expect(!vm.suggestedTagsOverCap)
-        // A sixth pill is a no-op (the row disables it; this is the guard behind it).
-        let sixth = pills[OnlyFoodCompose.maxTags]
-        vm.toggleSuggestedHashtag(sixth)
-        #expect(vm.hashtags.count == OnlyFoodCompose.maxTags)
-        #expect(!vm.isSuggestedHashtagSelected(sixth))
+        // The next pill is a no-op (the row disables it; this is the guard behind it).
+        let next = pills[1]
+        #expect(vm.toggleSuggestedHashtag(next) == false)
+        #expect(vm.hashtags.count == cap)
+        #expect(!vm.isSuggestedHashtagSelected(next))
         // What would be published passes the filter's own rule.
         #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
-        // Free a slot: the sixth becomes addable.
+        // Free a slot: the next pill becomes addable.
         vm.toggleSuggestedHashtag(pills[0])
         #expect(!vm.suggestedTagsAtCap)
-        vm.toggleSuggestedHashtag(sixth)
-        #expect(vm.isSuggestedHashtagSelected(sixth))
+        vm.toggleSuggestedHashtag(next)
+        #expect(vm.isSuggestedHashtagSelected(next))
         #expect(vm.suggestedTagsAtCap)
     }
 
@@ -150,14 +178,22 @@ struct OnlyFoodComposeTests {
     /// on the content side (`max(content #tags, t-tags)`).
     @Test func typedOverflow_isFlagged_andMatchesTheFilter() {
         let vm = onlyFoodComposer()
-        vm.updateContent("#soup #stew #dinner #homemade #cooking #foodstr")
+        let cap = OnlyFoodCompose.maxTags
+        vm.updateContent(nonFoodTags(cap) + " #foodstr")
+        #expect(vm.hashtags.count == cap + 1)
         #expect(vm.suggestedTagsOverCap)
         #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
-        vm.updateContent("#foodstr #foodstr #soup #stew #dinner #homemade")
-        #expect(vm.hashtags.count == 5)
-        #expect(vm.suggestedTagCount == 6)
+        // A duplicate typed tag counts on the content side.
+        vm.updateContent("#foodstr #foodstr " + nonFoodTags(cap - 1))
+        #expect(vm.hashtags.count == cap)
+        #expect(vm.suggestedTagCount == cap + 1)
         #expect(vm.suggestedTagsOverCap)
         #expect(OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
+        // Exactly at the cap is fine — the 6–20 band is what #84 let back in.
+        vm.updateContent(nonFoodTags(cap - 1) + " #foodstr")
+        #expect(vm.suggestedTagsAtCap)
+        #expect(!vm.suggestedTagsOverCap)
+        #expect(!OnlyFoodFilter.isStructuralSpam(kind1(content: vm.content, tTags: vm.hashtags)))
     }
 
     // MARK: - The dead end
@@ -186,13 +222,14 @@ struct OnlyFoodComposeTests {
         #expect(FoodHashtags.hasFoodTag(kind1(content: vm.content, tTags: vm.hashtags)))
     }
 
-    /// At the cap with no food tag (five non-food tags typed) the one-tap fix
-    /// cannot work: the toggle reports the no-op and leaves the body alone,
-    /// so the composer must not publish on its behalf (the alert hides the
-    /// button in that state).
+    /// At the cap with no food tag (twenty non-food tags typed) the one-tap
+    /// fix cannot work: the toggle reports the no-op and leaves the body
+    /// alone, so the composer must not publish on its behalf (the alert
+    /// hides the button in that state).
     @Test func confirmAddFoodstr_atCapWithNoFoodTag_isRefused() {
         let vm = onlyFoodComposer()
-        vm.updateContent("a #nostr #bitcoin #zap #sats #stack")
+        let cap = OnlyFoodCompose.maxTags
+        vm.updateContent("a " + nonFoodTags(cap))
         #expect(vm.suggestedTagsAtCap)
         #expect(vm.needsFoodTagConfirm)
         let before = vm.content
@@ -200,7 +237,7 @@ struct OnlyFoodComposeTests {
         #expect(vm.content == before)
         #expect(vm.needsFoodTagConfirm)
         // Off the cap, the same tap works and returns true.
-        vm.updateContent("a #nostr #bitcoin #zap #sats")
+        vm.updateContent("a " + nonFoodTags(cap - 1))
         #expect(vm.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag))
         #expect(!vm.needsFoodTagConfirm)
     }
@@ -208,15 +245,24 @@ struct OnlyFoodComposeTests {
     // MARK: - The row (rendered; PNGs via the git-ignored `wispTests/.zc_snapshot_dir`)
 
     /// The row in the three states the by-hand gate screenshots: no pill
-    /// tapped, one tapped, at the cap. Measured: the selected pills are
-    /// filled with the theme primary, the count reads as the filter counts.
+    /// tapped, one tapped, at the cap (typed filler plus two pills, the
+    /// other six dimmed). Measured: the selected pills are filled with the
+    /// theme primary, the count reads as the filter counts.
     @Test func suggestionRow_renders_none_one_cap() throws {
         let vm = onlyFoodComposer()
-        let states: [(String, Int)] = [("none", 0), ("one", 1), ("cap", OnlyFoodCompose.maxTags)]
-        var previous = 0
-        for (name, taps) in states {
-            for tag in OnlyFoodCompose.suggestedTags[previous..<taps] { vm.toggleSuggestedHashtag(tag) }
-            previous = taps
+        let cap = OnlyFoodCompose.maxTags
+        let pills = OnlyFoodCompose.suggestedTags
+        let states: [(String, Int, () -> Void)] = [
+            ("none", 0, {}),
+            ("one", 1, { vm.toggleSuggestedHashtag(pills[0]) }),
+            ("cap", cap, {
+                vm.updateContent(nonFoodTags(cap - 2))
+                vm.toggleSuggestedHashtag(pills[0])
+                vm.toggleSuggestedHashtag(pills[1])
+            }),
+        ]
+        for (name, taps, arrange) in states {
+            arrange()
             let renderer = ImageRenderer(content:
                 HashtagSuggestionRow(viewModel: vm)
                     .frame(width: 390)
@@ -226,7 +272,11 @@ struct OnlyFoodComposeTests {
             let image = try #require(renderer.uiImage)
             #expect(image.size.width >= 390, Comment(rawValue: name))
             #expect(vm.suggestedTagCount == taps, Comment(rawValue: name))
-            #expect(vm.suggestedTagsAtCap == (taps == OnlyFoodCompose.maxTags), Comment(rawValue: name))
+            #expect(vm.suggestedTagsAtCap == (taps == cap), Comment(rawValue: name))
+            if taps == cap {
+                #expect(vm.isSuggestedHashtagSelected(pills[0]) && vm.isSuggestedHashtagSelected(pills[1]))
+                #expect(pills.dropFirst(2).allSatisfy { !vm.isSuggestedHashtagSelected($0) }, "six pills dimmed")
+            }
             if let dir = Self.snapshotDirectory, let data = image.pngData() {
                 try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
                 try? data.write(to: URL(fileURLWithPath: dir).appendingPathComponent("tag-pills-\(name).png"))
