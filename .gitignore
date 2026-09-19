@@ -44,4 +44,5 @@ wispTests/.group_auth_member_nsec
 
 ## Member key for Cook+-gated live gates (C-E Cheffy, later Nourish compute) — nsec, never committed
 wispTests/.zc_member_nsec
+wispTests/.zc_snapshot_dir
 wispTests/.cheffy_live_enable
