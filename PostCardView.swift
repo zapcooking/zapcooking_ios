@@ -220,9 +220,35 @@ struct PostCardView: View {
     /// detector, and an account that can sign. Watch-only sees nothing —
     /// the action row is already hidden for them; the menu is not, so the
     /// check is explicit here (Android finding 0.4).
+    ///
+    /// Also required: a loaded key that can sign (a missing key is not
+    /// "not watch-only"), a public row (`isPrivate` decrypted NIP-17 rows
+    /// must never be uploaded to the endpoint or replied to publicly), and
+    /// a kind-1 target (the feed also renders polls / gallery events here).
     private var noteReviewEligible: Bool {
-        !activeUserIsWatchOnly
-            && NoteReviewTrigger.isEligible(noteContent: resolveRepost().event.content)
+        guard let keypair = NostrKey.load(), !keypair.privkey.isEmpty,
+              !NostrKey.isWatchOnly(pubkey: keypair.pubkey) else { return false }
+        let target = resolveRepost().event
+        return !isPrivate
+            && target.kind == 1
+            && NoteReviewTrigger.isEligible(noteContent: target.content)
+    }
+
+    /// Open the Note Review sheet from the stable root when a presenter is
+    /// in the environment (the draft editor raises the keyboard — see
+    /// `ComposePresenter`); the in-card `.sheet(item:)` is the fallback for
+    /// hosts without one.
+    private func openNoteReview() {
+        let target = resolveRepost().event
+        if let composePresenter {
+            composePresenter.openNoteReview(NoteReviewPresentation(
+                parent: target,
+                imageUrls: NoteReviewTrigger.eligibleImageUrls(noteContent: target.content),
+                onViewReply: { reply in onNoteTap?(reply.id) }
+            ))
+        } else {
+            activeSheet = .noteReview
+        }
     }
 
     /// Measured width of the action row, for `NoteReviewTrigger.meetsInlineWidth`.
@@ -805,7 +831,7 @@ struct PostCardView: View {
                     let target = resolveRepost().event
                     NoteReviewSheet(
                         parent: target,
-                        imageUrls: ImageUrls.extractImageUrls(target.content),
+                        imageUrls: NoteReviewTrigger.eligibleImageUrls(noteContent: target.content),
                         keypair: keypair,
                         onViewReply: { reply in onNoteTap?(reply.id) }
                     )
@@ -1100,7 +1126,7 @@ struct PostCardView: View {
             // menu carries the same entry at every width.
             if noteReviewEligible && NoteReviewTrigger.meetsInlineWidth(actionRowWidth) {
                 ActionRowButton(item: ActionRowItem(glyph: .custom(AnyView(CheffyIcon(size: ActionRowItem.glyphSize))))) {
-                    activeSheet = .noteReview
+                    openNoteReview()
                 }
                 .accessibilityLabel(NoteReview.entryTitle)
                 .accessibilityIdentifier("note-review-inline")
@@ -1337,7 +1363,7 @@ struct PostCardView: View {
                 if noteReviewEligible {
                     popoverMenuItem(title: NoteReview.entryTitle, icon: { CheffyIcon(size: 20) }) {
                         showOverflowMenu = false
-                        activeSheet = .noteReview
+                        openNoteReview()
                     }
                     .accessibilityIdentifier("note-review-menu")
                     Divider()

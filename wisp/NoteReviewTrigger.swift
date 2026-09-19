@@ -52,14 +52,24 @@ enum NoteReviewTrigger {
     /// never shrunk below 44pt and never left to `HStack` squeeze semantics.
     static let inlineMinRowWidth: CGFloat = 356
 
-    /// The single eligibility source: flag ∧ image detected. `flagEnabled`
-    /// is parameterized so the flag-off behavior stays testable while the
-    /// kill switch remains a compile-time constant.
+    /// The images a request may carry: the parity detector's matches, kept
+    /// to `https://`. `ImageUrls` mirrors the web detector exactly (which
+    /// admits `http://`), but the endpoint rejects a non-https `imageUrl`
+    /// with a 400, so an `http://` photo would earn the affordance only to
+    /// fail deterministically at the hand-off. Filtered here, at the
+    /// eligibility layer, so the detector stays byte-for-byte parity.
+    static func eligibleImageUrls(noteContent: String) -> [String] {
+        ImageUrls.extractImageUrls(noteContent).filter { $0.lowercased().hasPrefix("https://") }
+    }
+
+    /// The single eligibility source: flag ∧ an https image detected.
+    /// `flagEnabled` is parameterized so the flag-off behavior stays testable
+    /// while the kill switch remains a compile-time constant.
     static func isEligible(
         noteContent: String,
         flagEnabled: Bool = FeatureFlags.noteReviewEnabled
     ) -> Bool {
-        flagEnabled && !ImageUrls.extractImageUrls(noteContent).isEmpty
+        flagEnabled && !eligibleImageUrls(noteContent: noteContent).isEmpty
     }
 
     /// The width half of the inline gate — the action row's measured width.

@@ -63,6 +63,19 @@ struct NoteReviewTriggerTests {
         }
     }
 
+    /// The detector is web parity (admits `http://`); the endpoint 400s a
+    /// non-https `imageUrl`, so eligibility keeps only https images.
+    @Test func httpImages_areDetected_butNeverEligible() {
+        let mixed = "a http://example.com/a.jpg b https://example.com/b.jpg c http://example.com/c.png d https://example.com/d.png"
+        #expect(ImageUrls.extractImageUrls(mixed).count == 4)
+        #expect(NoteReviewTrigger.eligibleImageUrls(noteContent: mixed) == ["https://example.com/b.jpg", "https://example.com/d.png"])
+        // The web URL regex is case-sensitive on the scheme: an upper-case
+        // scheme is never extracted at all (parity), so nothing to filter.
+        #expect(ImageUrls.extractImageUrls("HTTPS://example.com/c.png").isEmpty)
+        #expect(!NoteReviewTrigger.isEligible(noteContent: "http://example.com/only.jpg", flagEnabled: true))
+        #expect(!NoteReviewTrigger.showInline(noteContent: "http://example.com/only.jpg", rowWidth: 1024, isQuoted: false, flagEnabled: true))
+    }
+
     @Test func killSwitchDefaultsOn() {
         #expect(FeatureFlags.noteReviewEnabled)
     }

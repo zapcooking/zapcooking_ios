@@ -39,32 +39,50 @@ protocol NoteReviewReplyPublishing {
 /// `RelayPool.publish` returns the accepting relays after `timeout` and
 /// cannot separate "no socket" from "no OK", so the mapping is: a non-empty
 /// accept list → `published`; an empty one → `timeout` holding the signed
-/// event; `failed` only when the relay set itself is empty.
+/// event; `failed` only when the relay set itself is empty. Pinned by
+/// `NoteReviewReplyPublisherTests` through `NoteReviewReplyTransport`.
+/// The relay-facing half of the publisher, behind a protocol so the outcome
+/// mapping is testable with a recording fake. (Stored `async` closure
+/// properties were the first seam; Swift 6.2 crashed both compiling and
+/// running the reabstraction thunks for them, so a witness table it is.)
+protocol NoteReviewReplyTransport {
+    /// Relay set for a reply from `author` to `parent`.
+    func relays(for parent: NostrEvent, author: String) async -> [String]
+    /// Broadcast and return the accepting relays within `timeout`.
+    func broadcast(_ event: NostrEvent, to relays: [String], timeout: TimeInterval) async -> [String]
+    /// Local bookkeeping after an accept.
+    func persist(_ event: NostrEvent) async
+}
+
+/// Production transport: `ThreadViewModel`'s reply relay rule,
+/// `RelayPool.publish`, `EventStore` persistence.
+struct RelayReplyTransport: NoteReviewReplyTransport {
+    func relays(for parent: NostrEvent, author: String) async -> [String] {
+        await RelayNoteReviewReplyPublisher.replyRelays(parent: parent, author: author)
+    }
+
+    func broadcast(_ event: NostrEvent, to relays: [String], timeout: TimeInterval) async -> [String] {
+        await RelayPool.publish(event: event, to: relays, timeout: timeout)
+    }
+
+    func persist(_ event: NostrEvent) async {
+        await EventStore.shared.persist([event])
+    }
+}
+
 struct RelayNoteReviewReplyPublisher: NoteReviewReplyPublishing {
     /// Web `RETRY_PUBLISH_TIMEOUT_MS` — 15 s of waiting on a relay OK.
     static let okTimeout: TimeInterval = 15
 
     var okTimeout: TimeInterval
-    /// Relay set for a reply from `author` to `parent`. Defaults to the
-    /// thread composer's rule; the live gate pins `RelayDefaults.defaults`.
-    var relayResolver: (_ parent: NostrEvent, _ author: String) async -> [String]
-    var broadcast: (_ event: NostrEvent, _ relays: [String], _ timeout: TimeInterval) async -> [String]
-    var persist: (_ event: NostrEvent) async -> Void
+    var transport: any NoteReviewReplyTransport
 
     init(
         okTimeout: TimeInterval = RelayNoteReviewReplyPublisher.okTimeout,
-        relayResolver: ((_ parent: NostrEvent, _ author: String) async -> [String])? = nil,
-        broadcast: ((_ event: NostrEvent, _ relays: [String], _ timeout: TimeInterval) async -> [String])? = nil,
-        persist: ((_ event: NostrEvent) async -> Void)? = nil
+        transport: any NoteReviewReplyTransport = RelayReplyTransport()
     ) {
         self.okTimeout = okTimeout
-        self.relayResolver = relayResolver ?? { parent, author in
-            await RelayNoteReviewReplyPublisher.replyRelays(parent: parent, author: author)
-        }
-        self.broadcast = broadcast ?? { event, relays, timeout in
-            await RelayPool.publish(event: event, to: relays, timeout: timeout)
-        }
-        self.persist = persist ?? { event in await EventStore.shared.persist([event]) }
+        self.transport = transport
     }
 
     /// The exact tag set the thread composer emits for a plain public reply:
@@ -105,6 +123,8 @@ struct RelayNoteReviewReplyPublisher: NoteReviewReplyPublishing {
     }
 
     func publish(content: String, parent: NostrEvent, keypair: Keypair) async -> NoteReviewPublishOutcome {
+        // A watch-only / empty key cannot sign — "your signer, not the relays".
+        if keypair.privkey.isEmpty { return .signRejected }
         let tags = Self.replyTags(parent: parent)
         let signed: NostrEvent
         do {
@@ -118,13 +138,13 @@ struct RelayNoteReviewReplyPublisher: NoteReviewReplyPublishing {
     }
 
     func publishSigned(_ event: NostrEvent, parent: NostrEvent) async -> NoteReviewPublishOutcome {
-        let relays = await relayResolver(parent, event.pubkey)
+        let relays = await transport.relays(for: parent, author: event.pubkey)
         if relays.isEmpty { return .failed }
-        let accepted = await broadcast(event, relays, okTimeout)
+        let accepted = await transport.broadcast(event, to: relays, timeout: okTimeout)
         if accepted.isEmpty { return .timeout(signed: event) }
         // Local bookkeeping mirrors the thread composer so the reply is in
         // the durable cache without waiting for the relay echo.
-        await persist(event)
+        await transport.persist(event)
         return .published(event)
     }
 }

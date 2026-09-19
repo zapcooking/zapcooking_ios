@@ -213,9 +213,7 @@ struct NoteReviewLiveTests {
 
         // Phase 3 — the ephemeral key publishes the drafted reply through the
         // real publisher, pinned to the default relay set.
-        var publisher = RelayNoteReviewReplyPublisher()
-        publisher.relayResolver = { _, _ in relays }
-        publisher.persist = { _ in }
+        let publisher = RelayNoteReviewReplyPublisher(transport: PinnedTransport(relays: relays))
         vm.post(publisher: publisher, keypair: author)
         for _ in 0..<300 {
             if vm.phase != .posting { break }
@@ -255,4 +253,16 @@ struct NoteReviewLiveTests {
         print("NoteReview live: reply id=\(reply.id) verified=\(found != nil)")
         await cleanup()
     }
+}
+
+
+/// Live-gate transport: the default relay set, the real broadcast, no
+/// local persistence (the ephemeral reply must not enter the seed cache).
+private struct PinnedTransport: NoteReviewReplyTransport {
+    let relays: [String]
+    func relays(for parent: NostrEvent, author: String) async -> [String] { relays }
+    func broadcast(_ event: NostrEvent, to relays: [String], timeout: TimeInterval) async -> [String] {
+        await RelayPool.publish(event: event, to: relays, timeout: timeout)
+    }
+    func persist(_ event: NostrEvent) async {}
 }

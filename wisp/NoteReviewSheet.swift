@@ -34,6 +34,12 @@ struct NoteReviewSheet: View {
         .background(Color.wispBackground)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        // While a publish is in flight the reply may already be signed and
+        // broadcast; a swipe-dismiss would drop the outcome before the
+        // signed event (the same-id retry) or the posted event is recorded.
+        // The posting layout offers no Close either, so the sheet stays up
+        // until the publisher answers.
+        .interactiveDismissDisabled(viewModel.phase == .posting)
         .onAppear { viewModel.open(parent: parent, imageUrls: imageUrls) }
         .onDisappear { viewModel.onSheetClosed() }
         .accessibilityIdentifier("note-review-sheet")
