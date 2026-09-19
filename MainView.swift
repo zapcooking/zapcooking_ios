@@ -55,6 +55,7 @@ struct MainView: View {
     @State private var showHashtagSets = false
     @State private var showLists = false
     @State private var showPolls = false
+    @State private var showMemories = false
     @State private var showCompose = false
     @State private var showRecipeCompose = false
     @State private var showSousChef = false
@@ -535,6 +536,25 @@ struct MainView: View {
                 }
             })
         }
+        .sheet(isPresented: $showMemories) {
+            // Same hand-off as PollsView: dismiss, then push the typed route
+            // on the feed stack once the sheet is gone.
+            MemoriesView(pubkey: keypair.pubkey, onRoute: { route in
+                showMemories = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    switch route {
+                    case .thread(let eventId, let authorPubkey):
+                        feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: authorPubkey))
+                    case .profile(let pubkey):
+                        feedPath.append(ProfileRoute(pubkey: pubkey))
+                    case .hashtag(let tag):
+                        feedPath.append(HashtagFeedRoute(tag: tag))
+                    }
+                    selectedTab = .feed
+                }
+            })
+        }
         .onChange(of: pipCoordinator.restoreRequest) { _, request in
             guard let request else { return }
             switch request {
@@ -635,6 +655,10 @@ struct MainView: View {
             onOpenPolls: {
                 closeDrawer()
                 showPolls = true
+            },
+            onOpenMemories: {
+                closeDrawer()
+                showMemories = true
             },
             onOpenHashtagSets: {
                 closeDrawer()
@@ -1549,6 +1573,12 @@ struct MainView: View {
                             }
                         )
                     }
+                    // Memories teaser, same slot on both bodies
+                    // (`FeedTabRouting.showsMemoriesTeaser` — the OnlyFood
+                    // inconsistency is deliberate and documented there).
+                    if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
+                        MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
+                    }
                     ForEach(Array(onlyfoodFeedVM.notes.enumerated()), id: \.element.id) { index, event in
                         PostCardView(
                             event: event,
@@ -1696,6 +1726,10 @@ struct MainView: View {
                                     ))
                                 }
                             )
+                        }
+                        // Memories teaser (`FeedTabRouting.showsMemoriesTeaser`).
+                        if FeedTabRouting.showsMemoriesTeaser(for: viewModel.currentKind) {
+                            MemoriesCard(pubkey: keypair.pubkey, onOpen: { showMemories = true })
                         }
                         // Iterating events directly with `id: \.id` keeps row
                         // identity stable when the array shifts (new posts

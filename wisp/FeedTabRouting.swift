@@ -82,6 +82,17 @@ enum FeedTabRouting {
         return true
     }
 
+    /// Memories teaser (`MemoriesCard`) in the top slot of BOTH feed bodies,
+    /// directly under the live rail. Deliberate: Memories surfaces the user's
+    /// own kind-1 notes whatever their topic, so a non-food memory can appear
+    /// on the OnlyFood feed — a knowing inconsistency, justified because
+    /// OnlyFood is the default landing and hiding the teaser there would hide
+    /// it for most users. The card renders nothing on a day with no memories.
+    static func showsMemoriesTeaser(for kind: FeedKind) -> Bool {
+        _ = kind
+        return true
+    }
+
     /// Compose FAB (§8): the tappable food-tag pills on OnlyFood; empty means
     /// the plain note composer. No seed text on any kind — nothing is added to
     /// a note unless the user taps a pill.
