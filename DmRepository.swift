@@ -36,7 +36,7 @@ final class DmRepository {
     private var activePubkey: String = ""
     private var hydratedFor: String = ""
 
-    /// Wall-clock floor for firing the incoming-DM haptic. Initialized at
+    /// Wall-clock floor for firing incoming-DM effects. Initialized at
     /// app-launch and bumped to `now` every time the app re-enters the
     /// foreground, so an overnight backlog of gift wraps doesn't buzz the
     /// user when they reopen the app. Mirrors NotificationRepository.
@@ -100,7 +100,7 @@ final class DmRepository {
         // upstream leaves the wrap unseen so the periodic REQ retries it.
         seenGiftWraps.insert(msg.giftWrapId)
         bumpLatestWrapTs(msg.createdAt)
-        fireIncomingHaptic(for: msg)
+        fireIncomingEffects(for: msg)
         persist(msg, conversationKey: conversationKey)
 
         // Apply any reactions that arrived before this message.
@@ -216,13 +216,23 @@ final class DmRepository {
         )
     }
 
-    private func fireIncomingHaptic(for msg: DmMessage) {
+    /// Sound and haptic for an incoming DM.
+    ///
+    /// Android treats a DM exactly like a reply — same sound, same pulse —
+    /// and iOS previously buzzed and stayed silent. Android's ICQ flower
+    /// burst rides along with both there; that is a Wisp convention and is
+    /// not ported. Rules in `NotificationEffectPlan`.
+    private func fireIncomingEffects(for msg: DmMessage) {
         guard msg.senderPubkey != activePubkey else { return }
         guard msg.createdAt >= soundEligibleAfter else { return }
         #if canImport(UIKit)
         guard UIApplication.shared.applicationState == .active else { return }
         #endif
-        Haptics.shared.pulse()
+        NotificationEffectPlan.plan(
+            for: .dm,
+            soundsOn: AppSettings.shared.notificationSoundsEnabled,
+            typeEnabled: NotificationFilterStore.loadActive().contains(.dms)
+        ).fire()
     }
 
     /// Read-only check used by the ingest path before attempting (expensive) decrypt.

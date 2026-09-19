@@ -260,6 +260,9 @@ final class NotificationRepository {
         return true
     }
 
+    /// Sound, haptic and bottom-bar burst for a freshly arrived notification.
+    /// The per-type rules live in `NotificationEffectPlan`, which documents
+    /// and tests the Android parity table; this only supplies live state.
     private func fireEffects(for item: FlatNotificationItem, persist: Bool) {
         guard persist else { return }
         guard item.timestamp >= soundEligibleAfter else { return }
@@ -267,20 +270,14 @@ final class NotificationRepository {
         let state = UIApplication.shared.applicationState
         guard state == .active else { return }
         #endif
-        let soundsOn = AppSettings.shared.notificationSoundsEnabled
-        switch item.kind {
-        case .reply:
-            if soundsOn { NotificationSounds.shared.play(.reply) }
-            Haptics.shared.pulse()
-        case .reaction, .repost, .mention, .quote:
-            if soundsOn { NotificationSounds.shared.play(.blip) }
-            Haptics.shared.blip()
-        case .zap:
-            if soundsOn { NotificationSounds.shared.play(.zap) }
-            Haptics.shared.zapBuzz()
-        case .pollVote, .pollEnded, .dm:
-            break
-        }
+        // DMs arrive through `DmRepository`, which fires their own effects.
+        guard item.kind != .dm else { return }
+        let enabled = NotificationFilterStore.loadActive()
+        NotificationEffectPlan.plan(
+            for: item.kind,
+            soundsOn: AppSettings.shared.notificationSoundsEnabled,
+            typeEnabled: enabled.contains(NotificationFilter.bucket(for: item.kind))
+        ).fire()
     }
 
     /// Insert a synthetic `.pollEnded` row. Called by `NotificationsViewModel`'s

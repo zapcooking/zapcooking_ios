@@ -1,6 +1,9 @@
 import Foundation
 
-enum NotificationKind: String, Hashable {
+/// `CaseIterable` so the effect-table tests can assert every kind is
+/// covered — a new kind that nobody wired into `NotificationEffectPlan`
+/// should fail a test, not fall silently through the switch.
+enum NotificationKind: String, Hashable, CaseIterable {
     case reply
     case reaction
     case repost
