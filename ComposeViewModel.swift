@@ -418,7 +418,7 @@ final class ComposeViewModel {
     /// Called from the SwiftUI text-field binding. Re-derives mention/emoji/hashtag state.
     func updateContent(_ new: String) {
         // Auto-prefix bare bech32 (`nevent1...`, `note1...`, `nprofile1...`, `npub1...`) with `nostr:`.
-        let prefixed = autoPrefixBareBech32(new)
+        let prefixed = Self.autoPrefixBareBech32(new)
         if prefixed != content {
             content = prefixed
         } else {
@@ -1317,7 +1317,7 @@ final class ComposeViewModel {
     /// surfaces pick up the rumor via `PrivateInteractionRouter` (on echo) and
     /// via the `.nostrEventPublished` broadcast the publisher emits.
     private func runPrivateReplyPipeline(parent: NostrEvent, root: NostrEvent?) async {
-        let materialized = materializeMentions(content)
+        let materialized = Self.trimTrailingBlankLines(materializeMentions(content))
         let body = appendQuoteUri(to: appendAttachmentUrls(to: materialized))
 
         // Build the rumor's extra tag set: mentions, pubkey refs from inline
@@ -1388,12 +1388,31 @@ final class ComposeViewModel {
     /// spliced onto the end (in `attachments` order). For gallery events the body
     /// is just the caption — upload URLs ride in `imeta` tags instead.
     private func bodyForPublish(kind: Int, materialized: String) -> String {
+        let trimmed = Self.trimTrailingBlankLines(materialized)
         switch kind {
         case Nip68.kindPicture, Nip71.kindVideoHorizontal, Nip71.kindVideoVertical:
-            return materialized
+            return trimmed
         default:
-            return appendQuoteUri(to: appendAttachmentUrls(to: materialized))
+            return appendQuoteUri(to: appendAttachmentUrls(to: trimmed))
         }
+    }
+
+    /// Drop blank lines left at the end of the buffer before the note goes
+    /// out. `ContentParser` collapses these when rendering, but that only
+    /// helps readers on this client — every other client shows the padding as
+    /// real empty lines, so it shouldn't leave here in the first place.
+    ///
+    /// Trailing only. Spacing *between* paragraphs is the author's to choose,
+    /// and rewriting the middle of someone's post on publish is a different
+    /// thing entirely from tidying its end. Drafts are also left alone: that
+    /// buffer is still being typed in.
+    nonisolated static func trimTrailingBlankLines(_ s: String) -> String {
+        var out = s
+        while let last = out.last,
+              last == "\n" || last == "\r" || last == " " || last == "\t" {
+            out.removeLast()
+        }
+        return out
     }
 
     private func appendAttachmentUrls(to body: String) -> String {
@@ -1773,8 +1792,16 @@ final class ComposeViewModel {
         hashtags = out
     }
 
-    private func autoPrefixBareBech32(_ s: String) -> String {
-        let pattern = "(?<![a-z0-9:./])(?<!nostr:)(nevent1|note1|nprofile1|naddr1|npub1)([a-z0-9]{20,})"
+    /// Internal (not private) so `ComposeMentionTests` can exercise the URL
+    /// guard directly — publishing a note needs a full signing round-trip.
+    static func autoPrefixBareBech32(_ s: String) -> String {
+        // The trailing `(?!\.[a-zA-Z])` mirrors ContentParser's npub pattern:
+        // a bech32 token followed by a dot + letters is a subdomain (a Blossom
+        // server like `npub1….blossom.band`), and prefixing it with `nostr:`
+        // would corrupt the URL. NSDataDetector can't catch this — it doesn't
+        // detect scheme-less domains as links, so the URL skip below is blind
+        // to exactly the bare-URL shapes that need the exclusion.
+        let pattern = "(?<![a-z0-9:./])(?<!nostr:)(nevent1|note1|nprofile1|naddr1|npub1)([a-z0-9]{20,})(?!\\.[a-zA-Z])"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return s }
         let nsRange = NSRange(s.startIndex..<s.endIndex, in: s)
         let matches = regex.matches(in: s, range: nsRange)
@@ -1888,7 +1915,18 @@ final class ComposeViewModel {
 
     private func topWriteRelays() -> [String] {
         if let board = RelayScoreBoard.load(pubkey: signingKeypair.pubkey) {
-            let top = board.scoredRelays.map(\.url)
+            // The scoreboard holds every relay any follow writes to — hundreds of
+            // them, junk from other people's relay lists included. Uncapped, this
+            // published drafts to all of them and stamped all of them into a
+            // poll's `relay` tags: one such poll went out at 21.5 KB with 480
+            // tags, among them `.onion` addresses, malformed URLs and a couple of
+            // wallet-connect endpoints someone had put in their NIP-65 list.
+            // Same filter-then-cap the feed pool uses; `DraftsViewModel` already
+            // caps its copy of this helper at 5.
+            let top = board.scoredRelays
+                .filter { RelayUrlValidator.isConnectable($0.url) }
+                .prefix(5)
+                .map(\.url)
             if !top.isEmpty { return top }
         }
         return ["wss://relay.primal.net", "wss://nos.lol"]
