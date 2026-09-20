@@ -126,6 +126,16 @@ final class GroupListViewModel {
     private func handleIncoming(event: NostrEvent, relayUrl: String, groupId: String) async {
         switch event.kind {
         case Nip29.kindChatMessage:
+            // Guideline 1.2: a blocked or reported author's messages, and a
+            // reported message, never enter the room — so they can't flip its
+            // unread flag or become its Chat Rooms preview. Messages already
+            // stored when the block lands are filtered at read time
+            // (`GroupRoom.visibleMessages`).
+            if MuteRepository.shared.isBlocked(event.pubkey.lowercased())
+                || ReportedContent.shared.isHidden(pubkey: event.pubkey)
+                || ReportedContent.shared.isHidden(eventId: event.id) {
+                return
+            }
             let replyId = Nip29.extractReplyId(from: event)
             let emojiTags = ContentParser.parseEmojiTags(event.tags)
             // Clamp so a sender with a fast clock can't pin their message below
@@ -360,21 +370,35 @@ final class GroupListViewModel {
         }
     }
 
+    // The admin events sign through `Signer.sign`, the same route
+    // `GroupRoomViewModel.sendMessage` and the reactions take, instead of the
+    // `Nip29.build*` helpers. `Signer` is local-key only today (it throws
+    // `localKeyMissing` for a watch-only account; there is no NIP-46 path in
+    // the app yet), so the room UI offers moderation only to accounts that
+    // can sign (`GroupRoomViewModel.canModerate`); when a remote-signing path
+    // lands in `Signer`, these pick it up without change. Tag shapes match the
+    // builders: `["h", group]` then `["p", target, roles…]`.
+
     func putUser(relayUrl: String, groupId: String, targetPubkey: String,
                  roles: [String] = []) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildPutUser(privkey32: priv, pubkey: keypair.pubkey,
-                                                  groupId: groupId, targetPubkey: targetPubkey, roles: roles) else {
-            return .failure(.network)
-        }
-        return await runAdmin(event: event, relayUrl: relayUrl)
+        await runAdmin(kind: Nip29.kindPutUser,
+                       tags: [["h", groupId], ["p", targetPubkey] + roles],
+                       relayUrl: relayUrl)
     }
 
     func removeUser(relayUrl: String, groupId: String, targetPubkey: String) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildRemoveUser(privkey32: priv, pubkey: keypair.pubkey,
-                                                     groupId: groupId, targetPubkey: targetPubkey) else {
-            return .failure(.network)
+        await runAdmin(kind: Nip29.kindRemoveUser,
+                       tags: [["h", groupId], ["p", targetPubkey]],
+                       relayUrl: relayUrl)
+    }
+
+    private func runAdmin(kind: Int, tags: [[String]], relayUrl: String) async -> Result<Void, AdminError> {
+        let event: NostrEvent
+        do {
+            event = try await Signer.sign(keypair: keypair, kind: kind, tags: tags, content: "")
+        } catch {
+            lastAdminError = .notAuthenticated
+            return .failure(.notAuthenticated)
         }
         return await runAdmin(event: event, relayUrl: relayUrl)
     }

@@ -1828,3 +1828,33 @@ machinery, `repo/NofferClient.kt` + CLINK (P3), and
    discovery pool for no reason, and Android (#205/#206) did the same. Not
    part of Concern 1; recorded here, not acted on. If restored, restore on
    both platforms in the same week so the role sets stay in lockstep.
+
+
+## App Review notes — Guideline 1.2 (UGC): group rooms
+
+Apple cited the 1.5 review under Guideline 1.2 and named five required
+precautions, including a mechanism to flag content and a mechanism to block
+abusive users. iOS has had Report and Block on posts, recipes and profiles
+since Concern 4.1; issue #135 adds them to NIP-29 group rooms (per-message
+Report and Block in the bubble's long-press menu, Block and, for admins,
+Remove & ban in Room info). A reviewer cannot see what the relay can do, so
+the operator path has to be stated. Paste the following into the App Store
+Connect review notes for the next submission:
+
+> **Group chat moderation.** Chat rooms are hosted on a relay we operate
+> (pantry.zap.cooking). Every message can be reported from its long-press
+> menu; a report is a signed, public NIP-56 event addressed to the room's
+> admins and to Zap Cooking's moderation accounts, and the reported message
+> is hidden for the reporter immediately. Any member can block another
+> member (long-press a message, or Room info → member menu); blocking hides
+> that person's messages and posts everywhere in the app and is synced
+> across the user's devices. Room admins can remove and ban a member from
+> the room (Room info → member menu → Remove & ban), which the relay
+> enforces: a banned member cannot rejoin, even with an invite. Relay
+> operators can additionally delete individual messages server-side.
+> Reports reach support@zap.cooking and are reviewed and acted on within
+> 24 hours. The app's Terms (accepted at sign-up) prohibit objectionable
+> content and abusive behaviour.
+
+Keep this paragraph true: the 24-hour commitment and the support address
+are the parts a reviewer will test.

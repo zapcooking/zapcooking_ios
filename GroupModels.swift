@@ -123,3 +123,32 @@ struct ChatDeepLink: Hashable {
     let groupId: String
     let code: String?
 }
+
+extension Array where Element == GroupMessage {
+    /// The messages minus what this account has reported (event ids) or
+    /// whose author it has reported or blocked (pubkeys). The room's
+    /// counterpart of `Array<NostrEvent>.removingHidden` — a report or a
+    /// block has to change what is on screen, or the reporter can't tell it
+    /// did anything.
+    nonisolated func removingHidden(eventIds: Set<String>, pubkeys: Set<String>) -> [GroupMessage] {
+        guard !eventIds.isEmpty || !pubkeys.isEmpty else { return self }
+        return filter { !eventIds.contains($0.id) && !pubkeys.contains($0.senderPubkey.lowercased()) }
+    }
+}
+
+extension GroupRoom {
+    /// The room's messages minus what this account has reported or blocked.
+    /// Every surface that shows room content reads this — the chat itself
+    /// and the Chat Rooms preview — so a report or a block changes all of
+    /// them at once. Reads the two observables, so SwiftUI re-renders when
+    /// either changes.
+    @MainActor
+    var visibleMessages: [GroupMessage] {
+        let reported = ReportedContent.shared
+        let blocked = MuteRepository.shared.blockedPubkeys
+        return messages.removingHidden(
+            eventIds: reported.eventIds,
+            pubkeys: reported.pubkeys.union(blocked)
+        )
+    }
+}

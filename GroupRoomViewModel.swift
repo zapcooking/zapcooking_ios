@@ -40,8 +40,82 @@ final class GroupRoomViewModel: EmojiComposing {
         repository.getRoom(relayUrl: relayUrl, groupId: groupId)
     }
 
+    /// The room's messages minus what this account has reported or blocked
+    /// (`GroupRoom.visibleMessages`), so a report or a block visibly does
+    /// something the moment it lands.
     var messages: [GroupMessage] {
-        room?.messages ?? []
+        room?.visibleMessages ?? []
+    }
+
+    /// Strictly the relay's kind-39001 admin list, same gate Android uses for
+    /// in-room moderation.
+    var isAdmin: Bool { room?.admins.contains(keypair.pubkey) ?? false }
+
+    // MARK: - Moderation (Guideline 1.2: report, block, remove)
+
+    /// Report and Block both sign (a kind 1984; the NIP-51 block list), and
+    /// `Signer` is local-key only, so a watch-only account gets neither.
+    var canModerate: Bool { !keypair.isWatchOnly }
+
+    /// Remove & ban: an admin on the relay's list who can also sign the
+    /// kind 9001. A watch-only account listed as admin cannot.
+    var canAdminister: Bool { canModerate && isAdmin }
+
+    /// Who a confirmation dialog is about, resolved once so the dialog keeps
+    /// its name while the row underneath re-renders (the reason
+    /// `PostCardView` caches its `MuteCandidate`).
+    struct ModerationCandidate: Equatable, Identifiable {
+        let pubkey: String
+        let displayName: String
+        var id: String { pubkey }
+    }
+
+    func candidate(for pubkey: String) -> ModerationCandidate {
+        let name = ProfileRepository.shared.get(pubkey)?.displayString ?? Nip19.shortNpub(hex: pubkey)
+        return ModerationCandidate(pubkey: pubkey, displayName: name)
+    }
+
+    /// Per-message report: the shared `ReportSheet` (kind 1984), addressed to
+    /// the pantry moderators plus this room's admins and published to the
+    /// room's relay too. The message disappears once a relay takes it.
+    func report(_ message: GroupMessage) {
+        ReportPresenter.shared.present(.groupMessage(
+            id: message.id,
+            senderPubkey: message.senderPubkey,
+            groupId: groupId,
+            relayUrl: relayUrl,
+            admins: room?.admins ?? []
+        ))
+    }
+
+    /// Block = the app-wide NIP-51 block (`MuteRepository`): their messages
+    /// leave this room and their posts leave every feed, and the list is
+    /// republished. Same word and same store as the feed and profile menus.
+    func blockAuthor(_ pubkey: String) {
+        MuteRepository.shared.blockUser(pubkey)
+    }
+
+    /// Admin: kind 9001 on the room's relay. Pantry records a ban with the
+    /// removal, so the member cannot rejoin by invite; the members list
+    /// updates when the relay's next kind-39002 arrives. Returns why it
+    /// failed, or nil.
+    func removeFromRoom(_ pubkey: String) async -> String? {
+        guard let listVM = GroupListViewModelRegistry.shared else {
+            return "The room list isn't loaded. Go back to Chat Rooms and try again."
+        }
+        switch await listVM.removeUser(relayUrl: relayUrl, groupId: groupId, targetPubkey: pubkey) {
+        case .success: return nil
+        case .failure(let error): return Self.describe(error)
+        }
+    }
+
+    static func describe(_ error: AdminError) -> String {
+        switch error {
+        case .notAuthenticated: return "The relay wants you signed in as an admin. Reopen the room and try again."
+        case .rejected(let message): return message.isEmpty ? "The relay rejected the request." : "The relay rejected the request: \(message)"
+        case .timeout: return "The relay didn't answer in time. Try again."
+        case .network: return "Couldn't reach the relay."
+        }
     }
 
     func setReplyTarget(_ message: GroupMessage?) { replyTarget = message }
