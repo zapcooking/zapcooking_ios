@@ -46,6 +46,24 @@ nonisolated enum OnlyFoodCompose {
     ]
 
     static let hint = "Tap a tag so this shows up in OnlyFood."
+
+    /// How many leading pills fit on one row of `available` points, keeping
+    /// room for the trailing "+" pill. The row neither wraps nor scrolls:
+    /// the pills are the head of `suggestedTags` and the "+" opens the
+    /// full set. `widths` are the pills' measured widths in order.
+    static func visiblePillCount(
+        widths: [CGFloat], plusWidth: CGFloat, spacing: CGFloat, available: CGFloat
+    ) -> Int {
+        var used = plusWidth
+        var count = 0
+        for width in widths {
+            let next = used + spacing + width
+            if next > available { break }
+            used = next
+            count += 1
+        }
+        return count
+    }
     static let placeholder = "What are you cooking?"
 
     /// The "No food tag yet" confirm's message. Under the cap the one-tap
