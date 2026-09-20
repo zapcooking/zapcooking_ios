@@ -1,36 +1,31 @@
-# GATE — concern/draft-survives-rejected-publish (#122: keep the draft on rejection / stopped mining)
-Composer + `PostPublisher` + `PostStatusPill`; nothing new is published,
-the tests drive an offline publish path (the `127.0.0.1` noise in the log
-is that test doing its job).
+# GATE — concern/parser-blank-lines (#119: blank lines around block cards, surplus blank lines)
+Renderer only (`ContentParser` passes 5 and 6): nothing published, no
+network change, so §7.13's live-write protocol does not apply. Rebased
+onto main at 4d89593 (#120, Unicode hashtags — the last thing to touch
+`ContentParser`). The MacBook Air is the gate machine until the Mac
+Studio lands; the box block below is the standard form for the Studio.
 
-**Frozen at this commit.** App code is frozen at **7094523**. This GATE.md
+**Frozen at this commit.** App code is frozen at **44ee02e**. This GATE.md
 is the only commit after it and is the HEAD commit — `gate.sh` refuses to
 run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
-Rebased onto main at 4d89593 (#120). The MacBook Air is the gate machine
-until the Mac Studio lands; the box block below is the standard form.
 
-## What changed since the last gate run
-- Rebased onto main 4d89593. No conflicts.
-- Copilot audit fixes (7094523, three findings that arrived 2026-09-20):
-  `retry()` restarts the optimistic feed row via `PendingPostStore.start`
-  (a stopped post had no row on retry; a failed one stayed `.failed` while
-  the retry mined); `clearAutosaveIfStillThisDraft` compares the whole
-  autosave property list, not just `content`, so a newer draft with the
-  same body but different settings survives a late success; the pill's
-  icon-only dismiss button has an accessibility label. +1 test
-  (`successKeepsADraftWithTheSameBodyButDifferentSettings`).
-- Merge-order note: #121 lands before this one and touches the same two
-  compose files in different regions; a dry-run merge of both in order
-  is clean.
+## What changed since the last gate run (PR body's "Verification")
+- Rebased onto main 4d89593 (was gated against pre-#116 main). No
+  conflicts.
+- Copilot review fix (44ee02e): pass 5 trims block-adjacent blank lines
+  with the same whitespace-aware regexes pass 6 uses, so an indented blank
+  line (`text\n   \n<card>`) or a CRLF terminator no longer leaves a text
+  row behind; the trailing regex also swallows the CR before the final
+  newline. +3 tests (indented blank line, CRLF both sides of a card, CRLF
+  padding at the end of a post).
 
 ## Local (MacBook Air, Xcode 27.0, iOS 26.2 sim, -derivedDataPath shared)
-- Full serial `-only-testing:wispTests` at 7094523: **1088 passed / 2 failed / 21 skipped / 1111** — exactly the Air's clean-main set under Xcode 27 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` and #117 `ColorHierarchyTests/textTiers…`; main at 4d89593 ran 1077/3/21 of 1101 the same morning, its third failure a load flake that passes alone; `RecipeComposeViewModelTests` passed in this run). +10 tests over main (9 from the concern, 1 from the review fix). Zero warnings on lines this branch adds. Machine: Seth's MacBook Air, Xcode 27.0, iOS 26.2 simulator, serial, 616 s of tests.
-- pbxproj: no diff (three-dot).
-- Gate 4 (by hand): publish with every relay unreachable (airplane mode
-  after the sheet dismisses) — the pill shows Retry and stays until
-  acknowledged; reopen the composer, the text is back; tap Retry and the
-  feed's pending row reappears and follows the attempt. Stop a long PoW
-  run — same. VoiceOver reads the pill's X as "Dismiss".
+- Full serial `-only-testing:wispTests` at 44ee02e: **1100 passed / 2 failed / 21 skipped / 1123** — the two are exactly the Air's clean-main set under Xcode 27 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` and #117 `ColorHierarchyTests/textTiers…`; main at 4d89593 ran 1077/3/21 of 1101 the same morning, its third failure a load flake that passes alone). +22 tests over main. Zero warnings on lines this branch adds. Machine: Seth's MacBook Air, Xcode 27.0, iOS 26.2 simulator, serial.
+- pbxproj: no diff (three-dot). New test files are under `wispTests/`.
+- Gate 4 (by hand) is Seth's device pass: a note with an invoice / quote /
+  image card after a paragraph shows no gap above the card; a post padded
+  with trailing newlines ends at its last line; a stanza with single
+  newlines keeps every break.
 
 ## Gate 1 — hermetic, serial (Mac Studio / box form)
 ```
@@ -41,7 +36,20 @@ xcodebuild test -project wisp.xcodeproj -scheme wisp \
   -only-testing:wispTests
 ```
 Pass = main's failure set on that machine and nothing else; judge the
-`.xcresult` via `sh ci_scripts/gate.sh --parse <bundle>`.
+`.xcresult` via `sh ci_scripts/gate.sh --parse <bundle>`. Expect +25
+tests over main (22 from the concern, 3 from the review fix).
+
+## Gate 2 — the parser suites alone
+```
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/ContentParserBlankLineTests \
+  -only-testing:wispTests/ContentParserBlockSpacingTests \
+  -only-testing:wispTests/ContentParserDedupTests \
+  -only-testing:wispTests/ImageUrlsTests
+```
 
 ## Gate 6 — project file
 ```
