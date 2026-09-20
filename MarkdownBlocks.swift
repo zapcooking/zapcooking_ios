@@ -52,8 +52,13 @@ nonisolated enum MarkdownBlocks {
     /// starts by decoding the entity here.
     static func profilePubkey(from entity: String) -> String? {
         var bare = entity
-        for prefix in ["nostr:", "NOSTR:"] where bare.hasPrefix(prefix) {
-            bare = String(bare.dropFirst(prefix.count))
+        // Case-insensitive scheme strip. `nostrInlineRegex` accepts any
+        // casing (`NoStR:` included), so the check here must too, or those
+        // mentions decode as nothing and render as a raw shortened entity.
+        // Only the prefix is lowercased for the comparison; the payload is
+        // kept as typed.
+        if bare.count > 6, bare.prefix(6).lowercased() == "nostr:" {
+            bare = String(bare.dropFirst(6))
         }
         let lower = bare.lowercased()
         guard lower.hasPrefix("npub1") || lower.hasPrefix("nprofile1") else { return nil }
@@ -87,8 +92,13 @@ nonisolated enum MarkdownBlocks {
     /// only when the entity doesn't decode.
     static func shortenNostrEntity(_ entity: String) -> String {
         var bare = entity
-        for prefix in ["nostr:", "NOSTR:"] where bare.hasPrefix(prefix) {
-            bare = String(bare.dropFirst(prefix.count))
+        // Case-insensitive scheme strip. `nostrInlineRegex` accepts any
+        // casing (`NoStR:` included), so the check here must too, or those
+        // mentions decode as nothing and render as a raw shortened entity.
+        // Only the prefix is lowercased for the comparison; the payload is
+        // kept as typed.
+        if bare.count > 6, bare.prefix(6).lowercased() == "nostr:" {
+            bare = String(bare.dropFirst(6))
         }
         let lower = bare.lowercased()
         if lower.hasPrefix("npub1") || lower.hasPrefix("nprofile1") {

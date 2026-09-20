@@ -26,6 +26,9 @@ struct LongformMentionTests {
     @Test func schemePrefixIsOptionalAndCaseInsensitive() {
         #expect(MarkdownBlocks.profilePubkey(from: "nostr:\(npub)") == authorHex)
         #expect(MarkdownBlocks.profilePubkey(from: "NOSTR:\(npub)") == authorHex)
+        // Mixed case too: the inline regex already matches it, so the decoder
+        // must not be the step that drops it.
+        #expect(MarkdownBlocks.profilePubkey(from: "NoStR:\(npub)") == authorHex)
     }
 
     // MARK: - Not a person

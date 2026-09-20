@@ -195,7 +195,9 @@ struct ArticleView: View {
             // see that zapping was an option. Its own row rather than beside
             // the byline: overlaid on that row it collided with any display
             // name long enough to reach it.
-            if !activeUserIsWatchOnly {
+            // Post-level zap, so the §4.8 kill switch applies here exactly as
+            // it does to the bolt in `ArticleActionBar` below the body.
+            if !activeUserIsWatchOnly, ZapGate.postZapVisible() {
                 Spacer().frame(height: 12)
                 ArticleZapRow(
                     article: article,
@@ -265,8 +267,13 @@ struct ArticleView: View {
             VStack(spacing: 0) {
                 articleMenuItem(title: "Share", systemImage: "square.and.arrow.up") {
                     showOverflowMenu = false
+                    // Next runloop tick, as the post overflow menu does: the
+                    // popover is still the top presenter until its dismissal
+                    // settles, and a share sheet presented under it goes nowhere.
                     if let link = articleShareURL(article) {
-                        ShareSheetPresenter.present(url: link)
+                        DispatchQueue.main.async {
+                            ShareSheetPresenter.present(url: link)
+                        }
                     }
                 }
                 Divider()
@@ -344,7 +351,9 @@ struct ArticleView: View {
 
     private func articleShareURL(_ article: NostrEvent) -> String? {
         guard let naddr = articleNaddr(article) else { return nil }
-        return "https://wisp.talk/thread/\(naddr)"
+        // The fork's canonical web route for an addressable article
+        // (`ZAPCOOKING_IOS_BUILD.md`, share URLs): never the upstream host.
+        return "https://zap.cooking/r/\(naddr)"
     }
 
     // MARK: - Markdown blocks
@@ -543,8 +552,9 @@ private struct ArticleZapRow: View {
     let authorProfile: ProfileData?
 
     @Environment(WalletStore.self) private var walletStore: WalletStore?
+    @Environment(ComposePresenter.self) private var composePresenter: ComposePresenter?
     @State private var engagementRepo = EngagementRepository.shared
-    @State private var showZapSheet = false
+    @State private var showWalletSetupPrompt = false
 
     private var box: EngagementBox { engagementRepo.box(for: article.id) }
     private var iZapped: Bool { box.counts.zappers.contains { $0.pubkey == keypair.pubkey } }
@@ -576,7 +586,22 @@ private struct ArticleZapRow: View {
             Spacer(minLength: 0)
 
             Button {
-                showZapSheet = true
+                // Root-presented via `ZapRoute`, never a local `.sheet`: this
+                // row lives in the article `LazyVStack`, and a keyboard-raising
+                // sheet owned by a lazy row dies when the row is re-windowed
+                // (the open/close loop `ArticleActionBar` documents). The
+                // no-wallet outcome shows the setup prompt, not an empty sheet.
+                let outcome = ZapRoute.open(
+                    ZapSheetRequest(
+                        recipientPubkey: article.pubkey,
+                        recipientLud16: authorProfile?.lud16,
+                        recipientName: authorProfile?.displayString,
+                        eventId: article.id
+                    ),
+                    store: walletStore,
+                    presenter: composePresenter
+                )
+                if outcome == .walletSetupNeeded { showWalletSetupPrompt = true }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "bolt.fill")
@@ -596,21 +621,7 @@ private struct ArticleZapRow: View {
             .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
-        .sheet(isPresented: $showZapSheet) {
-            if let store = walletStore {
-                ZapSheet(
-                    store: store,
-                    recipientPubkey: article.pubkey,
-                    recipientLud16: authorProfile?.lud16,
-                    recipientName: authorProfile?.displayString,
-                    eventId: article.id,
-                    extraTags: [],
-                    forcePrivate: false,
-                    onSuccess: { _ in },
-                    dismiss: { showZapSheet = false }
-                )
-            }
-        }
+        .walletSetupPrompt(isPresented: $showWalletSetupPrompt)
     }
 }
 

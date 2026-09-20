@@ -340,8 +340,11 @@ struct QuotedNoteView: View {
                     // copy into the card. The same article linked as a
                     // `nostr:naddr1…` already gets a proper card via
                     // `ArticleCardView`; this gives the id-based path the
-                    // equivalent, using the event already in hand.
-                    ArticleFeedPreview(event: event, relayHints: relayHints)
+                    // equivalent, using the event already in hand. Unlinked:
+                    // `articleTapOrNoteButton` around this card is already the
+                    // `ArticleTapLink` for a kind 30023, and nesting a second
+                    // one gives the tap two navigation controls.
+                    ArticleFeedPreview(event: event, relayHints: relayHints, linked: false)
                 } else {
                     // "Long" for an embedded preview is text past the threshold OR
                     // ANY inline media (NIP-92 imeta image / video). Without the
