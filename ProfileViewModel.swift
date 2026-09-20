@@ -189,6 +189,22 @@ final class ProfileViewModel {
         let myFollows = FollowsCache.shared.follows(for: activeUserPubkey)
         youFollow = myFollows.contains(pubkey)
 
+        // Paint the cached following count immediately so the stat doesn't
+        // start at 0 and visibly fill in once the kind-3 query lands — the
+        // profile read as "loading my follows from scratch" on every visit.
+        // `loadContacts` overwrites this with the relay copy when it arrives.
+        //
+        // Only the count is seeded, not `followingPubkeys`: that array gates
+        // whether `loadFollowingProfiles` re-fetches contacts, so priming it
+        // would let the Following tab render the cached list and mark itself
+        // loaded without ever consulting a relay.
+        let cachedFollows = pubkey == activeUserPubkey
+            ? myFollows
+            : FollowsCache.shared.follows(for: pubkey)
+        if !cachedFollows.isEmpty {
+            followingCount = cachedFollows.count
+        }
+
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in await self?.loadProfileHeader() }
             group.addTask { [weak self] in await self?.loadContacts() }
@@ -204,10 +220,13 @@ final class ProfileViewModel {
             group.addTask { [weak self] in await self?.loadDeletions() }
         }
 
-        // Now that we know the target's write relays, load notes/replies in parallel
+        // Now that we know the target's write relays, load notes/replies in
+        // parallel — with the contacts retry riding alongside rather than
+        // ahead of them, since it only feeds the header stat.
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in await self?.loadInitialNotes() }
             group.addTask { [weak self] in await self?.loadInitialReplies() }
+            group.addTask { [weak self] in await self?.retryContactsIfNeeded() }
         }
     }
 
@@ -272,14 +291,47 @@ final class ProfileViewModel {
         return out
     }
 
+    /// Retry contacts once the target's own write relays are known.
+    ///
+    /// `loadContacts` races `loadTargetWriteRelays` in the first group, so
+    /// its `queryRelays()` set is built before `targetWriteRelays` is
+    /// populated — for a profile whose kind-3 lives only on its author's
+    /// write relays, the first attempt searches the wrong servers and finds
+    /// nothing. Nothing else re-runs it (`start()` is one-shot via
+    /// `hasStarted`, and there's no pull-to-refresh on the header), so the
+    /// count stayed at 0 for the life of the screen rather than briefly.
+    ///
+    /// Runs concurrently with the notes load, never before it: this is a
+    /// second full relay round-trip, and blocking on it held the first note
+    /// back by seconds on every profile the first pass missed.
+    ///
+    /// Only a genuine miss retries: the first query returned no kind-3 at
+    /// all *and* was built before the target's write relays were known. A
+    /// kind-3 with zero `p` tags is an answer, not a miss — `followingPubkeys`
+    /// is empty either way, so keying the retry on it made every empty
+    /// profile pay a second 10-second timeout before `start()` completed.
+    private func retryContactsIfNeeded() async {
+        guard contactsMissedWithoutTargetRelays, !targetWriteRelays.isEmpty else { return }
+        contactsMissedWithoutTargetRelays = false
+        await loadContacts()
+    }
+
+    /// Set by `loadContacts` when a query that had no target write relays to
+    /// search came back without any kind-3. Cleared by the retry.
+    private var contactsMissedWithoutTargetRelays = false
+
     private func loadContacts() async {
+        let hadTargetRelays = !targetWriteRelays.isEmpty
         let relays = queryRelays()
         let results = await RelayPool.query(
             relays: relays,
             filter: NostrFilter(kinds: [3], authors: [pubkey], limit: 1),
             timeout: 10
         )
-        guard let best = results.filter({ $0.kind == 3 }).max(by: { $0.createdAt < $1.createdAt }) else { return }
+        guard let best = results.filter({ $0.kind == 3 }).max(by: { $0.createdAt < $1.createdAt }) else {
+            contactsMissedWithoutTargetRelays = !hadTargetRelays
+            return
+        }
         let pubkeys = best.tags.compactMap { tag -> String? in
             tag.count >= 2 && tag[0] == "p" ? tag[1] : nil
         }
