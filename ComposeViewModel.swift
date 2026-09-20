@@ -20,6 +20,9 @@ final class ComposeViewModel {
     var content: String = ""
     var galleryMode: Bool = false
     var explicit: Bool = false
+    /// Settings → Proof of Work decides; there is no per-post control any
+    /// more (the composer's shield was inherited Wisp chrome nobody could
+    /// name, and note PoW now defaults off).
     var powEnabled: Bool = PowPreferences.snapshot().noteEnabled
     /// True when the user has toggled "Private" in a reply composer. Routes
     /// publish through `PrivateReplyPublisher` (NIP-17 gift wrap) instead of
@@ -208,8 +211,7 @@ final class ComposeViewModel {
         }
         var payload: [String: Any] = [
             "content": content,
-            "explicit": explicit,
-            "powEnabled": powEnabled
+            "explicit": explicit
         ]
         if let ts = scheduleAt?.timeIntervalSince1970 {
             payload["scheduleAt"] = ts
@@ -291,7 +293,8 @@ final class ComposeViewModel {
         attachments = restored
         mentions = restoredMentions
         explicit = payload["explicit"] as? Bool ?? false
-        powEnabled = payload["powEnabled"] as? Bool ?? powEnabled
+        // An older autosave may carry "powEnabled" from the removed shield;
+        // it is ignored so a restored draft can't mine with no visible control.
         if let ts = payload["scheduleAt"] as? TimeInterval {
             scheduleAt = Date(timeIntervalSince1970: ts)
         }
@@ -366,7 +369,6 @@ final class ComposeViewModel {
     }
 
     func toggleNsfw() { explicit.toggle() }
-    func togglePow() { powEnabled.toggle() }
     /// Toggle the "Private" reply state. No-op when locked (replying to a
     /// rumor that's already private) — the chain stays encrypted end-to-end.
     func togglePrivate() {
@@ -1162,27 +1164,34 @@ final class ComposeViewModel {
     }
 
     /// True when the composer has enough content to publish. Drives the
-    /// Publish button's enabled state — the user shouldn't be able to
-    /// tap a button that will immediately error out with "Type something
-    /// first." Mirrors the success conditions in `validate()`, minus the
-    /// transitional "Wait for uploads to finish" case: a partial upload
-    /// counts as content (the user clearly intends to post something);
-    /// the validator catches the not-ready-yet state on tap.
-    var canPublish: Bool {
+    /// Why Publish is greyed out, or nil when it isn't. The reason lives
+    /// **on the button** (the `RecipeComposeView` pattern): a silently
+    /// disabled button reads as broken. Mirrors `validate()`, including the
+    /// upload-in-flight case, so the button never enables onto a tap that
+    /// would error. Same register as the recipe form's copy.
+    var publishBlocker: String? {
+        // Uploads first, in every mode: the poll toggle does not clear
+        // attachments, so a poll can be enabled mid-upload and must wait too.
+        let uploading = uploadProgress != nil || attachments.contains(where: { $0.url == nil })
+        if uploading { return "Wait for uploads to finish." }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if pollEnabled {
             let nonBlank = pollOptions
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            if nonBlank.count < 2 { return false }
-            if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
-            return true
+            if trimmed.isEmpty { return "Add a question." }
+            if nonBlank.count < 2 { return "Add at least 2 options." }
+            return nil
         }
         if galleryMode {
-            return !attachments.isEmpty
+            return attachments.isEmpty ? "Add a photo." : nil
         }
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty || !attachments.isEmpty
+        if trimmed.isEmpty && attachments.isEmpty { return "Write something or add a photo." }
+        return nil
     }
+
+    /// Publish button's enabled state — `publishBlocker` says why when false.
+    var canPublish: Bool { publishBlocker == nil }
 
     // MARK: - Internals
 

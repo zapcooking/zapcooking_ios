@@ -457,6 +457,18 @@ struct MainView: View {
                     onSuccess: zap.onSuccess,
                     dismiss: { composePresenter.request = nil }
                 )
+            case .noteReview(let review):
+                // Hosted here for the same reason: the draft editor raises the
+                // keyboard. See `ComposePresenter.openNoteReview`.
+                NoteReviewSheet(
+                    parent: review.parent,
+                    imageUrls: review.imageUrls,
+                    keypair: keypair,
+                    onViewReply: { reply in
+                        composePresenter.request = nil
+                        review.onViewReply?(reply)
+                    }
+                )
             }
         }
         .sheet(item: $reopenDraft) { draft in

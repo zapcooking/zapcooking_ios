@@ -61,6 +61,23 @@ final class ComposePresenter {
     func openZap(_ zap: ZapSheetRequest) {
         request = .zap(zap)
     }
+
+    /// The Cheffy Note Review sheet edits a draft in a `TextEditor`, so it
+    /// raises the keyboard and must be hosted from the stable root like the
+    /// composers (presenting it from the recyclable card row would reproduce
+    /// the open/close loop above).
+    func openNoteReview(_ review: NoteReviewPresentation) {
+        request = .noteReview(review)
+    }
+}
+
+/// Everything `NoteReviewSheet` needs, captured at tap time on the card.
+/// `onViewReply` rides inline like the emoji case's `onPick`, so its lifetime
+/// is bound to the presentation.
+struct NoteReviewPresentation {
+    let parent: NostrEvent
+    let imageUrls: [String]
+    var onViewReply: ((NostrEvent) -> Void)? = nil
 }
 
 /// Identifiable so it can drive `.sheet(item:)`. The emoji case carries its
@@ -75,6 +92,8 @@ enum ComposeRequest: Identifiable {
     /// New top-level note, optionally seeded and/or with suggestion pills
     /// (OnlyFood FAB: no seed, the food pills).
     case newNote(initialText: String, suggestedHashtags: [String])
+    /// Cheffy Note Review for a photo-bearing kind-1 (keyboard-raising draft editor).
+    case noteReview(NoteReviewPresentation)
 
     var id: String {
         switch self {
@@ -83,6 +102,7 @@ enum ComposeRequest: Identifiable {
         case .emoji(let id, _):     return "emoji-\(id.uuidString)"
         case .zap(let zap):         return "zap-\(zap.eventId ?? zap.recipientPubkey)"
         case .newNote:              return "new-note"
+        case .noteReview(let r):    return "note-review-\(r.parent.id)"
         }
     }
 }

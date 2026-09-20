@@ -138,6 +138,42 @@ struct BottomBarAndActionRowTests {
         #expect(total <= available - 5 * 4, "row content \(total)pt of \(available)pt")
     }
 
+    /// The adaptive Cheffy Note Review slot makes the row seven controls
+    /// wide. Measured 2026-09-19 (MacBook Air, Xcode 26.3, iPhone 17 /
+    /// iOS 26.2): reply "1.2k" 51, react "1.2k" 50, repost "1.2k" 54, zap
+    /// "1.2k" 45, bookmark / Cheffy / expand 44 each — 332pt, over the
+    /// 343pt row's gap budget at 375pt. So the slot is adaptive:
+    /// `NoteReviewTrigger.inlineMinRowWidth` (356 = 7 × 44 + 6 × 4 gaps + 24
+    /// count headroom) keeps a 375pt device menu-only and lets 390pt and
+    /// wider carry the slot. This pins both halves: the seven-control worst
+    /// case fits the threshold width with the gap rule, and does NOT fit
+    /// the narrowest device.
+    @Test func sevenControlRow_fitsTheInlineThreshold_notTheNarrowestDevice() {
+        let controls: [ActionRowItem] = [
+            ActionRowItem(glyph: .symbol("bubble.right"), label: "1.2k"),
+            ActionRowItem(glyph: .text("🔥"), label: "1.2k"),
+            ActionRowItem(glyph: .symbol("arrow.2.squarepath"), label: "1.2k"),
+            ActionRowItem(glyph: .image(Image(systemName: "bolt.fill")), label: "1.2k"),
+            ActionRowItem(glyph: .symbol("bookmark")),
+            ActionRowItem(glyph: .custom(AnyView(CheffyIcon(size: ActionRowItem.glyphSize)))),
+            ActionRowItem(glyph: .symbol("chevron.down")),
+        ]
+        var total: CGFloat = 0
+        for control in controls {
+            let renderer = ImageRenderer(content: control)
+            renderer.scale = 1
+            let width = renderer.uiImage?.size.width ?? 0
+            #expect(width >= 44)
+            total += width
+        }
+        let gaps: CGFloat = 6 * 4
+        let narrowest: CGFloat = 375 - 2 * 16
+        #expect(total > narrowest - gaps, "seven controls fit 375pt after all (\(total)pt) — the slot could be unconditional")
+        #expect(total <= NoteReviewTrigger.inlineMinRowWidth - gaps, "seven-control worst case \(total)pt exceeds the inline threshold's budget")
+        #expect(!NoteReviewTrigger.meetsInlineWidth(narrowest))
+        #expect(NoteReviewTrigger.meetsInlineWidth(390 - 2 * 16))
+    }
+
     @Test func actionRowButton_rendersItsItemAtFullTarget() {
         let button = ActionRowButton(item: ActionRowItem(glyph: .symbol("bookmark"))) {}
         let renderer = ImageRenderer(content: button)

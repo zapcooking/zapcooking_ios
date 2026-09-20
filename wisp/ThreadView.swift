@@ -259,7 +259,7 @@ struct ThreadView: View {
                             viewModel.revealHiddenSpamAuthor(row.event.pubkey)
                         }
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                         .padding(.leading, 16)
                         .padding(.bottom, 4)
                     }
@@ -382,7 +382,7 @@ struct ThreadView: View {
         // PostCardView — so PostCardView's `==` re-render gate is untouched.
         // The animation value MUST be the per-row Bool, not the optional, or
         // every visible row would animate on any highlight change.
-        .background(viewModel.highlightId == item.row.id ? Color.wispPrimary.opacity(0.14) : Color.clear)
+        .background(viewModel.highlightId == item.row.id ? Color.zapSubtleFill : Color.clear)
         .animation(.easeInOut(duration: 0.3), value: viewModel.highlightId == item.row.id)
     }
 
@@ -425,7 +425,7 @@ struct ThreadView: View {
                         .font(.subheadline.weight(.medium))
                     Spacer()
                 }
-                .foregroundStyle(Color.wispPrimary)
+                .foregroundStyle(Color.zapInteractive)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)

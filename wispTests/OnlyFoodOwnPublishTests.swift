@@ -86,8 +86,9 @@ struct OnlyFoodOwnPublishTests {
     @Test func ownNote_overStructuralCap_isNotInserted() async {
         let vm = vm { _ in self.loaded([]) }
         await vm.startAndWait()
-        let tags = ["foodstr", "soup", "stew", "dinner", "homemade", "cooking"].map { ["t", $0] }
-        let spammy = note(id: "six", author: me, createdAt: 200, tags: tags)
+        // One over the structural cap, whatever the cap is (#85 moved it 5 → 20).
+        let tags = [["t", "foodstr"]] + (1...OnlyFoodFilter.maxHashtags).map { ["t", "zc\($0)"] }
+        let spammy = note(id: "over", author: me, createdAt: 200, tags: tags)
         #expect(vm.insertOwnPublished(spammy) == false)
         #expect(vm.notes.isEmpty)
     }

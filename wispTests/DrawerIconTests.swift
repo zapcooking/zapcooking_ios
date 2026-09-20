@@ -82,11 +82,18 @@ struct LogoAppearanceTests {
         let cg = try #require(flat.cgImage)
         var buf = [UInt8](repeating: 0, count: side * side * 4)
         let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
-        let ctx = try #require(CGContext(
-            data: &buf, width: side, height: side, bitsPerComponent: 8,
-            bytesPerRow: side * 4, space: space,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+        // `&buf` would hand CGContext a pointer that is only valid for the
+        // call; the context keeps it, so draw inside the scoped access.
+        let drew: Bool = buf.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(
+                data: raw.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                bytesPerRow: side * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        try #require(drew)
 
         var n = 0
         for i in stride(from: 0, to: buf.count, by: 4) {
