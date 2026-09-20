@@ -1170,6 +1170,10 @@ final class ComposeViewModel {
     /// upload-in-flight case, so the button never enables onto a tap that
     /// would error. Same register as the recipe form's copy.
     var publishBlocker: String? {
+        // Uploads first, in every mode: the poll toggle does not clear
+        // attachments, so a poll can be enabled mid-upload and must wait too.
+        let uploading = uploadProgress != nil || attachments.contains(where: { $0.url == nil })
+        if uploading { return "Wait for uploads to finish." }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if pollEnabled {
             let nonBlank = pollOptions
@@ -1179,13 +1183,9 @@ final class ComposeViewModel {
             if nonBlank.count < 2 { return "Add at least 2 options." }
             return nil
         }
-        let uploading = uploadProgress != nil || attachments.contains(where: { $0.url == nil })
         if galleryMode {
-            if attachments.isEmpty && !uploading { return "Add a photo." }
-            if uploading { return "Wait for uploads to finish." }
-            return nil
+            return attachments.isEmpty ? "Add a photo." : nil
         }
-        if uploading { return "Wait for uploads to finish." }
         if trimmed.isEmpty && attachments.isEmpty { return "Write something or add a photo." }
         return nil
     }

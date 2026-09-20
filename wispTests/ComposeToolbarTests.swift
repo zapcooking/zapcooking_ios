@@ -124,6 +124,22 @@ struct ComposeToolbarTests {
         #expect(vm.publishBlocker == nil)
     }
 
+    /// The poll toggle does not clear attachments, so a poll enabled
+    /// mid-upload waits like every other mode (Copilot, PR #92).
+    @Test func publishBlocker_poll_waitsForUploads_beforeItsOwnChecks() {
+        let vm = composer()
+        vm.attachments = [attachment(url: nil)]
+        vm.togglePoll()
+        #expect(vm.pollEnabled)
+        #expect(vm.publishBlocker == "Wait for uploads to finish.")
+        vm.updateContent("Best breakfast?")
+        vm.pollOptions = ["Eggs", "Oats"]
+        #expect(vm.publishBlocker == "Wait for uploads to finish.")
+        #expect(!vm.canPublish)
+        vm.attachments = [attachment(url: "https://blossom.example/a.jpg")]
+        #expect(vm.publishBlocker == nil)
+    }
+
     @Test func publishBlocker_poll_questionThenOptions() {
         let vm = composer()
         vm.togglePoll()

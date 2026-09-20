@@ -35,13 +35,15 @@ struct HashtagSuggestionRow: View {
                 Spacer(minLength: 8)
                 countLabel
             }
+            // No trailing Spacer: it would add one more `spacing` gap the
+            // fit computation does not count. The frame leads the row.
             HStack(spacing: HashtagPillMetrics.spacing) {
                 ForEach(visibleTags, id: \.self) { tag in
                     pill(tag)
                 }
                 morePill
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
             if viewModel.suggestedTagsOverCap {
                 Text("OnlyFood hides notes with more than \(OnlyFoodCompose.maxTags) tags.")
@@ -132,7 +134,10 @@ nonisolated enum HashtagPillMetrics {
     static let strokeWidth: CGFloat = 1
     static let plusGlyphWidth: CGFloat = 12
     /// Outline for unselected chips and the "+": visible on both schemes,
-    /// quieter than text.
+    /// quieter than text. Deliberately not the palette `outline`
+    /// (`Color.borderSubtle`): that is a hairline tier (0x343338 on the
+    /// custom dark preset) and reads as nothing on a chip, which would
+    /// undo the "tap me" affordance the stroke exists for.
     static let outline = Color.secondary.opacity(0.55)
     static var font: Font { .caption.weight(.medium) }
 
