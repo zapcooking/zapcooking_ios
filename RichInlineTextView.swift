@@ -217,9 +217,12 @@ struct RichInlineTextView: UIViewRepresentable {
         // the interactive tier, URLs one step lower at the link tier, so a
         // post's own text stays the focus and a zap amount stays the
         // loudest orange on screen. The colours are set directly on the
-        // attributed string: `isSelectable` is off for @mention tap
-        // reliability, which also bypasses UITextView's `linkTextAttributes`
-        // pass (the old `systemBlue` path).
+        // attributed string and are what gets painted: tappable ranges carry
+        // the custom `.wispLinkURL` attribute rather than the system `.link`,
+        // so UITextView never repaints them with `tintColor` /
+        // `linkTextAttributes` (the old `systemBlue` path). `isSelectable`
+        // stays on for the Copy menu; single-tap routing is our own
+        // recognizer, not UITextView's link handling.
         let primaryColor = UIColor(Color.zapInteractive)
         let linkColor = UIColor(Color.zapLink)
 

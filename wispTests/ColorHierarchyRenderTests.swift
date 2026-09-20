@@ -95,6 +95,17 @@ struct ColorHierarchyRenderTests {
         #expect(orangeAmountOnly > 30, "bolt + amount px: \(orangeAmountOnly)")
         // Adding the message adds no full-strength orange: it is gray now.
         #expect(orangeWithMessage <= orangeAmountOnly + 8, "with message \(orangeWithMessage) vs amount-only \(orangeAmountOnly)")
+        // The message is `textSecondary`: the dark-mode secondary label
+        // colour composited over the ground shows up only when the message
+        // is present.
+        let secondary = UIColor.secondaryLabel.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        try #require(secondary.getRed(&r, green: &g, blue: &b, alpha: &a))
+        let grayArgb = (0xFF << 24) | (Int((r * 255).rounded()) << 16) | (Int((g * 255).rounded()) << 8) | Int((b * 255).rounded())
+        let gray = Self.composite(grayArgb, over: ground, alpha: Double(a))
+        let grayWithMessage = withMessage.count(argb: gray, tolerance: 10)
+        let grayAmountOnly = amountOnly.count(argb: gray, tolerance: 10)
+        #expect(grayWithMessage > grayAmountOnly + 40, "message gray px: \(grayWithMessage) vs \(grayAmountOnly) without a message")
         // The capsule stroke is the subtle tier, not the value tier.
         let subtle = Self.composite(zap, over: ground, alpha: ResolvedTheme.subtleOpacity)
         #expect(withMessage.count(argb: subtle, tolerance: 10) > 20)

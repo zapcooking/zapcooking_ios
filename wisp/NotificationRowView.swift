@@ -99,9 +99,12 @@ struct NotificationRowView: View {
     private var mergedZapsBadge: some View {
         if item.kind == .zap, !item.mergedZaps.isEmpty {
             let extra = item.mergedZaps.count
+            // A count badge, not a sat amount: interactive tier on the
+            // subtle wash, like the poll badge below. The sats themselves
+            // stay on `wispZapColor` in `mergedZapBreakdown`.
             Text("+\(extra) more")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.wispZapColor)
+                .foregroundStyle(Color.zapInteractive)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
