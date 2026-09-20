@@ -728,6 +728,69 @@ enum ContentParser {
         return result
     }
 
+    // MARK: - Image split (short free-form text)
+
+    /// Splits short free-form text — a zap comment, say — into the images it
+    /// references and whatever text is left once those URLs are stripped out.
+    /// Surfaces that only have a plain string to work with (no event, no imeta
+    /// tags) use this to render an image comment as an actual image instead of
+    /// a raw URL.
+    ///
+    /// Whitespace in the leftover text is collapsed to single spaces so a
+    /// comment written as "nice one\n\nhttps://…/x.jpg" doesn't leave a
+    /// trailing blank line behind in a one- or two-line label.
+    ///
+    /// `.unknownMedia` (an extension-less Blossom URL, where the file type is
+    /// only knowable from an imeta tag the plain string doesn't carry) counts as
+    /// an image here, matching how `RichContentView` renders that segment.
+    static func splitImages(from content: String) -> (text: String, images: [MediaMeta]) {
+        guard !content.isEmpty else { return ("", []) }
+        var images: [MediaMeta] = []
+        var seen = Set<String>()
+        for seg in parse(content: content) {
+            let meta: MediaMeta
+            switch seg {
+            case .image(let m), .unknownMedia(let m): meta = m
+            default: continue
+            }
+            guard seen.insert(meta.url).inserted else { continue }
+            images.append(meta)
+        }
+        guard !images.isEmpty else {
+            return (content.trimmingCharacters(in: .whitespacesAndNewlines), images)
+        }
+        var text = content
+        for meta in images {
+            // `parse` trims trailing punctuation off a URL token, so `meta.url`
+            // is shorter than what the author typed (`…/image.jpg,`). Take the
+            // punctuation out with the URL — the same set `trimTrailingPunctuation`
+            // strips — or the comma survives as "text" and an image-only comment
+            // stops being image-only.
+            let pattern = NSRegularExpression.escapedPattern(for: meta.url) + #"[.,)\];:!?]*"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                text = text.replacingOccurrences(of: meta.url, with: " ")
+                continue
+            }
+            text = regex.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " "
+            )
+        }
+        let collapsed = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return (collapsed, images)
+    }
+
+    /// One-line rendering of free-form text for chips and pills, where there's
+    /// no room to lay an image out: each image URL collapses to an `[image]`
+    /// marker so a URL-only comment doesn't render as a long truncated link.
+    static func compactImageMarkers(_ content: String) -> String {
+        let (text, images) = splitImages(from: content)
+        guard !images.isEmpty else { return text }
+        let markers = Array(repeating: "[image]", count: images.count).joined(separator: " ")
+        return text.isEmpty ? markers : "\(text) \(markers)"
+    }
+
     // MARK: - Custom emoji tags (NIP-30)
 
     static func parseEmojiTags(_ tags: [[String]]) -> [String: String] {

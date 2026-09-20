@@ -51,6 +51,14 @@ final class ComposeViewModel {
     var zapPollMinSats: Int? = nil
     var zapPollMaxSats: Int? = nil
     var pollEndsAt: Int? = nil
+    /// Poll duration UI state, kept here rather than as `@State` in
+    /// `PollOptionsEditor`: the editor is mounted only while `pollEnabled`,
+    /// so view-local state died every time the poll was toggled off and on
+    /// and the user's ∞ / 7d / custom choice silently became a one-day poll
+    /// again. Preset `nil` with `pollDurationIsCustom == false` is ∞.
+    var pollDurationPreset: PollDurationPreset? = .oneDay
+    var pollDurationIsCustom = false
+    var pollCustomEndDate = Date().addingTimeInterval(24 * 3_600)
 
     // MARK: - Autocomplete state
 
