@@ -245,7 +245,7 @@ nonisolated enum MarkdownBlocks {
 
 private extension String {
     /// Kotlin `trimStart()` — strip leading whitespace only.
-    func trimmingLeadingWhitespace() -> String {
+    nonisolated func trimmingLeadingWhitespace() -> String {
         guard let idx = firstIndex(where: { !$0.isWhitespace }) else { return "" }
         return String(self[idx...])
     }
