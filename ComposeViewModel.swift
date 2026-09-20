@@ -1370,10 +1370,12 @@ final class ComposeViewModel {
     }
 
     /// NIP-22 tag set for this compose session, or nil when the reply isn't
-    /// answering an externally-rooted comment. Computed once and consulted by
-    /// both `determineKind` and `buildBaseTags` so the kind and the tags can
-    /// never disagree — a kind-1111 carrying NIP-10 `e`/`p` tags (or a kind-1
-    /// carrying `I`/`K`) would be malformed either way.
+    /// answering an externally-rooted comment. A single derivation from the
+    /// same inputs (`mode`, poll / gallery state) that both `determineKind`
+    /// and `buildBaseTags` consult, so the kind and the tags can never
+    /// disagree — a kind-1111 carrying NIP-10 `e`/`p` tags (or a kind-1
+    /// carrying `I`/`K`) would be malformed either way. It is recomputed on
+    /// each access; nothing is cached.
     private var nip22ReplyTags: [[String]]? {
         guard !pollEnabled, !galleryMode else { return nil }
         guard case .reply(let parent, _) = mode else { return nil }

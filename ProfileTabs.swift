@@ -328,7 +328,10 @@ struct CommentsTabView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.comments, id: \.id) { event in
-                        NavigationLink(value: ThreadRoute(eventId: event.id, authorPubkey: event.pubkey)) {
+                        // Same wrapper as the other list tabs: a kind-1111 is
+                        // never a recipe, so this resolves to the thread
+                        // route today, but one tap gate for every card row.
+                        FeedEventNavigationLink(event: event) {
                             PostCardView(
                                 event: event,
                                 profile: viewModel.profiles[event.pubkey],
@@ -340,7 +343,14 @@ struct CommentsTabView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .onAppear { engagementRepo.markVisible(event: event) }
+                        .onAppear {
+                            engagementRepo.markVisible(event: event)
+                            MediaLookaheadPrefetcher.shared.noteAppeared(
+                                eventId: event.id,
+                                in: viewModel.comments,
+                                profiles: viewModel.profiles
+                            )
+                        }
                         .onDisappear { engagementRepo.markInvisible(event: event) }
                         Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
                     }

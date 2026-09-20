@@ -7,9 +7,11 @@ import Foundation
 /// geohash, ISBN…). Uppercase tags name the *root* scope, lowercase name the
 /// *immediate parent*, so a top-level comment repeats the same value in both.
 ///
-/// Wisp only renders these; it doesn't compose them yet. The job here is to
-/// recover enough context that a comment on a web page doesn't read as a
-/// stray remark with no subject — see `ExternalContentRef`.
+/// Two jobs. Rendering: recover enough context that a comment on a web page
+/// doesn't read as a stray remark with no subject — see `ExternalRef`.
+/// Composing: a reply to an externally-rooted comment must itself be a
+/// kind 1111 with the root's `I`/`K` tags, never a kind 1 with NIP-10 tags
+/// — see `buildReplyTags(to:relayHint:)` and `ComposeViewModel`.
 nonisolated enum Nip22 {
     static let kindComment = 1111
 
