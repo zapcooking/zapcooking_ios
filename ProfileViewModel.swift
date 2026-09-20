@@ -290,22 +290,35 @@ final class ProfileViewModel {
     ///
     /// Runs concurrently with the notes load, never before it: this is a
     /// second full relay round-trip, and blocking on it held the first note
-    /// back by seconds on every profile the first pass missed — including
-    /// ones with a genuinely empty contact list, where it can never succeed
-    /// and always pays the full timeout.
+    /// back by seconds on every profile the first pass missed.
+    ///
+    /// Only a genuine miss retries: the first query returned no kind-3 at
+    /// all *and* was built before the target's write relays were known. A
+    /// kind-3 with zero `p` tags is an answer, not a miss — `followingPubkeys`
+    /// is empty either way, so keying the retry on it made every empty
+    /// profile pay a second 10-second timeout before `start()` completed.
     private func retryContactsIfNeeded() async {
-        guard followingPubkeys.isEmpty, !targetWriteRelays.isEmpty else { return }
+        guard contactsMissedWithoutTargetRelays, !targetWriteRelays.isEmpty else { return }
+        contactsMissedWithoutTargetRelays = false
         await loadContacts()
     }
 
+    /// Set by `loadContacts` when a query that had no target write relays to
+    /// search came back without any kind-3. Cleared by the retry.
+    private var contactsMissedWithoutTargetRelays = false
+
     private func loadContacts() async {
+        let hadTargetRelays = !targetWriteRelays.isEmpty
         let relays = queryRelays()
         let results = await RelayPool.query(
             relays: relays,
             filter: NostrFilter(kinds: [3], authors: [pubkey], limit: 1),
             timeout: 10
         )
-        guard let best = results.filter({ $0.kind == 3 }).max(by: { $0.createdAt < $1.createdAt }) else { return }
+        guard let best = results.filter({ $0.kind == 3 }).max(by: { $0.createdAt < $1.createdAt }) else {
+            contactsMissedWithoutTargetRelays = !hadTargetRelays
+            return
+        }
         let pubkeys = best.tags.compactMap { tag -> String? in
             tag.count >= 2 && tag[0] == "p" ? tag[1] : nil
         }
