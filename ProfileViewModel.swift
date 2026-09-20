@@ -183,6 +183,14 @@ final class ProfileViewModel {
             group.addTask { [weak self] in await self?.loadContacts() }
             group.addTask { [weak self] in await self?.loadTargetWriteRelays() }
             group.addTask { [weak self] in await self?.loadFollowerCount() }
+            // Deletions run alongside header/contacts — those already take
+            // several seconds on slow relays, so the kind-5 query rides for
+            // free. Placed in the first group rather than blocking the notes
+            // load so profile open speed is unchanged. The notes load in the
+            // second group picks up whatever the tracker learned; if
+            // deletions arrive after notes render, `shouldDrop` catches them
+            // on the next rebuild.
+            group.addTask { [weak self] in await self?.loadDeletions() }
         }
 
         // Now that we know the target's write relays, load notes/replies in parallel
@@ -614,6 +622,19 @@ final class ProfileViewModel {
         ) else { return }
         followersCount = social.followers.count
         followersCountIsApprox = false
+    }
+
+    /// Fetch the author's kind-5 deletion requests so the DeletionTracker
+    /// knows which of their notes to hide before the notes/replies render.
+    private func loadDeletions() async {
+        let relays = queryRelays()
+        let results = await RelayPool.query(
+            relays: relays,
+            filter: NostrFilter(kinds: [Nip09.kindDeletion], authors: [pubkey], limit: 200),
+            timeout: 6
+        )
+        DeletionTracker.shared.ingestBatch(results.filter { $0.kind == Nip09.kindDeletion })
+        await EventPersistQueue.shared.enqueue(results.filter { $0.kind == Nip09.kindDeletion })
     }
 
     private func loadFollowers() async {

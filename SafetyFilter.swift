@@ -82,6 +82,15 @@ final class SafetyFilter: @unchecked Sendable {
     func shouldDrop(event: NostrEvent, context: SafetyContext) -> Bool {
         let s = _current
 
+        // NIP-09: hide events their author has deleted. Checked here so every
+        // render path (feed, thread, search, profile, notifications, quotes)
+        // is covered by the single chokepoint without threading callbacks.
+        // Sits above the fork's reported-content gates — the two features are
+        // orthogonal and both stay.
+        if DeletionTracker.shared.isDeleted(event.id) {
+            return true
+        }
+
         if !s.reportedEventIds.isEmpty, s.reportedEventIds.contains(event.id) {
             return true
         }

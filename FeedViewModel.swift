@@ -384,6 +384,14 @@ final class FeedViewModel {
         let pubkey = keypair.pubkey
         Task { await services.pruneEventStore(pubkey) }
 
+        // Re-seed the deletion tracker from persisted kind-5 events so
+        // deleted notes are hidden from the very first frame — without this
+        // they'd flash from cache until the live subscription delivers the
+        // kind-5 again. Runs before the OnlyFood/relay-kind branches so every
+        // feed surface benefits, not just Follows.
+        let deletionEvents = await eventStore.loadDeletionEvents()
+        DeletionTracker.shared.ingestBatch(deletionEvents)
+
         // The landing kind was fixed in `init`. Only Follows runs the outbox
         // seed + fan-out below; a restored relay-backed kind opens its live
         // subscription directly, and OnlyFood is rendered by its own view
@@ -979,6 +987,11 @@ final class FeedViewModel {
             for await (event, _) in sub.events {
                 guard let self else { return }
                 if Task.isCancelled { return }
+                // Intercept deletion requests before any other processing.
+                if event.kind == Nip09.kindDeletion {
+                    DeletionTracker.shared.ingest(event)
+                    continue
+                }
                 if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
                 guard Self.relayFeedKinds.contains(event.kind) else { continue }
                 guard self.seenIds.insert(event.id).inserted else { continue }
@@ -1270,7 +1283,8 @@ final class FeedViewModel {
         }
 
         // 4. Build one REQ per relay (multi-filter when authors > 200) — at most one socket per host.
-        let kinds = [1, 6, 20, Nip88.kindPoll, Nip69.kindZapPoll]
+        //    Kind 5 rides along so deletions from followed authors arrive live.
+        let kinds = [1, 6, 20, Nip88.kindPoll, Nip69.kindZapPoll, Nip09.kindDeletion]
         var queries: [RelayQuery] = []
         for (relayUrl, authors) in relayToAuthors {
             let chunks = Array(authors).chunked(into: Self.maxAuthorsPerFilter)
@@ -1300,6 +1314,15 @@ final class FeedViewModel {
                 // note — `shouldDrop` fail-closes on the inner author, and this
                 // was the one live path that skipped it.
                 if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
+                // Kind 5 is a deletion request, not feed content — feed it to
+                // the tracker and drop it before it can reach the render path.
+                // This runs AFTER shouldDrop so the tracker has already learned
+                // about the deletion from the `shouldDrop` call above for any
+                // matching event id; this ingestion is for future events.
+                if event.kind == Nip09.kindDeletion {
+                    DeletionTracker.shared.ingest(event)
+                    continue
+                }
                 guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { continue }
                 guard self.seenIds.insert(event.id).inserted else { continue }
                 self.enqueueLiveEvent(event)
