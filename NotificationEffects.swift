@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 
 /// Which notification types the user wants to hear about.
@@ -64,6 +65,10 @@ final class NotificationBurstStore {
     static let zapDuration: TimeInterval = 0.9
 
     private(set) var zapBurst = false
+    /// Bumped on every `fireZap()`, including a refire while the flag is
+    /// already true. `ZapBurstView` only starts particles on a false→true
+    /// edge of `isActive`, so the parent watches this token to restart.
+    private(set) var zapGeneration = 0
 
     @ObservationIgnored private var zapClear: Task<Void, Never>?
 
@@ -77,6 +82,7 @@ final class NotificationBurstStore {
     /// while `isZapAnimating`).
     func fireZap() {
         zapClear?.cancel()
+        zapGeneration += 1
         zapBurst = true
         zapClear = Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.zapDuration))

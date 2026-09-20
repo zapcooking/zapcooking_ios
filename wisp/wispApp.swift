@@ -83,12 +83,13 @@ struct wispApp: App {
 private struct RootContainer: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        let resolved = settings.resolveTheme(systemColorScheme: systemColorScheme)
+        let resolved = settings.resolveTheme(systemColorScheme: systemColorScheme, contrast: contrast)
         ResolvedThemeProxy.update(resolved)
         return ContentView()
             .environment(\.theme, resolved)
-            .id("\(settings.colorScheme.rawValue)-\(systemColorScheme == .dark)")
+            .id("\(settings.colorScheme.rawValue)-\(systemColorScheme == .dark)-\(contrast == .increased)")
     }
 }

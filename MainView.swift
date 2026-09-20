@@ -457,6 +457,18 @@ struct MainView: View {
                     onSuccess: zap.onSuccess,
                     dismiss: { composePresenter.request = nil }
                 )
+            case .noteReview(let review):
+                // Hosted here for the same reason: the draft editor raises the
+                // keyboard. See `ComposePresenter.openNoteReview`.
+                NoteReviewSheet(
+                    parent: review.parent,
+                    imageUrls: review.imageUrls,
+                    keypair: keypair,
+                    onViewReply: { reply in
+                        composePresenter.request = nil
+                        review.onViewReply?(reply)
+                    }
+                )
             }
         }
         .sheet(item: $reopenDraft) { draft in
@@ -2000,7 +2012,7 @@ struct MainView: View {
     @ViewBuilder
     private func burstOverlay(_ tab: BottomTab) -> some View {
         if tab == .notifications {
-            ZapBurstView(isActive: bursts.zapBurst)
+            ZapBurstView(isActive: bursts.zapBurst, restartToken: bursts.zapGeneration)
                 .frame(width: 120, height: 120)
                 .allowsHitTesting(false)
         }

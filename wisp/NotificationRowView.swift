@@ -69,7 +69,7 @@ struct NotificationRowView: View {
                         if item.isPrivate || item.isPrivateZap {
                             Image(systemName: "lock.fill")
                                 .font(.caption2)
-                                .foregroundStyle(Color.wispPrimary)
+                                .foregroundStyle(Color.zapInteractive)
                                 .accessibilityLabel("Private")
                         }
                         mergedZapsBadge
@@ -99,13 +99,16 @@ struct NotificationRowView: View {
     private var mergedZapsBadge: some View {
         if item.kind == .zap, !item.mergedZaps.isEmpty {
             let extra = item.mergedZaps.count
+            // A count badge, not a sat amount: interactive tier on the
+            // subtle wash, like the poll badge below. The sats themselves
+            // stay on `wispZapColor` in `mergedZapBreakdown`.
             Text("+\(extra) more")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.wispZapColor)
+                .foregroundStyle(Color.zapInteractive)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    Capsule().fill(Color.wispZapColor.opacity(0.15))
+                    Capsule().fill(Color.zapSubtleFill)
                 )
                 .accessibilityLabel("\(extra) more zaps")
         }
@@ -119,11 +122,11 @@ struct NotificationRowView: View {
             let n = item.pollVoterCount
             Text("\(n) votes")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.wispPrimary)
+                .foregroundStyle(Color.zapInteractive)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    Capsule().fill(Color.wispPrimary.opacity(0.15))
+                    Capsule().fill(Color.zapSubtleFill)
                 )
                 .accessibilityLabel("\(n) votes")
         }
@@ -146,7 +149,7 @@ struct NotificationRowView: View {
                 if !parts.isEmpty {
                     Text(parts.joined(separator: " · "))
                         .font(.caption)
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                         .lineLimit(2)
                 } else if !item.voteOptionIds.isEmpty {
                     let labels = item.voteOptionIds.compactMap { id in
@@ -155,7 +158,7 @@ struct NotificationRowView: View {
                     if !labels.isEmpty {
                         Text(labels.joinToString())
                             .font(.caption)
-                            .foregroundStyle(Color.wispPrimary)
+                            .foregroundStyle(Color.zapInteractive)
                             .lineLimit(1)
                     }
                 }
@@ -168,7 +171,7 @@ struct NotificationRowView: View {
             if let label = opts.first(where: { $0.index == idx })?.label {
                 Text("voted: \(label)")
                     .font(.caption)
-                    .foregroundStyle(Color.wispPrimary)
+                    .foregroundStyle(Color.zapInteractive)
                     .lineLimit(1)
             }
         }

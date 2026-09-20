@@ -61,8 +61,8 @@ final class AppSettings {
 
     /// Brand primary, dark side: web `src/app.css` `html.dark --color-primary`
     /// and Android `Themes.kt` default `primary` (#FF5722). The light side
-    /// (#EC4700) lives on the `custom` preset's light palette. Was Wisp's
-    /// #FF9800 until the brand-color-parity concern.
+    /// (#EC4700) is `Themes.light.primary`. Was Wisp's #FF9800 until the
+    /// brand-color-parity concern.
     nonisolated static let defaultAccentARGB: Int = 0xFFFF5722
 
     var largeText: Bool {

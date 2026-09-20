@@ -30,6 +30,7 @@ struct ComposeView: View {
     @State private var photosPickerMaxCount: Int = 8
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
+    @State private var showTagPicker = false
 
     /// Draft to load on first appear. Nil for `.new` and `.reply`/`.quote` composers.
     /// Loaded from `.task` rather than `init` to defeat SwiftUI's State preservation
@@ -107,7 +108,15 @@ struct ComposeView: View {
                             quoteContextHeader
 
                             if !viewModel.suggestedHashtags.isEmpty {
-                                HashtagSuggestionRow(viewModel: viewModel)
+                                HashtagSuggestionRow(viewModel: viewModel) {
+                                    // Same hop as the GIF picker: let the
+                                    // keyboard collapse before the sheet
+                                    // presents, or the presentation races it.
+                                    contentFocused = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        showTagPicker = true
+                                    }
+                                }
                             }
 
                             actionsRow
@@ -267,6 +276,11 @@ struct ComposeView: View {
         }
         .sheet(isPresented: $showDraftsSheet) {
             DraftsScheduledView(keypair: viewModel.keypair)
+        }
+        .sheet(isPresented: $showTagPicker, onDismiss: { contentFocused = true }) {
+            FoodTagPickerView(viewModel: viewModel)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAccountPicker) {
             accountPickerSheet
@@ -838,8 +852,8 @@ struct ComposeView: View {
 
     private var nsfwBanner: some View {
         HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-            Text("Content marked as NSFW")
+            Image(systemName: ComposeActionsRow.sensitiveGlyph(marked: true))
+            Text(ComposeActionsRow.sensitiveBannerText)
                 .font(.caption.weight(.medium))
             Spacer()
         }
@@ -901,115 +915,28 @@ struct ComposeView: View {
 
     // MARK: - Actions row (under text editor)
 
+    /// The toolbar itself is `ComposeActionsRow` (under `wisp/`, so it can be
+    /// rendered on its own in tests); this view keeps the pickers, which
+    /// need its focus state and UIKit presenters.
     private var actionsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 22) {
-            if !viewModel.galleryMode, !viewModel.pollEnabled {
-                Button {
-                    presentPhotoPicker(max: 4)
-                } label: {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
+        ComposeActionsRow(
+            viewModel: viewModel,
+            onPickPhotos: { presentPhotoPicker(max: 4) },
+            onPasteImage: { pasteImageFromClipboard() },
+            onPickGif: {
+                // Resign the compose text field before presenting so the
+                // keyboard animation finishes ahead of the modal. Without
+                // the hop, the keyboard collapse mid-present can cancel
+                // the in-flight UIKit modal and SwiftUI flips
+                // `showGifPicker` back to false — same shape as the
+                // drafts-sheet keyboard race.
+                contentFocused = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    showGifPicker = true
                 }
-                .buttonStyle(.plain)
-                .tint(Color(.secondaryLabel))
-            }
-
-            if !viewModel.pollEnabled {
-                Button {
-                    pasteImageFromClipboard()
-                } label: {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Paste image from clipboard")
-            }
-
-            if !viewModel.pollEnabled {
-                Button {
-                    // Resign the compose text field before presenting so the
-                    // keyboard animation finishes ahead of the modal. Without
-                    // the hop, the keyboard collapse mid-present can cancel
-                    // the in-flight UIKit modal and SwiftUI flips
-                    // `showGifPicker` back to false — same shape as the
-                    // drafts-sheet keyboard race.
-                    contentFocused = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        showGifPicker = true
-                    }
-                } label: {
-                    Text("GIF")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(Color.secondary, lineWidth: 1.5)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add GIF")
-            }
-
-            Button {
-                viewModel.toggleNsfw()
-            } label: {
-                Image(systemName: "exclamationmark.triangle\(viewModel.explicit ? ".fill" : "")")
-                    .font(.system(size: 22))
-                    .foregroundStyle(viewModel.explicit ? Color.orange : .secondary)
-            }
-
-            Button {
-                viewModel.togglePow()
-            } label: {
-                Image(systemName: "shield\(viewModel.powEnabled ? ".fill" : "")")
-                    .font(.system(size: 22))
-                    .foregroundStyle(viewModel.powEnabled ? Color.wispPrimary : .secondary)
-            }
-
-            if viewModel.mode.allowsPollToggle {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.togglePoll()
-                    }
-                } label: {
-                    Image(systemName: "chart.bar")
-                        .font(.system(size: 22))
-                        .foregroundStyle(viewModel.pollEnabled ? Color.wispPrimary : .secondary)
-                }
-                .accessibilityLabel(viewModel.pollEnabled ? "Disable poll" : "Create poll")
-            }
-
-            // Private-reply toggle — only meaningful for `.reply` mode. Locked
-            // (no-op) when the parent is itself a private rumor; the icon stays
-            // filled to signal the chain stays encrypted.
-            if case .reply = viewModel.mode {
-                Button {
-                    viewModel.togglePrivate()
-                } label: {
-                    Image(systemName: viewModel.isPrivate ? "lock.fill" : "lock")
-                        .font(.system(size: 22))
-                        .foregroundStyle(viewModel.isPrivate ? Color.wispPrimary : .secondary)
-                }
-                .disabled(viewModel.isPrivateLocked)
-                .accessibilityLabel(viewModel.isPrivate ? "Disable private reply" : "Send privately")
-            }
-
-            Button {
-                showScheduleSheet = true
-            } label: {
-                Image(systemName: "clock\(viewModel.scheduleEnabled ? ".fill" : "")")
-                    .font(.system(size: 22))
-                    .foregroundStyle(viewModel.scheduleEnabled ? Color.wispPrimary : .secondary)
-            }
-            .disabled(viewModel.isPrivate)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-        }
+            },
+            onSchedule: { showScheduleSheet = true }
+        )
     }
 
     // MARK: - Bottom publish bar
@@ -1035,13 +962,14 @@ struct ComposeView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                // Grey the button out when the composer has no content to
-                // publish (no text, no attachments). Visual feedback matches
-                // the disabled state — tapping while empty errors out with
-                // "Type something first.", which a greyed-out button heads
-                // off before the user discovers it.
+                // Grey the button out when the composer can't publish yet
+                // and put the reason on the button ("Write something or add
+                // a photo.", "Wait for uploads to finish."), the way the
+                // recipe form does — a greyed-out button with no
+                // explanation reads as broken.
                 let inFlight = viewModel.isPublishing || viewModel.isMining
-                let isInactive = !viewModel.canPublish
+                let blocker = viewModel.publishBlocker
+                let isInactive = blocker != nil
                 Button {
                     if viewModel.needsFoodTagConfirm {
                         showFoodTagConfirm = true
@@ -1068,6 +996,11 @@ struct ComposeView: View {
                                 Text(viewModel.scheduleEnabled ? "Scheduling" : "Publishing")
                                     .font(.subheadline.weight(.semibold))
                             }
+                        } else if let blocker {
+                            Text(blocker)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         } else {
                             Text(viewModel.scheduleEnabled ? "Schedule Post" : "Publish")
                                 .font(.subheadline.weight(.semibold))

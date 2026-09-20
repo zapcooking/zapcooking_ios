@@ -156,7 +156,26 @@ struct NotificationEffectsTests {
         // Past the first window's deadline, still lit because of the second.
         try await Task.sleep(for: .seconds(NotificationBurstStore.zapDuration * 0.5))
         #expect(store.zapBurst)
-        try await Task.sleep(for: .seconds(NotificationBurstStore.zapDuration))
+        // Poll for the clear: a single `zapDuration` sleep races the
+        // MainActor continuation when render suites in the same process
+        // stall the run loop.
+        let deadline = Date().addingTimeInterval(NotificationBurstStore.zapDuration + 2)
+        while store.zapBurst, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         #expect(!store.zapBurst)
+    }
+
+    /// `ZapBurstView` starts particles on a false→true edge of `isActive`.
+    /// Refiring while already bursting never produces that edge, so the
+    /// generation token has to move or the second zap draws nothing.
+    @Test func refiring_bumpsGeneration() {
+        let store = NotificationBurstStore()
+        #expect(store.zapGeneration == 0)
+        store.fireZap()
+        #expect(store.zapGeneration == 1)
+        store.fireZap()
+        #expect(store.zapGeneration == 2)
+        #expect(store.zapBurst)
     }
 }
