@@ -120,6 +120,26 @@ compare against **530/1**. Post-2.4-open was 529/1; post-4.1 was 508/1; post-3.1
 post-HiddenRecipes / post-2.3 was 468/1; post-1.8b was 430/1; post-0.6
 was 194/1.
 
+**Note (2026-09-20, an argument for next time, not a rule change) —
+proportionate gate evidence from the Phase 2 wave.** Eight full serial
+`wispTests` runs on the MacBook Air that day (#119, #121, #122, #123,
+#124, #125 ×2, #126 ×2, #128, #129 — the teammate's carry-over PRs rebased
+onto main 4d89593) produced the identical result every time: the Air's
+baseline pair (#4 plus #117) and zero new failures. The two events that
+forced a re-run were **compiler warnings on lines the branch added**,
+caught by the build, not by tests (#125: a no-op `await` on a synchronous
+MainActor method; #126: a `private extension String` helper left
+main-actor-isolated by default and called from a `nonisolated` enum). The
+build is ~3 min of a ~22 min run; each full run also leaks ~12 GB of
+`CFNetworkDownload_*.tmp` into the simulator app container (issue #91).
+The proportionate gate this suggests: **build + a warnings scan
+restricted to the branch's added hunks on every branch; the full serial
+suite on branches that touch shared files (`FeedViewModel`, `EventStore`,
+`ProfileViewModel`, `ComposeViewModel`, `SafetyFilter`, the relay pools)
+and before any TestFlight build.** Recorded so the case can be made from
+data when the gate is next discussed; the protocol above stands until
+Seth changes it.
+
 Default hermetic run is **`wispTests` only**. A bare `xcodebuild test` also
 executes `wispUITests`; that target is **not** in the baseline. Isolated
 stock `XCUIApplication().launch()` (`wispUITests.testExample`) passes on
