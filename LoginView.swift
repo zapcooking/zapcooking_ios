@@ -177,7 +177,10 @@ struct LoginView: View {
     private func login() {
         error = nil
         isLoading = true
-        let input = nsecInput
+        // Trim before parsing: an nsec pasted from a password manager can
+        // carry a trailing newline, which fails parseNsec on add-account
+        // while the QR path and first-run login both trim and succeed.
+        let input = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             let result = NostrKey.parseNsec(input)
             isLoading = false
