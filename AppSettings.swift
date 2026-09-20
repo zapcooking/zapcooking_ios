@@ -25,6 +25,22 @@ final class AppSettings {
     /// both went with the Interface settings pickers that fed them.
     nonisolated static let zapSymbol = "bolt.fill"
 
+    /// How the notifications list renders each row.
+    enum NotificationFeedStyle: String, CaseIterable {
+        /// Every row renders its detail (referenced note, zap message, poll,
+        /// reply composer) inline without a tap — the default.
+        case expanded
+        /// One-line rows; tapping opens a single row at a time (accordion).
+        case compact
+
+        var label: String {
+            switch self {
+            case .expanded: "Expanded"
+            case .compact:  "Compact"
+            }
+        }
+    }
+
     private struct Keys {
         static let largeText = "wisp_settings_large_text"
         static let colorScheme = "wisp_settings_color_scheme"
@@ -35,6 +51,7 @@ final class AppSettings {
         static let clientTagEnabled = "wisp_settings_client_tag_enabled"
         static let fiatCurrency = "wisp_settings_fiat_currency"
         static let notificationSoundsEnabled = "wisp_settings_notification_sounds_enabled"
+        static let notificationFeedStyle = "wisp_settings_notification_feed_style"
         static let postUndoTimerEnabled = "wisp_settings_post_undo_timer_enabled"
         static let postUndoTimerSeconds = "wisp_settings_post_undo_timer_seconds"
         static let postUndoTimerForReplies = "wisp_settings_post_undo_timer_for_replies"
@@ -92,6 +109,13 @@ final class AppSettings {
     }
     var notificationSoundsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationSoundsEnabled, forKey: Keys.notificationSoundsEnabled) }
+    }
+    /// Display density of the notifications list. Defaults to `.expanded` so
+    /// the feed reads end-to-end without tapping every row; the user can flip
+    /// back to `.compact` (the accordion) from the notifications top bar or
+    /// interface settings, and the choice survives relaunch.
+    var notificationFeedStyle: NotificationFeedStyle {
+        didSet { UserDefaults.standard.set(notificationFeedStyle.rawValue, forKey: Keys.notificationFeedStyle) }
     }
     /// When true, publishing a top-level post (and optionally replies — see
     /// `postUndoTimerForReplies`) waits `postUndoTimerSeconds` before sending,
@@ -171,6 +195,8 @@ final class AppSettings {
         self.clientTagEnabled = defaults.object(forKey: Keys.clientTagEnabled) as? Bool ?? true
         self.fiatCurrency = defaults.string(forKey: Keys.fiatCurrency) ?? "USD"
         self.notificationSoundsEnabled = defaults.object(forKey: Keys.notificationSoundsEnabled) as? Bool ?? true
+        let notifStyleRaw = defaults.string(forKey: Keys.notificationFeedStyle) ?? NotificationFeedStyle.expanded.rawValue
+        self.notificationFeedStyle = NotificationFeedStyle(rawValue: notifStyleRaw) ?? .expanded
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
         let storedSeconds = defaults.object(forKey: Keys.postUndoTimerSeconds) as? Int ?? 10
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
