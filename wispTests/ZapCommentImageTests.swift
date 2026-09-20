@@ -18,6 +18,18 @@ struct ZapCommentImageTests {
         #expect(images.map(\.url) == ["https://i.example.com/zombie.jpg"])
     }
 
+    // `parse` trims the trailing punctuation off a URL token, so the comma
+    // the author typed after the image isn't part of `meta.url`. It must go
+    // with the URL, or an image-only comment reads as the text ",".
+    @Test func trailingPunctuationAfterTheUrlGoesWithIt() {
+        let (text, images) = ContentParser.splitImages(from: "https://i.example.com/zombie.jpg,")
+        #expect(text.isEmpty)
+        #expect(images.map(\.url) == ["https://i.example.com/zombie.jpg"])
+        let (text2, images2) = ContentParser.splitImages(from: "look: https://i.example.com/zombie.jpg!")
+        #expect(text2 == "look:")
+        #expect(images2.count == 1)
+    }
+
     @Test func textSurvivesAlongsideTheImage() {
         let (text, images) = ContentParser.splitImages(
             from: "that a lotta zombies https://i.example.com/zombie.jpg"

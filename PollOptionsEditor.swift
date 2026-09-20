@@ -38,10 +38,9 @@ struct PollOptionsEditor: View {
 
     @State private var minSatsText: String = ""
     @State private var maxSatsText: String = ""
-    /// Active preset, or nil when ∞ / Custom is selected.
-    @State private var selectedPreset: PollDurationPreset? = .oneDay
-    @State private var isCustom = false
-    @State private var customDate: Date = Date().addingTimeInterval(24 * 3_600)
+    // The duration choice (preset / ∞ / custom date) lives on the view model
+    // — see `ComposeViewModel.pollDurationPreset` — because this editor is
+    // torn down whenever the poll is toggled off.
 
     private static let endDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -106,7 +105,15 @@ struct PollOptionsEditor: View {
         .background(Color.wispSurfaceVariant.opacity(0.3),
                     in: RoundedRectangle(cornerRadius: 12))
         .onAppear {
-            applyPreset(.oneDay)
+            // Stamp the default only for a fresh composer: a preset chosen but
+            // no end timestamp yet. Anything the user already picked — another
+            // preset, ∞ (preset nil), or a custom date — is left exactly as is
+            // when this editor is re-mounted.
+            if viewModel.pollEndsAt == nil,
+               !viewModel.pollDurationIsCustom,
+               let preset = viewModel.pollDurationPreset {
+                applyPreset(preset)
+            }
         }
     }
 
@@ -151,43 +158,43 @@ struct PollOptionsEditor: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(PollDurationPreset.allCases) { preset in
-                        chip(label: preset.label, selected: selectedPreset == preset && !isCustom) {
-                            isCustom = false
+                        chip(label: preset.label, selected: viewModel.pollDurationPreset == preset && !viewModel.pollDurationIsCustom) {
+                            viewModel.pollDurationIsCustom = false
                             applyPreset(preset)
                         }
                     }
-                    chip(label: "∞", selected: selectedPreset == nil && !isCustom) {
-                        isCustom = false
-                        selectedPreset = nil
+                    chip(label: "∞", selected: viewModel.pollDurationPreset == nil && !viewModel.pollDurationIsCustom) {
+                        viewModel.pollDurationIsCustom = false
+                        viewModel.pollDurationPreset = nil
                         viewModel.setPollEndsAt(nil)
                     }
                 }
                 .padding(.vertical, 2)
             }
 
-            Toggle(isOn: $isCustom) {
+            Toggle(isOn: $viewModel.pollDurationIsCustom) {
                 Text("Custom end date")
                     .font(.subheadline)
             }
             .tint(Color.wispPrimary)
-            .onChange(of: isCustom) { _, custom in
+            .onChange(of: viewModel.pollDurationIsCustom) { _, custom in
                 if custom {
-                    selectedPreset = nil
-                    viewModel.setPollEndsAt(Int(customDate.timeIntervalSince1970))
+                    viewModel.pollDurationPreset = nil
+                    viewModel.setPollEndsAt(Int(viewModel.pollCustomEndDate.timeIntervalSince1970))
                 } else {
                     applyPreset(.oneDay)
                 }
             }
 
-            if isCustom {
+            if viewModel.pollDurationIsCustom {
                 DatePicker(
                     "",
-                    selection: $customDate,
+                    selection: $viewModel.pollCustomEndDate,
                     in: Date()...,
                     displayedComponents: [.date, .hourAndMinute]
                 )
                 .labelsHidden()
-                .onChange(of: customDate) { _, new in
+                .onChange(of: viewModel.pollCustomEndDate) { _, new in
                     viewModel.setPollEndsAt(Int(new.timeIntervalSince1970))
                 }
             }
@@ -217,7 +224,7 @@ struct PollOptionsEditor: View {
     }
 
     private func applyPreset(_ preset: PollDurationPreset) {
-        selectedPreset = preset
+        viewModel.pollDurationPreset = preset
         let ts = Int(Date().addingTimeInterval(preset.seconds).timeIntervalSince1970)
         viewModel.setPollEndsAt(ts)
     }

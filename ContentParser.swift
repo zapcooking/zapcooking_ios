@@ -665,7 +665,19 @@ enum ContentParser {
         }
         var text = content
         for meta in images {
-            text = text.replacingOccurrences(of: meta.url, with: " ")
+            // `parse` trims trailing punctuation off a URL token, so `meta.url`
+            // is shorter than what the author typed (`…/image.jpg,`). Take the
+            // punctuation out with the URL — the same set `trimTrailingPunctuation`
+            // strips — or the comma survives as "text" and an image-only comment
+            // stops being image-only.
+            let pattern = NSRegularExpression.escapedPattern(for: meta.url) + #"[.,)\];:!?]*"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                text = text.replacingOccurrences(of: meta.url, with: " ")
+                continue
+            }
+            text = regex.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " "
+            )
         }
         let collapsed = text
             .split(whereSeparator: \.isWhitespace)
