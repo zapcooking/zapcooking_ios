@@ -87,9 +87,7 @@ private struct WalletSetupPromptModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.confirmationDialog(
-            settings.fiatModeEnabled
-                ? "Set up a wallet in the side menu to send money"
-                : "Set up a wallet in the side menu to send zaps",
+            "Set up a wallet in the side menu to send zaps",
             isPresented: $isPresented,
             titleVisibility: .visible
         ) {
@@ -98,9 +96,7 @@ private struct WalletSetupPromptModifier: ViewModifier {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(settings.fiatModeEnabled
-                 ? "Connect a Lightning wallet (Spark or NWC) under Wallet in the side menu to send money."
-                 : "Connect a Lightning wallet (Spark or NWC) under Wallet in the side menu to send zaps.")
+            Text("Connect a Lightning wallet (Spark or NWC) under Wallet in the side menu to send zaps.")
         }
     }
 }

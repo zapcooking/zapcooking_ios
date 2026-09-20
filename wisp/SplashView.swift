@@ -276,6 +276,9 @@ private struct AnimatedLogo: View {
         Image("ZcLogo")
             .resizable()
             .scaledToFit()
+            // Splash paints its own dark ground whatever the app's
+            // appearance, so the logo is pinned to its white variant.
+            .environment(\.colorScheme, .dark)
             .frame(width: 88, height: 88)
             .background(
                 // Radial glow so the logo reads against the food collage,

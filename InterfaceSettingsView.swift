@@ -5,10 +5,8 @@ struct InterfaceSettingsView: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showAccentPicker = false
     @State private var showCurrencyPicker = false
     @State private var rateUpdatedAt: Date? = nil
-    @State private var themesExpanded = false
     #if DEBUG
     @State private var showDeveloperTools = false
     #endif
@@ -37,51 +35,6 @@ struct InterfaceSettingsView: View {
                                     .background(settings.colorScheme == mode ? theme.primary : theme.palette.surfaceVariant)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                        }
-                    }
-                }
-
-                section(title: "Themes") {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { themesExpanded.toggle() }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(currentThemeDisplayName)
-                                .foregroundStyle(theme.palette.onSurface)
-                            Spacer()
-                            Image(systemName: themesExpanded ? "chevron.up" : "chevron.down")
-                                .foregroundStyle(theme.palette.onSurfaceVariant)
-                        }
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    if themesExpanded {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12)], spacing: 12) {
-                            ForEach(Themes.all) { preset in
-                                themeCard(preset)
-                            }
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-
-                if settings.themeName == "custom" {
-                    section(title: "Accent color") {
-                        Button { showAccentPicker = true } label: {
-                            HStack(spacing: 12) {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(argb: settings.accentColorARGB))
-                                    .frame(width: 36, height: 36)
-                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.palette.outline, lineWidth: 1))
-                                Text("Pick a color")
-                                    .foregroundStyle(theme.palette.onSurface)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                            }
-                            .padding(.vertical, 8)
                         }
                     }
                 }
@@ -182,80 +135,47 @@ struct InterfaceSettingsView: View {
 
                 // Instant-zap configuration lives in the zap sheet's
                 // "Edit Presets" now (toggle + per-preset selection), so it's
-                // discoverable where it's used. Fiat mode stays here as an
-                // app-wide units toggle.
+                // discoverable where it's used. There is no app-wide fiat
+                // mode any more (Android has none) — zap and post surfaces
+                // are always sats. The currency below is only the one the
+                // wallet dashboard renders when you tap its balance into
+                // fiat, so the picker stays ungated.
                 section(title: "Currency") {
-                    Toggle("Fiat mode", isOn: $settings.fiatModeEnabled)
-                        .toggleStyle(SwitchToggleStyle(tint: theme.primary))
-                    if settings.fiatModeEnabled {
-                        Button { showCurrencyPicker = true } label: {
-                            HStack {
-                                Text("Currency")
-                                    .foregroundStyle(theme.palette.onSurface)
-                                Spacer()
-                                Text(settings.fiatCurrency)
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                            }
-                            .padding(.vertical, 8)
-                        }
+                    Button { showCurrencyPicker = true } label: {
                         HStack {
-                            if let updated = rateUpdatedAt {
-                                Text("Last updated \(updated.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                            } else {
-                                Text("No exchange rate cached yet")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                            }
-                            Spacer()
-                            Button("Refresh") {
-                                Task {
-                                    await ExchangeRateService.shared.refresh()
-                                    await ExchangeRateCache.shared.updateFromService()
-                                    rateUpdatedAt = ExchangeRateCache.shared.updatedAt
-                                }
-                            }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(theme.primary)
-                        }
-                    }
-
-                    if !settings.fiatModeEnabled {
-                        Divider()
-                            .padding(.vertical, 4)
-                        HStack {
-                            Text("Zap icon")
+                            Text("Currency")
                                 .foregroundStyle(theme.palette.onSurface)
                             Spacer()
-                            HStack(spacing: 12) {
-                                Button {
-                                    settings.zapIconStyle = .bitcoin
-                                } label: {
-                                    Image(systemName: "bitcoinsign")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(settings.zapIconStyle == .bitcoin
-                                                         ? theme.primary
-                                                         : theme.palette.onSurfaceVariant.opacity(0.7))
-                                        .frame(width: 24, height: 24)
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    settings.zapIconStyle = .bolt
-                                } label: {
-                                    Image(systemName: "bolt.fill")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(settings.zapIconStyle == .bolt
-                                                         ? theme.primary
-                                                         : theme.palette.onSurfaceVariant.opacity(0.7))
-                                        .frame(width: 24, height: 24)
-                                }
-                                .buttonStyle(.plain)
+                            Text(settings.fiatCurrency)
+                                .foregroundStyle(theme.palette.onSurfaceVariant)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(theme.palette.onSurfaceVariant)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    Text("Used by the wallet balance and transaction rows when you switch them to fiat. Zaps are always shown in sats.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.palette.onSurfaceVariant)
+                    HStack {
+                        if let updated = rateUpdatedAt {
+                            Text("Last updated \(updated.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.palette.onSurfaceVariant)
+                        } else {
+                            Text("No exchange rate cached yet")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.palette.onSurfaceVariant)
+                        }
+                        Spacer()
+                        Button("Refresh") {
+                            Task {
+                                await ExchangeRateService.shared.refresh()
+                                await ExchangeRateCache.shared.updateFromService()
+                                rateUpdatedAt = ExchangeRateCache.shared.updatedAt
                             }
                         }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.primary)
                     }
                 }
 
@@ -294,13 +214,6 @@ struct InterfaceSettingsView: View {
             NavigationStack { DeveloperToolsView() }
         }
         #endif
-        .sheet(isPresented: $showAccentPicker) {
-            NavigationStack {
-                AccentColorPickerView()
-                    .navigationTitle("Accent color")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
-        }
         .sheet(isPresented: $showCurrencyPicker) {
             NavigationStack {
                 CurrencyPickerView()
@@ -331,48 +244,6 @@ struct InterfaceSettingsView: View {
         }
     }
 
-    private var currentThemeDisplayName: String {
-        Themes.all.first(where: { $0.id == settings.themeName })?.displayName ?? "Custom"
-    }
-
-    @ViewBuilder
-    private func themeCard(_ preset: ThemePreset) -> some View {
-        let palette = theme.isDark ? preset.dark : preset.light
-        let primary: Color = preset.id == "custom" ? Color(argb: settings.accentColorARGB) : palette.primary
-        let isSelected = settings.themeName == preset.id
-        Button {
-            settings.themeName = preset.id
-            withAnimation(.easeInOut(duration: 0.2)) { themesExpanded = false }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 4) {
-                    swatch(palette.background)
-                    swatch(palette.surface)
-                    swatch(primary)
-                    swatch(palette.zap)
-                }
-                Text(preset.displayName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(theme.palette.onSurface)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? theme.primary : theme.palette.outline,
-                            lineWidth: isSelected ? 2 : 1)
-            )
-        }
-    }
-
-    private func swatch(_ color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(color)
-            .frame(width: 22, height: 22)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.palette.outline.opacity(0.3), lineWidth: 0.5))
-    }
 }
 
 private struct CurrencyPickerView: View {

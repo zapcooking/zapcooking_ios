@@ -53,7 +53,8 @@ enum WalletBalanceUnit: String, CaseIterable {
 /// Tri-state balance display for the wallet dashboard. Tapping the balance
 /// cycles sats → fiat → hidden. Persisted per wallet pubkey under the
 /// `walletBalanceDisplay_<pubkey>` key. The `fiat` state stays scoped to the
-/// wallet screen and is independent of the app-wide `fiatModeEnabled` setting.
+/// wallet screen — it is the only fiat surface left now that the app-wide
+/// fiat mode is gone. The currency it renders is `AppSettings.fiatCurrency`.
 enum WalletBalanceDisplayMode: String, CaseIterable {
     case sats, fiat, hidden
 

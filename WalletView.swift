@@ -791,19 +791,10 @@ struct SendInvoiceSheet: View {
                 if needsAmountField {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Group {
-                                if settings.fiatModeEnabled {
-                                    Text(ExchangeRateService.currency(for: settings.fiatCurrency).symbol)
-                                } else {
-                                    Image(systemName: settings.zapSymbolName)
-                                }
-                            }
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            TextField(settings.fiatModeEnabled
-                                      ? "Amount in \(settings.fiatCurrency)"
-                                      : "Amount in sats",
-                                      text: $amountText)
+                            Image(systemName: settings.zapSymbolName)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                            TextField("Amount in sats", text: $amountText)
                                 .keyboardType(.numberPad)
                                 .font(.system(.body, design: .rounded))
                         }
@@ -1230,7 +1221,7 @@ struct ReceiveInvoiceSheet: View {
                     TextField("0", text: $amount)
                         .keyboardType(.numberPad)
                         .font(.system(size: 32, weight: .semibold, design: .rounded))
-                    Text(settings.fiatModeEnabled ? settings.fiatCurrency : "sats")
+                    Text("sats")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                 }

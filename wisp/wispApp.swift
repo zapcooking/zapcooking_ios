@@ -51,6 +51,13 @@ struct wispApp: App {
                 .environment(powPrefs)
                 .environment(audioPlayer)
                 .preferredColorScheme(settings.preferredColorScheme)
+                // Keep the home indicator drawn over our own bottom bar
+                // instead of leaving it to `.automatic`, which lets the
+                // system dim or drop it. The window's interface style and
+                // the palette are resolved from the same Appearance
+                // preference, so the indicator's auto-chosen tint always
+                // contrasts with the ground the bar is painted on.
+                .persistentSystemOverlays(.visible)
                 .onOpenURL { url in
                     if url.scheme == "wisp", url.host == "share" {
                         let files = PendingShareStore.consumePendingFiles()
@@ -83,6 +90,6 @@ private struct RootContainer: View {
         ResolvedThemeProxy.update(resolved)
         return ContentView()
             .environment(\.theme, resolved)
-            .id("\(settings.themeName)-\(settings.colorScheme.rawValue)-\(settings.accentColorARGB)-\(systemColorScheme == .dark)-\(contrast == .increased)")
+            .id("\(settings.colorScheme.rawValue)-\(systemColorScheme == .dark)-\(contrast == .increased)")
     }
 }

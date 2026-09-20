@@ -9,7 +9,7 @@ import UIKit
 /// no relay-count menu, the Cheffy entry behind its gate at a 44 pt target,
 /// the drawer's Feed Relay row carrying the count with red-at-zero, the
 /// picker staying centred with lopsided edges (hosted and measured), and the
-/// bolt as the zap-glyph default with explicit picks and fiat mode untouched.
+/// bolt as the one zap glyph.
 @MainActor
 struct FeedTopBarPolishTests {
 
@@ -133,22 +133,14 @@ struct FeedTopBarPolishTests {
         }
     }
 
-    // MARK: - Item 6: zap glyph default
+    // MARK: - Item 6: zap glyph
 
-    @Test func zapGlyph_defaultsToBolt_onFreshInstall() {
-        #expect(AppSettings.ZapIconStyle.default == .bolt)
-        #expect(AppSettings.ZapIconStyle.resolve(stored: nil) == .bolt)
-        // An unknown raw value is "unset", not "bitcoin".
-        #expect(AppSettings.ZapIconStyle.resolve(stored: "junk") == .bolt)
-    }
-
-    @Test func zapGlyph_explicitBitcoinPick_survives_andFiatStillCoinStack() {
-        #expect(AppSettings.ZapIconStyle.resolve(stored: "bitcoin") == .bitcoin)
-        #expect(AppSettings.ZapIconStyle.resolve(stored: "bolt") == .bolt)
-        #expect(AppSettings.zapGlyph(fiatMode: false, style: .bolt) == .symbol("bolt.fill"))
-        #expect(AppSettings.zapGlyph(fiatMode: false, style: .bitcoin) == .symbol("bitcoinsign"))
-        #expect(AppSettings.zapGlyph(fiatMode: true, style: .bolt) == .coinStack)
-        #expect(AppSettings.zapGlyph(fiatMode: true, style: .bitcoin) == .coinStack)
+    /// The bolt is the only zap glyph now — Android offers no icon choice
+    /// and has no fiat mode, so the bitcoinsign alternative and the
+    /// fiat-mode coin stack went with their Interface settings pickers.
+    @Test func zapGlyph_isAlwaysTheBolt() {
+        #expect(AppSettings.zapSymbol == "bolt.fill")
+        #expect(AppSettings.shared.zapSymbolName == "bolt.fill")
     }
 }
 

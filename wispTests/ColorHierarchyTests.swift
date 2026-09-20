@@ -45,11 +45,11 @@ struct ColorHierarchyTests {
     @Test func colorAccessors_readTheActiveTheme() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let custom = Themes.get("custom")
+        let dark = Themes.dark
         ResolvedThemeProxy.update(ResolvedTheme(
-            presetId: "custom", isDark: true, palette: custom.dark,
-            primary: custom.dark.primary, zap: custom.dark.zap, bookmark: custom.dark.bookmark,
-            zapAnimation: custom.dark.zap
+            isDark: true, palette: dark,
+            primary: dark.primary, zap: dark.zap, bookmark: dark.bookmark,
+            zapAnimation: dark.zap
         ))
         #expect(try Self.argb(Color.zapPrimary) == Self.brandDark)
         #expect(try Self.argb(Color.zapPrimary) == Self.argb(Color.wispPrimary))
@@ -58,21 +58,15 @@ struct ColorHierarchyTests {
         #expect(try Self.near(Self.alpha(Color.zapLink), ResolvedTheme.linkOpacity))
         #expect(try Self.near(Self.alpha(Color.zapSubtle), ResolvedTheme.subtleOpacity))
         #expect(try Self.near(Self.alpha(Color.zapSubtleFill), ResolvedTheme.subtleFillOpacity))
-        #expect(try Self.argb(Color.borderSubtle) == Self.argb(custom.dark.outline))
+        #expect(try Self.argb(Color.borderSubtle) == Self.argb(dark.outline))
     }
 
     /// On the brand theme the value tier (`wispZapColor`) and the primary
     /// tier are one colour, so a zap amount and the compose FAB match.
     @Test func brandTheme_zapValueTier_equalsPrimary() throws {
         let settings = AppSettings.shared
-        let saved = (settings.themeName, settings.colorScheme, settings.accentColorARGB)
-        defer {
-            settings.themeName = saved.0
-            settings.colorScheme = saved.1
-            settings.accentColorARGB = saved.2
-        }
-        settings.themeName = "custom"
-        settings.accentColorARGB = AppSettings.defaultAccentARGB
+        let saved = settings.colorScheme
+        defer { settings.colorScheme = saved }
         settings.colorScheme = .dark
         let theme = settings.resolveTheme(systemColorScheme: .dark)
         #expect(try Self.argb(theme.zap) == Self.argb(theme.primary))
@@ -83,14 +77,8 @@ struct ColorHierarchyTests {
 
     @Test func increasedContrast_collapsesTextTiersToPrimary_andDeepensWashes() throws {
         let settings = AppSettings.shared
-        let saved = (settings.themeName, settings.colorScheme, settings.accentColorARGB)
-        defer {
-            settings.themeName = saved.0
-            settings.colorScheme = saved.1
-            settings.accentColorARGB = saved.2
-        }
-        settings.themeName = "custom"
-        settings.accentColorARGB = AppSettings.defaultAccentARGB
+        let saved = settings.colorScheme
+        defer { settings.colorScheme = saved }
         settings.colorScheme = .dark
 
         let standard = settings.resolveTheme(systemColorScheme: .dark, contrast: .standard)
@@ -129,13 +117,13 @@ struct ColorHierarchyTests {
     // MARK: - Contrast (measured, composited over the custom dark grounds)
 
     /// WCAG 2 contrast of each text tier, composited with its alpha over
-    /// every custom dark ground. Primary is pinned at AA normal text
+    /// every dark ground. Primary is pinned at AA normal text
     /// elsewhere (`BrandColorParityTests`); the interactive tier holds AA on
     /// the feed background and stays within a tenth of it on the surfaces;
     /// the link tier clears the AA large-text / UI-component floor (3.0)
     /// everywhere. Increased Contrast restores the 100% figures.
-    @Test func textTiers_keepTheirContrastFloors_onEveryCustomDarkGround() throws {
-        let dark = Themes.get("custom").dark
+    @Test func textTiers_keepTheirContrastFloors_onEveryDarkGround() throws {
+        let dark = Themes.dark
         let primary = try Self.argb(dark.primary)
         let grounds = [("background", dark.background), ("surface", dark.surface), ("surfaceVariant", dark.surfaceVariant)]
         for (name, ground) in grounds {

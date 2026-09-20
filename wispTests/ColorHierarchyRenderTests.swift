@@ -24,7 +24,7 @@ struct ColorHierarchyRenderTests {
     @Test func ladder_rendersEveryTier_onTheDarkGround() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let palette = Themes.get("custom").dark
+        let palette = Themes.dark
         ResolvedThemeProxy.update(Self.theme(palette))
 
         let ground = try Self.argb(palette.background)
@@ -48,7 +48,7 @@ struct ColorHierarchyRenderTests {
     @Test func ladder_rendersAtAccessibilityTextSize() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let palette = Themes.get("custom").dark
+        let palette = Themes.dark
         ResolvedThemeProxy.update(Self.theme(palette))
 
         let ground = try Self.argb(palette.background)
@@ -70,7 +70,7 @@ struct ColorHierarchyRenderTests {
     @Test func zapPill_amountIsOrange_messageIsGray() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let palette = Themes.get("custom").dark
+        let palette = Themes.dark
         ResolvedThemeProxy.update(Self.theme(palette))
 
         let ground = try Self.argb(palette.background)
@@ -120,7 +120,7 @@ struct ColorHierarchyRenderTests {
     @Test func richText_paintsHashtagMentionAndUrl_atTheirTiers() throws {
         let saved = ResolvedThemeProxy.current
         defer { ResolvedThemeProxy.update(saved) }
-        let palette = Themes.get("custom").dark
+        let palette = Themes.dark
         ResolvedThemeProxy.update(Self.theme(palette))
 
         let npub = try #require(Nip19.npubEncode(pubkey: [UInt8](repeating: 0x11, count: 32)))
@@ -193,7 +193,7 @@ struct ColorHierarchyRenderTests {
 
     private static func theme(_ palette: ThemePalette) -> ResolvedTheme {
         ResolvedTheme(
-            presetId: "custom", isDark: true, palette: palette,
+            isDark: true, palette: palette,
             primary: palette.primary, zap: palette.zap, bookmark: palette.bookmark, zapAnimation: palette.zap
         )
     }
