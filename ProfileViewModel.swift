@@ -641,7 +641,7 @@ final class ProfileViewModel {
         commentsFlushScheduled = true
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Self.liveFlushDelayMs))
-            await self?.flushCommentsPending()
+            self?.flushCommentsPending()
         }
     }
 
