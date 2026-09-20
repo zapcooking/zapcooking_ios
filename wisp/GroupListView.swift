@@ -126,7 +126,7 @@ private struct GroupListRow: View {
     }
 
     private var preview: String {
-        if let last = room.messages.last { return last.content }
+        if let last = room.visibleMessages.last { return last.content }
         return room.metadata?.about ?? "(no messages)"
     }
 

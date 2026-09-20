@@ -44,6 +44,26 @@ struct GroupModerationTests {
         #expect(list.removingHidden(eventIds: [], pubkeys: []) == list)
     }
 
+    /// The one filter every surface reads (chat, Chat Rooms preview): a
+    /// reported message and a blocked author's messages drop out the moment
+    /// `ReportedContent` records them.
+    @Test func visibleMessages_dropsAReportedMessage_andAReportedAuthor() async throws {
+        try await isolated {
+            let room = GroupRoom(
+                groupId: "bakers", relayUrl: "wss://pantry.zap.cooking",
+                messages: [message("m1", from: "alice"), message("m2", from: "bob"), message("m3", from: "alice")]
+            )
+            #expect(room.visibleMessages.map(\.id) == ["m1", "m2", "m3"])
+            ReportedContent.shared.hide(.groupMessage(
+                id: "m2", senderPubkey: "bob", groupId: "bakers",
+                relayUrl: "wss://pantry.zap.cooking", admins: []
+            ))
+            #expect(room.visibleMessages.map(\.id) == ["m1", "m3"])
+            ReportedContent.shared.hide(.profile(pubkey: "alice"))
+            #expect(room.visibleMessages.isEmpty)
+        }
+    }
+
     // MARK: - Report
 
     @Test func groupMessageTarget_carriesTheRoom_itsRelay_andItsAdmins() {

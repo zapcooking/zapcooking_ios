@@ -3,6 +3,7 @@ import SwiftUI
 struct GroupRoomView: View {
     @Bindable var viewModel: GroupRoomViewModel
     @State private var showDetail = false
+    @State private var prompts = GroupModerationPrompts()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -27,7 +28,7 @@ struct GroupRoomView: View {
         .background(Color.wispBackground)
         .wispTopHeader { header }
         .toolbar(.hidden, for: .navigationBar)
-        .groupModerationDialogs(viewModel)
+        .groupModerationDialogs(prompts, viewModel: viewModel)
         .navigationDestination(isPresented: $showDetail) {
             GroupDetailView(viewModel: viewModel)
         }
@@ -70,13 +71,12 @@ struct GroupRoomView: View {
                                 viewModel.messages.first(where: { $0.id == id })
                             },
                             // Guideline 1.2: report and block on every message
-                            // that isn't ours; remove & ban for the relay's
-                            // admins. Watch-only accounts can't sign a report
-                            // (`ReportSender` answers `.needsKey`) or a block
-                            // list, so they get no menu.
-                            onReport: viewModel.keypair.isWatchOnly ? nil : { viewModel.report(msg) },
-                            onBlock: viewModel.keypair.isWatchOnly ? nil : { viewModel.askToBlock(msg.senderPubkey) },
-                            onRemove: viewModel.isAdmin ? { viewModel.askToRemove(msg.senderPubkey) } : nil
+                            // that isn't ours; remove & ban for admins. All
+                            // three sign, so a watch-only account (even one
+                            // listed as admin) gets no menu.
+                            onReport: viewModel.canModerate ? { viewModel.report(msg) } : nil,
+                            onBlock: viewModel.canModerate ? { prompts.askToBlock(msg.senderPubkey, in: viewModel) } : nil,
+                            onRemove: viewModel.canAdminister ? { prompts.askToRemove(msg.senderPubkey, in: viewModel) } : nil
                         )
                         .id(msg.id)
                         .onTapGesture { viewModel.setReplyTarget(msg) }

@@ -126,6 +126,16 @@ final class GroupListViewModel {
     private func handleIncoming(event: NostrEvent, relayUrl: String, groupId: String) async {
         switch event.kind {
         case Nip29.kindChatMessage:
+            // Guideline 1.2: a blocked or reported author's messages, and a
+            // reported message, never enter the room — so they can't flip its
+            // unread flag or become its Chat Rooms preview. Messages already
+            // stored when the block lands are filtered at read time
+            // (`GroupRoom.visibleMessages`).
+            if MuteRepository.shared.isBlocked(event.pubkey.lowercased())
+                || ReportedContent.shared.isHidden(pubkey: event.pubkey)
+                || ReportedContent.shared.isHidden(eventId: event.id) {
+                return
+            }
             let replyId = Nip29.extractReplyId(from: event)
             let emojiTags = ContentParser.parseEmojiTags(event.tags)
             // Clamp so a sender with a fast clock can't pin their message below
@@ -360,11 +370,14 @@ final class GroupListViewModel {
         }
     }
 
-    // The admin events sign through `Signer.sign` rather than the
-    // `Nip29.build*` helpers so a NIP-46 remote signer works too — the
-    // builders take a raw private key, which a bunker account doesn't have
-    // (the same reason `GroupRoomViewModel.sendMessage` bypasses them). Tag
-    // shapes match the builders: `["h", group]` then `["p", target, roles…]`.
+    // The admin events sign through `Signer.sign`, the same route
+    // `GroupRoomViewModel.sendMessage` and the reactions take, instead of the
+    // `Nip29.build*` helpers. `Signer` is local-key only today (it throws
+    // `localKeyMissing` for a watch-only account; there is no NIP-46 path in
+    // the app yet), so the room UI offers moderation only to accounts that
+    // can sign (`GroupRoomViewModel.canModerate`); when a remote-signing path
+    // lands in `Signer`, these pick it up without change. Tag shapes match the
+    // builders: `["h", group]` then `["p", target, roles…]`.
 
     func putUser(relayUrl: String, groupId: String, targetPubkey: String,
                  roles: [String] = []) async -> Result<Void, AdminError> {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GroupDetailView: View {
     @Bindable var viewModel: GroupRoomViewModel
+    @State private var prompts = GroupModerationPrompts()
     @Environment(\.dismiss) private var dismiss
 
     @State private var showLeaveConfirm = false
@@ -23,7 +24,7 @@ struct GroupDetailView: View {
         }
         .background(Color.wispBackground)
         .toolbar(.hidden, for: .navigationBar)
-        .groupModerationDialogs(viewModel)
+        .groupModerationDialogs(prompts, viewModel: viewModel)
         .task(id: room?.members) {
             // Batch-fetch any missing profiles for the member + admin lists.
             guard let listVM = GroupListViewModelRegistry.shared else { return }
@@ -109,13 +110,15 @@ struct GroupDetailView: View {
                         pubkey: pubkey,
                         isAdmin: room?.admins.contains(pubkey) == true,
                         isSelf: pubkey == viewModel.keypair.pubkey,
-                        canBlock: !viewModel.keypair.isWatchOnly,
-                        isBlocked: MuteRepository.shared.isBlocked(pubkey),
-                        showActions: isAdmin && pubkey != viewModel.keypair.pubkey,
-                        onBlock: { viewModel.askToBlock(pubkey) },
+                        canBlock: viewModel.canModerate,
+                        isBlocked: MuteRepository.shared.isBlocked(pubkey.lowercased()),
+                        // Promote and Remove & ban sign a 9000 / 9001: an
+                        // admin who can't sign (watch-only) doesn't get them.
+                        showActions: viewModel.canAdminister && pubkey != viewModel.keypair.pubkey,
+                        onBlock: { prompts.askToBlock(pubkey, in: viewModel) },
                         onUnblock: { MuteRepository.shared.unblockUser(pubkey) },
                         onPromote: { Task { await promote(pubkey) } },
-                        onRemove: { viewModel.askToRemove(pubkey) }
+                        onRemove: { prompts.askToRemove(pubkey, in: viewModel) }
                     )
                 }
             }

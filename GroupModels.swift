@@ -135,3 +135,20 @@ extension Array where Element == GroupMessage {
         return filter { !eventIds.contains($0.id) && !pubkeys.contains($0.senderPubkey.lowercased()) }
     }
 }
+
+extension GroupRoom {
+    /// The room's messages minus what this account has reported or blocked.
+    /// Every surface that shows room content reads this — the chat itself
+    /// and the Chat Rooms preview — so a report or a block changes all of
+    /// them at once. Reads the two observables, so SwiftUI re-renders when
+    /// either changes.
+    @MainActor
+    var visibleMessages: [GroupMessage] {
+        let reported = ReportedContent.shared
+        let blocked = MuteRepository.shared.blockedPubkeys
+        return messages.removingHidden(
+            eventIds: reported.eventIds,
+            pubkeys: reported.pubkeys.union(blocked)
+        )
+    }
+}
