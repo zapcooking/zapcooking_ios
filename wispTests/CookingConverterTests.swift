@@ -99,6 +99,18 @@ struct CookingConverterTests {
         #expect(CookingConverter.unit(stored: "furlong", fallback: "cup").abbrev == "cup")
         #expect(CookingConverter.unit(stored: nil, fallback: "mL").abbrev == "mL")
     }
+
+    /// Extra decimal points would fail `Double` parsing and freeze the
+    /// result on the em dash, so only the first separator is kept.
+    @Test func sanitizeAmount_allowsOneDecimalAndCapsAtTwelve() {
+        #expect(CookingConverter.sanitizeAmount("1.25") == "1.25")
+        #expect(CookingConverter.sanitizeAmount("1..2") == "1.2")
+        #expect(CookingConverter.sanitizeAmount("12.3.4") == "12.34")
+        #expect(CookingConverter.sanitizeAmount("abc1.2def3") == "1.23")
+        #expect(CookingConverter.sanitizeAmount("123456789012345") == "123456789012")
+        #expect(CookingConverter.sanitizeAmount("1234567890.12") == "1234567890.1")
+        #expect(CookingConverter.sanitizeAmount(".") == ".")
+    }
 }
 
 /// The countdown face. Android draws its timer digits in Orbitron Bold

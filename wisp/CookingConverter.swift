@@ -112,4 +112,24 @@ enum CookingConverter {
     static func partner(for unit: Unit) -> Unit {
         allUnits.first { $0.category == unit.category && $0 != unit } ?? unit
     }
+
+    /// Digits and at most one decimal point, capped at 12 characters like
+    /// Android's `take(12)`. Extra separators are dropped rather than
+    /// left in, so `"1..2"` cannot sit in the field and fail to parse.
+    static func sanitizeAmount(_ raw: String) -> String {
+        var seenDot = false
+        var out = ""
+        for ch in raw {
+            if ch.isNumber {
+                out.append(ch)
+            } else if ch == ".", !seenDot {
+                out.append(ch)
+                seenDot = true
+            } else {
+                continue
+            }
+            if out.count == 12 { break }
+        }
+        return out
+    }
 }

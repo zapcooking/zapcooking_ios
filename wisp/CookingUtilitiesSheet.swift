@@ -148,6 +148,7 @@ struct CookingUtilitiesSheet: View {
                 .keyboardType(.numberPad)
                 .focused($minutesFocused)
                 .frame(width: 72)
+                .accessibilityLabel("Minutes")
                 .onChange(of: minutesText) { _, value in
                     let digits = value.filter(\.isNumber)
                     minutesText = String(digits.prefix(3))
@@ -312,8 +313,7 @@ struct CookingUtilitiesSheet: View {
 
             TextField("0", text: Binding(
                 get: { amountText },
-                // Digits and one decimal point, capped like Android's `take(12)`.
-                set: { amountText = String($0.filter { $0.isNumber || $0 == "." }.prefix(12)) }
+                set: { amountText = CookingConverter.sanitizeAmount($0) }
             ))
             .keyboardType(.decimalPad)
             .outlinedField()
@@ -321,7 +321,13 @@ struct CookingUtilitiesSheet: View {
             .accessibilityIdentifier("converter-amount")
 
             sectionLabel("From").padding(.top, 16)
-            unitPicker(selection: $fromAbbrev, partnerOf: $toAbbrev, id: "converter-from")
+            unitPicker(
+                selection: $fromAbbrev,
+                fallback: CookingConverter.defaultFrom,
+                partnerOf: $toAbbrev,
+                partnerFallback: CookingConverter.defaultTo,
+                id: "converter-from"
+            )
                 .padding(.top, 8)
 
             HStack {
@@ -345,7 +351,13 @@ struct CookingUtilitiesSheet: View {
             .padding(.top, 12)
 
             sectionLabel("To").padding(.top, 12)
-            unitPicker(selection: $toAbbrev, partnerOf: $fromAbbrev, id: "converter-to")
+            unitPicker(
+                selection: $toAbbrev,
+                fallback: CookingConverter.defaultTo,
+                partnerOf: $fromAbbrev,
+                partnerFallback: CookingConverter.defaultFrom,
+                id: "converter-to"
+            )
                 .padding(.top, 8)
 
             resultSlab.padding(.top, 16)
@@ -421,17 +433,19 @@ struct CookingUtilitiesSheet: View {
     /// pair is never left describing an impossible conversion.
     private func unitPicker(
         selection: Binding<String>,
+        fallback: String,
         partnerOf partner: Binding<String>,
+        partnerFallback: String,
         id: String
     ) -> some View {
-        let selected = CookingConverter.unit(stored: selection.wrappedValue, fallback: CookingConverter.defaultFrom)
+        let selected = CookingConverter.unit(stored: selection.wrappedValue, fallback: fallback)
         return Menu {
             ForEach(CookingConverter.Category.allCases, id: \.self) { category in
                 Section(category.rawValue.capitalized) {
                     ForEach(CookingConverter.allUnits.filter { $0.category == category }) { unit in
                         Button(unit.abbrev) {
                             let other = CookingConverter.unit(stored: partner.wrappedValue,
-                                                              fallback: CookingConverter.defaultTo)
+                                                              fallback: partnerFallback)
                             if other.category != unit.category {
                                 partner.wrappedValue = CookingConverter.partner(for: unit).abbrev
                             }
