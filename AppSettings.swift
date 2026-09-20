@@ -35,6 +35,8 @@ final class AppSettings {
         static let clientTagEnabled = "wisp_settings_client_tag_enabled"
         static let fiatCurrency = "wisp_settings_fiat_currency"
         static let notificationSoundsEnabled = "wisp_settings_notification_sounds_enabled"
+        static let replySoundName = "wisp_settings_sound_reply"
+        static let activitySoundName = "wisp_settings_sound_activity"
         static let postUndoTimerEnabled = "wisp_settings_post_undo_timer_enabled"
         static let postUndoTimerSeconds = "wisp_settings_post_undo_timer_seconds"
         static let postUndoTimerForReplies = "wisp_settings_post_undo_timer_for_replies"
@@ -90,8 +92,19 @@ final class AppSettings {
     var fiatCurrency: String {
         didSet { UserDefaults.standard.set(fiatCurrency, forKey: Keys.fiatCurrency) }
     }
+    /// Master switch — when off, every in-app notification sound is
+    /// silenced. Shared with the Notifications screen's speaker toggle, as
+    /// Android shares its `notif_sound_enabled` key between the two.
     var notificationSoundsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationSoundsEnabled, forKey: Keys.notificationSoundsEnabled) }
+    }
+    /// Tone for replies and DMs. `NotificationSound.none` is silent.
+    var replySoundName: String {
+        didSet { UserDefaults.standard.set(replySoundName, forKey: Keys.replySoundName) }
+    }
+    /// Tone for reactions, reposts, mentions and votes.
+    var activitySoundName: String {
+        didSet { UserDefaults.standard.set(activitySoundName, forKey: Keys.activitySoundName) }
     }
     /// When true, publishing a top-level post (and optionally replies — see
     /// `postUndoTimerForReplies`) waits `postUndoTimerSeconds` before sending,
@@ -171,6 +184,10 @@ final class AppSettings {
         self.clientTagEnabled = defaults.object(forKey: Keys.clientTagEnabled) as? Bool ?? true
         self.fiatCurrency = defaults.string(forKey: Keys.fiatCurrency) ?? "USD"
         self.notificationSoundsEnabled = defaults.object(forKey: Keys.notificationSoundsEnabled) as? Bool ?? true
+        self.replySoundName = NotificationSound.resolve(
+            stored: defaults.string(forKey: Keys.replySoundName), fallback: NotificationSound.defaultReply)
+        self.activitySoundName = NotificationSound.resolve(
+            stored: defaults.string(forKey: Keys.activitySoundName), fallback: NotificationSound.defaultActivity)
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
         let storedSeconds = defaults.object(forKey: Keys.postUndoTimerSeconds) as? Int ?? 10
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10

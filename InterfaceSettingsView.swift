@@ -39,6 +39,28 @@ struct InterfaceSettingsView: View {
                     }
                 }
 
+                // Notification Sounds — separate tones for replies vs. other
+                // activity, ported from Zap Cooking Android's InterfaceScreen.
+                // Zaps keep a dedicated thunder and are not listed. Picking a
+                // tone previews it; the play button replays the current one.
+                section(title: "Notification Sounds") {
+                    Toggle("Play notification sounds", isOn: $settings.notificationSoundsEnabled)
+                        .toggleStyle(SwitchToggleStyle(tint: theme.primary))
+                    Text("Turn off to silence every notification sound.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.palette.onSurfaceVariant)
+                        .padding(.bottom, 4)
+
+                    soundPicker(
+                        label: "Replies",
+                        selection: $settings.replySoundName
+                    )
+                    soundPicker(
+                        label: "Reactions, mentions & reposts",
+                        selection: $settings.activitySoundName
+                    )
+                }
+
                 section(title: "Media") {
                     Toggle("Auto-download media", isOn: $settings.autoLoadMedia)
                         .toggleStyle(SwitchToggleStyle(tint: theme.primary))
@@ -244,6 +266,58 @@ struct InterfaceSettingsView: View {
         }
     }
 
+
+    /// One tone picker: a menu of the selectable sounds plus a button that
+    /// replays the current pick. Choosing an option previews it, so you hear
+    /// what you picked without a second tap. Preview is disabled for the
+    /// silent option, and deliberately ignores the master switch — you
+    /// should be able to audition a tone before turning sounds back on.
+    @ViewBuilder
+    private func soundPicker(label: String, selection: Binding<String>) -> some View {
+        let isSilent = selection.wrappedValue == NotificationSound.none
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.palette.onSurfaceVariant)
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(NotificationSound.all) { sound in
+                        Button(sound.label) {
+                            selection.wrappedValue = sound.rawName
+                            NotificationSounds.shared.play(resource: sound.rawName)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(NotificationSound.label(for: selection.wrappedValue))
+                            .foregroundStyle(theme.palette.onSurface)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(theme.palette.onSurfaceVariant)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(theme.palette.surfaceVariant, in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                Button {
+                    NotificationSounds.shared.play(resource: selection.wrappedValue)
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(isSilent
+                                         ? theme.palette.onSurfaceVariant.opacity(0.4)
+                                         : theme.primary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSilent)
+                .accessibilityLabel("Preview \(label) sound")
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 private struct CurrencyPickerView: View {
