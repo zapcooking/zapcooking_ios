@@ -97,3 +97,52 @@ struct LogoAppearanceTests {
         return n
     }
 }
+
+/// Bar glyphs that come from the Android vector drawables rather than SF
+/// Symbols. They are separate assets, and nothing in the build catches it
+/// when two of them are accidentally the same artwork.
+@MainActor
+struct NavGlyphAssetTests {
+
+    /// The feed tab's selected and unselected flames must be *different*
+    /// drawings. They were byte-identical — both carrying Android's filled
+    /// `ic_flame`, so the unselected tab rendered as a solid flame instead
+    /// of the outline Android shows.
+    @Test func flame_outlineAndFill_areDifferentArtwork() throws {
+        let outline = try #require(UIImage(named: "ZapNavFlame"))
+        let fill = try #require(UIImage(named: "ZapNavFlameFill"))
+        #expect(Self.render(outline) != Self.render(fill))
+    }
+
+    /// The outline is the lighter of the two: rasterised at the same size it
+    /// covers markedly fewer opaque pixels than the solid flame.
+    @Test func flame_outlineIsLighterThanFill() throws {
+        let outline = try #require(Self.opaqueCount(UIImage(named: "ZapNavFlame")))
+        let fill = try #require(Self.opaqueCount(UIImage(named: "ZapNavFlameFill")))
+        #expect(outline < fill, "outline \(outline) px vs fill \(fill) px")
+    }
+
+    private static func render(_ image: UIImage) -> Data? {
+        let side: CGFloat = 64
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }.pngData()
+    }
+
+    private static func opaqueCount(_ image: UIImage?) -> Int? {
+        guard let image else { return nil }
+        let side = 64
+        let flat = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+        }
+        guard let cg = flat.cgImage,
+              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var buf = [UInt8](repeating: 0, count: side * side * 4)
+        guard let ctx = CGContext(data: &buf, width: side, height: side, bitsPerComponent: 8,
+                                  bytesPerRow: side * 4, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return stride(from: 3, to: buf.count, by: 4).reduce(0) { $0 + (buf[$1] > 128 ? 1 : 0) }
+    }
+}

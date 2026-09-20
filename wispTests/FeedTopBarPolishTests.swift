@@ -37,7 +37,7 @@ struct FeedTopBarPolishTests {
     @Test func topBar_hasNoOnlinePillOrRelayMenu_onAnyKind() {
         // The control vocabulary itself has no pill: the only way a pill
         // could come back is a new case here, which this pins.
-        #expect(Set(FeedTopBarControl.allCases) == [.avatar, .contentFilter, .feedPicker, .cheffy])
+        #expect(Set(FeedTopBarControl.allCases) == [.avatar, .gadgets, .contentFilter, .feedPicker, .cheffy])
         for kind in everyKind {
             for cheffy in [true, false] {
                 let controls = FeedTopBarLayout.controls(kind: kind, cheffyVisible: cheffy)
@@ -48,6 +48,23 @@ struct FeedTopBarPolishTests {
                 #expect(controls.filter { $0 == .cheffy }.count <= 1)
             }
         }
+    }
+
+    /// Gadgets rides beside the avatar on every kind — Android puts the same
+    /// grid glyph there, and a timer three taps deep in the drawer is three
+    /// too many with something on the hob.
+    @Test func gadgetsEntry_sitsBesideTheAvatar_onEveryKind() {
+        for kind in everyKind {
+            for cheffy in [true, false] {
+                let controls = FeedTopBarLayout.controls(kind: kind, cheffyVisible: cheffy)
+                #expect(controls.contains(.gadgets), "\(kind)")
+                #expect(controls.filter { $0 == .gadgets }.count == 1, "\(kind)")
+                let avatar = try? #require(controls.firstIndex(of: .avatar))
+                let gadgets = try? #require(controls.firstIndex(of: .gadgets))
+                #expect(gadgets == (avatar ?? -2) + 1, "\(kind): gadgets must follow the avatar")
+            }
+        }
+        #expect(FeedTopBarLayout.gadgetsTargetSize >= 44)
     }
 
     // MARK: - Item 5: Cheffy entry

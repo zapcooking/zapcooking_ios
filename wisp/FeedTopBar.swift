@@ -13,6 +13,10 @@ enum FeedTopBarControl: Equatable, Hashable, CaseIterable {
     /// Leading, general kinds only: the content-filter cycle. Hidden on the
     /// hashtag-backed OnlyFood feed (unchanged).
     case contentFilter
+    /// Leading: the Gadgets sheet (timers). Android carries the same grid
+    /// glyph beside its avatar, and the drawer row alone made a timer three
+    /// taps away mid-cook. Visible on every kind.
+    case gadgets
     /// Centre: the kind picker, overlaid so it stays centred.
     case feedPicker
     /// Trailing: the Cheffy entry (`CheffyGate.entryVisible()`), the same
@@ -26,7 +30,7 @@ enum FeedTopBarLayout {
     /// drawer's Feed Relay row (and the picker's Relay entry); Online Now was
     /// removed from the app.
     static func controls(kind: FeedKind, cheffyVisible: Bool) -> [FeedTopBarControl] {
-        var controls: [FeedTopBarControl] = [.avatar]
+        var controls: [FeedTopBarControl] = [.avatar, .gadgets]
         if kind != .onlyFood { controls.append(.contentFilter) }
         controls.append(.feedPicker)
         if cheffyVisible { controls.append(.cheffy) }
@@ -38,6 +42,11 @@ enum FeedTopBarLayout {
     /// the leading side.
     static let cheffyTargetSize: CGFloat = 44
     static let cheffyGlyphSize: CGFloat = 30
+
+    /// The Gadgets glyph sits between the 32 pt avatar and the 30 pt Cheffy
+    /// mark, inside the same 44 pt target every bar control gets.
+    static let gadgetsTargetSize: CGFloat = 44
+    static let gadgetsGlyphSize: CGFloat = 22
 }
 
 /// Leading and trailing content in an `HStack`, the centre content overlaid

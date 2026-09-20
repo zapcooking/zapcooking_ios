@@ -1182,6 +1182,9 @@ struct MainView: View {
         )
         return FeedTopBarFrame {
             profileAvatar
+            if controls.contains(.gadgets) {
+                gadgetsButton
+            }
             // The content filter does not apply to the hashtag-backed
             // OnlyFood feed.
             if controls.contains(.contentFilter) {
@@ -1214,6 +1217,26 @@ struct MainView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Cheffy")
         .accessibilityIdentifier("feed-cheffy-entry")
+    }
+
+    /// Gadgets (timers) straight from the bar, matching the grid glyph
+    /// Android puts beside its avatar. It opens the same sheet the drawer's
+    /// Gadgets row does — that was three taps deep, which is three too many
+    /// with something on the hob.
+    private var gadgetsButton: some View {
+        Button {
+            showCookingUtilitiesSheet = true
+        } label: {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: FeedTopBarLayout.gadgetsGlyphSize, weight: .regular))
+                .foregroundStyle(Color.wispOnSurfaceVariant)
+                .frame(width: FeedTopBarLayout.gadgetsTargetSize,
+                       height: FeedTopBarLayout.gadgetsTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Gadgets")
+        .accessibilityIdentifier("feed-gadgets-entry")
     }
 
     private var profileAvatar: some View {
