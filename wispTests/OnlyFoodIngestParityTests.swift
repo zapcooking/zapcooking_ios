@@ -169,7 +169,8 @@ struct OnlyFoodIngestParityTests {
     }
 
     @Test func repost_dropped_whenInnerIsStructuralSpam_orUnparseable() async {
-        let tags = [["t", "foodstr"]] + ["soup", "stew", "dinner", "homemade", "cooking"].map { ["t", $0] }
+        // One over the structural cap, whatever the cap is (#85 moved it 5 → 20).
+        let tags = [["t", "foodstr"]] + (1...OnlyFoodFilter.maxHashtags).map { ["t", "zc\($0)"] }
         let spammy = repost(id: "r1", reposter: carol, of: note(id: "i1", author: alice, createdAt: 50, tags: tags), createdAt: 300)
         let blank = repost(id: "r2", reposter: carol, of: note(id: "i2", author: alice, createdAt: 50), createdAt: 301, content: "")
         let junk = repost(id: "r3", reposter: carol, of: note(id: "i3", author: alice, createdAt: 50), createdAt: 302, content: "{not json")
@@ -277,8 +278,9 @@ struct OnlyFoodIngestParityTests {
 
     @Test func poll_isAccepted_andStructuralCapApplies() async {
         let ok = poll(id: "p1", author: alice, createdAt: 200)
+        // `poll` already carries #foodstr; this many extras is one over the cap.
         let spammy = poll(id: "p2", author: alice, createdAt: 201,
-                          extraTags: ["soup", "stew", "dinner", "homemade", "cooking"].map { ["t", $0] })
+                          extraTags: (1...OnlyFoodFilter.maxHashtags).map { ["t", "zc\($0)"] })
         let vm = vm { _ in self.loaded([ok, spammy]) }
         await vm.startAndWait()
         #expect(vm.notes.map(\.id) == ["p1"])
