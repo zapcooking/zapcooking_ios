@@ -60,6 +60,14 @@ final class NotificationRepository {
         activePrivkey32 = data
     }
 
+    #if DEBUG
+    /// Set by tests to observe which arrivals reach `fireEffects`. Carries
+    /// the whole item so a test can filter to its own fixture — the
+    /// repository is a singleton and suites run in parallel, so a bare kind
+    /// picks up other suites' traffic.
+    var effectProbe: ((FlatNotificationItem) -> Void)?
+    #endif
+
     /// Wall-clock floor for firing notification sounds/haptics. Initialized to
     /// app-launch and bumped to `now` every time the app re-enters the
     /// foreground, so an overnight backlog of relay events doesn't blast
@@ -267,6 +275,15 @@ final class NotificationRepository {
     /// The per-type rules live in `NotificationEffectPlan`, which documents
     /// and tests the Android parity table; this only supplies live state.
     private func fireEffects(for item: FlatNotificationItem, persist: Bool) {
+        #if DEBUG
+        // Test seam. The live gates below — foreground, `soundEligibleAfter`
+        // — never hold in a test process, so without this there is no way to
+        // assert that a path reaches the effects at all. That is the failure
+        // this exists for: `.pollVote` and `.pollEnded` were in the effect
+        // table but neither path called this, and the unit tests on the
+        // table passed the whole time.
+        effectProbe?(item)
+        #endif
         guard persist else { return }
         guard item.timestamp >= soundEligibleAfter else { return }
         #if canImport(UIKit)
