@@ -57,6 +57,12 @@ nonisolated enum RelayUrlValidator {
         else { return false }
         if host == "localhost" || host.hasSuffix(".localhost") { return false }
         if isIpLiteral(host) { return false }
+        // A public relay has a dotted hostname. A single-label host is either a
+        // LAN name (already excluded alongside `localhost` / IP literals) or a
+        // mangled URL that `URL(string:)` still parses — `wss://https//relay…`
+        // yields host `https` with the real relay in the path, and used to
+        // pass here and take a slot in a poll's `relay` tags.
+        if !host.contains(".") { return false }
         return true
     }
 
