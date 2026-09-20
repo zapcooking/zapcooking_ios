@@ -47,6 +47,67 @@ nonisolated enum OnlyFoodCompose {
 
     static let hint = "Tap a tag so this shows up in OnlyFood."
 
+    // MARK: - The row's order and the picker's set
+
+    /// The row's candidate order: every food tag already in the body
+    /// (`bodyTags`, the composer's derived hashtags in body order) comes
+    /// first, so a tag picked from the full set or typed by hand is never
+    /// hidden behind the "+"; then the suggested tags that are not yet
+    /// selected, in their measured-usage order.
+    static func rowOrder(bodyTags: [String], suggested: [String]) -> [String] {
+        let selected = bodyTags.filter { FoodHashtags.allSet.contains($0) }
+        let rest = suggested.filter { !selected.contains($0) }
+        return selected + rest
+    }
+
+    /// The picker's first section: the eight pills, in order.
+    static var pickerPopular: [String] { suggestedTags }
+
+    /// The picker's second section: every other food tag the OnlyFood
+    /// filter matches on, alphabetical. `FoodHashtags.all` backs the
+    /// picker (not `FoodTopics`): a tag from this list is what makes a
+    /// note reachable in OnlyFood, and 66 of the taxonomy's tags are not
+    /// in it.
+    static let pickerRest: [String] = {
+        let popular = Set(suggestedTags)
+        return FoodHashtags.all.map { $0.lowercased() }
+            .filter { !popular.contains($0) }
+            .sorted()
+    }()
+
+    /// Search: a leading "#" is ignored, matching is case-insensitive and
+    /// by substring. Empty query returns `tags` unchanged.
+    static func pickerMatches(_ tags: [String], query: String) -> [String] {
+        var q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        while q.hasPrefix("#") { q.removeFirst() }
+        guard !q.isEmpty else { return tags }
+        return tags.filter { $0.contains(q) }
+    }
+
+    /// One row, one "+": how many leading entries of the ordered row fit
+    /// in `available` points, and how many *selected* entries fall past
+    /// the cut. The "+" widens to "+N" when N selected tags are hidden,
+    /// which can push one more entry out, so the pair is iterated to a
+    /// fixed point (it converges in a step or two: N only grows).
+    static func rowLayout(
+        widths: [CGFloat], selected: [Bool], plusWidth: (Int) -> CGFloat,
+        spacing: CGFloat, available: CGFloat
+    ) -> (count: Int, hiddenSelected: Int) {
+        let selectedTotal = selected.filter { $0 }.count
+        var hidden = 0
+        var count = 0
+        for _ in 0..<4 {
+            count = visiblePillCount(
+                widths: widths, plusWidth: plusWidth(hidden), spacing: spacing, available: available
+            )
+            let shown = selected.prefix(count).filter { $0 }.count
+            let next = selectedTotal - shown
+            if next == hidden { break }
+            hidden = next
+        }
+        return (count, hidden)
+    }
+
     /// How many leading pills fit on one row of `available` points, keeping
     /// room for the trailing "+" pill. The row neither wraps nor scrolls:
     /// the pills are the head of `suggestedTags` and the "+" opens the
