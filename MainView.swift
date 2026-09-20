@@ -74,6 +74,9 @@ struct MainView: View {
     @State private var cookingTimers = CookingTimerStore.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.theme) private var theme
+    /// Drives the Notifications-tab zap burst. Written by the notification
+    /// repository when a zap lands while the app is foregrounded.
+    @State private var bursts = NotificationBurstStore.shared
     /// Set on `.background`, consumed on the next `.active` — see the
     /// `scenePhase` handler.
     @State private var wasBackgrounded = false
@@ -1973,7 +1976,7 @@ struct MainView: View {
                         selectedTab = tab
                     }
                 } label: {
-                    tab.glyph(selected: tab == selectedTab)
+                    tab.glyph(selected: tab == selectedTab, zapping: isZapping(tab))
                         .frame(height: 30)
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .topTrailing) {
@@ -1984,6 +1987,7 @@ struct MainView: View {
                                     .offset(x: -10, y: 2)
                             }
                         }
+                        .overlay { burstOverlay(tab) }
                 }
                 .foregroundStyle(tab == selectedTab ? Color.wispPrimary : .secondary)
                 .accessibilityLabel(tab.title)
@@ -1992,6 +1996,26 @@ struct MainView: View {
         }
         .padding(.vertical, 10)
         .padding(.bottom, 2)
+    }
+
+    /// Android swaps the Notifications glyph to a bolt for the duration of
+    /// the zap burst (`BottomBar.kt`), so the tab itself reads as "a zap just
+    /// landed" even after the particles clear the icon.
+    private func isZapping(_ tab: BottomTab) -> Bool {
+        tab == .notifications && bursts.zapBurst
+    }
+
+    /// The zap burst hangs off the Notifications tab, as on Android. It
+    /// draws well outside the 30pt glyph row, so it gets a fixed 120pt canvas
+    /// that contributes no layout of its own — the overlay is measured by the
+    /// glyph, and the canvas is free to spill past it.
+    @ViewBuilder
+    private func burstOverlay(_ tab: BottomTab) -> some View {
+        if tab == .notifications {
+            ZapBurstView(isActive: bursts.zapBurst, restartToken: bursts.zapGeneration)
+                .frame(width: 120, height: 120)
+                .allowsHitTesting(false)
+        }
     }
 
     /// Android drives `hasUnreadMessages` / `hasUnreadNotifications` into the
@@ -2187,8 +2211,22 @@ enum BottomTab: String, CaseIterable {
     /// The bar glyph, template-rendered so `foregroundStyle` tints it. Custom
     /// vectors resize by frame (SF Symbols by font) — both sized to
     /// `barGlyphSize` so siblings align on the shared 30pt row.
+    ///
+    /// `zapping` is the Notifications tab's zap-burst state: Android swaps
+    /// that tab's glyph to `ic_bolt` while the burst runs, so the bell gives
+    /// way to a bolt here for the same window.
     @ViewBuilder
-    func glyph(selected: Bool) -> some View {
+    func glyph(selected: Bool, zapping: Bool = false) -> some View {
+        if zapping {
+            Image(systemName: AppSettings.zapSymbol)
+                .font(.system(size: barGlyphSize))
+        } else {
+            unburstGlyph(selected: selected)
+        }
+    }
+
+    @ViewBuilder
+    private func unburstGlyph(selected: Bool) -> some View {
         let name = selected ? selectedIcon : icon
         if usesCustomGlyph {
             Image(name)

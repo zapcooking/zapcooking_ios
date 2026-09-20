@@ -5,7 +5,7 @@ import AVFoundation
 final class NotificationSounds {
     static let shared = NotificationSounds()
 
-    enum Effect {
+    enum Effect: Equatable {
         case reply
         case blip
         case zap

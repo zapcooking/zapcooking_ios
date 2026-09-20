@@ -14,6 +14,11 @@ import SwiftUI
 /// when the bursting window is short.
 struct ZapBurstView: View {
     var isActive: Bool
+    /// Parent-supplied restart signal. `onChange(of: isActive)` only fires
+    /// on a false→true edge, so a second zap while the burst is already
+    /// running would otherwise leave the first animation to finish. Default
+    /// 0 keeps post-card callers (one burst per event id) unchanged.
+    var restartToken: Int = 0
 
     /// Total burst duration (s). Matches Android's 1100 ms tween.
     private let duration: TimeInterval = 1.1
@@ -38,6 +43,9 @@ struct ZapBurstView: View {
         }
         .onChange(of: isActive) { _, newValue in
             if newValue { startAnimation() }
+        }
+        .onChange(of: restartToken) { _, _ in
+            if isActive { startAnimation() }
         }
     }
 
