@@ -360,21 +360,32 @@ final class GroupListViewModel {
         }
     }
 
+    // The admin events sign through `Signer.sign` rather than the
+    // `Nip29.build*` helpers so a NIP-46 remote signer works too — the
+    // builders take a raw private key, which a bunker account doesn't have
+    // (the same reason `GroupRoomViewModel.sendMessage` bypasses them). Tag
+    // shapes match the builders: `["h", group]` then `["p", target, roles…]`.
+
     func putUser(relayUrl: String, groupId: String, targetPubkey: String,
                  roles: [String] = []) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildPutUser(privkey32: priv, pubkey: keypair.pubkey,
-                                                  groupId: groupId, targetPubkey: targetPubkey, roles: roles) else {
-            return .failure(.network)
-        }
-        return await runAdmin(event: event, relayUrl: relayUrl)
+        await runAdmin(kind: Nip29.kindPutUser,
+                       tags: [["h", groupId], ["p", targetPubkey] + roles],
+                       relayUrl: relayUrl)
     }
 
     func removeUser(relayUrl: String, groupId: String, targetPubkey: String) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildRemoveUser(privkey32: priv, pubkey: keypair.pubkey,
-                                                     groupId: groupId, targetPubkey: targetPubkey) else {
-            return .failure(.network)
+        await runAdmin(kind: Nip29.kindRemoveUser,
+                       tags: [["h", groupId], ["p", targetPubkey]],
+                       relayUrl: relayUrl)
+    }
+
+    private func runAdmin(kind: Int, tags: [[String]], relayUrl: String) async -> Result<Void, AdminError> {
+        let event: NostrEvent
+        do {
+            event = try await Signer.sign(keypair: keypair, kind: kind, tags: tags, content: "")
+        } catch {
+            lastAdminError = .notAuthenticated
+            return .failure(.notAuthenticated)
         }
         return await runAdmin(event: event, relayUrl: relayUrl)
     }

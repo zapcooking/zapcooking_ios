@@ -44,6 +44,23 @@ struct Nip56Tests {
         ])
     }
 
+    /// A room report: typed `p` and `e`, the room's `h`, then the pantry
+    /// moderators and the room's admins as plain `p` recipients — the query
+    /// Android's `ReportsScreen` and the relay operator run.
+    @Test func buildReportTags_groupMessage_emitsH_andAdminsAsRecipients() {
+        let tags = Nip56.buildReportTags(
+            reportedPubkey: "alice", category: .harassment, eventId: "m1",
+            groupId: "bakers", recipients: ["mod1", "adm1", "alice"]
+        )
+        #expect(tags.contains(["p", "alice", "other"]))
+        #expect(tags.contains(["e", "m1", "other"]))
+        #expect(tags.contains(["h", "bakers"]))
+        #expect(tags.contains(["p", "mod1"]))
+        #expect(tags.contains(["p", "adm1"]))
+        #expect(tags.filter { $0.count >= 2 && $0[0] == "p" && $0[1] == "alice" }.count == 1,
+                "the reported pubkey is not repeated as a recipient")
+    }
+
     @Test func buildReportTags_profileOnly_omitsEAndH() {
         let tags = Nip56.buildReportTags(
             reportedPubkey: "bob",

@@ -23,6 +23,7 @@ struct GroupDetailView: View {
         }
         .background(Color.wispBackground)
         .toolbar(.hidden, for: .navigationBar)
+        .groupModerationDialogs(viewModel)
         .task(id: room?.members) {
             // Batch-fetch any missing profiles for the member + admin lists.
             guard let listVM = GroupListViewModelRegistry.shared else { return }
@@ -107,9 +108,14 @@ struct GroupDetailView: View {
                     MemberRow(
                         pubkey: pubkey,
                         isAdmin: room?.admins.contains(pubkey) == true,
+                        isSelf: pubkey == viewModel.keypair.pubkey,
+                        canBlock: !viewModel.keypair.isWatchOnly,
+                        isBlocked: MuteRepository.shared.isBlocked(pubkey),
                         showActions: isAdmin && pubkey != viewModel.keypair.pubkey,
+                        onBlock: { viewModel.askToBlock(pubkey) },
+                        onUnblock: { MuteRepository.shared.unblockUser(pubkey) },
                         onPromote: { Task { await promote(pubkey) } },
-                        onRemove: { Task { await remove(pubkey) } }
+                        onRemove: { viewModel.askToRemove(pubkey) }
                     )
                 }
             }
@@ -194,11 +200,6 @@ struct GroupDetailView: View {
                                  targetPubkey: pubkey, roles: ["admin"])
     }
 
-    @MainActor
-    private func remove(_ pubkey: String) async {
-        guard let listVM = GroupListViewModelRegistry.shared else { return }
-        _ = await listVM.removeUser(relayUrl: viewModel.relayUrl, groupId: viewModel.groupId, targetPubkey: pubkey)
-    }
 }
 
 /// Tiny weak-singleton so `GroupDetailView` can reach the active `GroupListViewModel`
@@ -212,7 +213,14 @@ enum GroupListViewModelRegistry {
 private struct MemberRow: View {
     let pubkey: String
     let isAdmin: Bool
+    let isSelf: Bool
+    /// Signing accounts only — a block republishes the NIP-51 list.
+    let canBlock: Bool
+    let isBlocked: Bool
+    /// Admin actions (promote, remove & ban), never on our own row.
     let showActions: Bool
+    let onBlock: () -> Void
+    let onUnblock: () -> Void
     let onPromote: () -> Void
     let onRemove: () -> Void
 
@@ -235,14 +243,30 @@ private struct MemberRow: View {
                     .padding(.horizontal, 4).padding(.vertical, 1)
                     .background(Color.wispPrimary.opacity(0.2), in: Capsule())
             }
+            if isBlocked {
+                Text("blocked").font(.caption2)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.15), in: Capsule())
+            }
             Spacer()
-            if showActions {
+            if !isSelf && (canBlock || showActions) {
                 Menu {
-                    Button("Promote to admin", action: onPromote)
-                    Button("Remove", role: .destructive, action: onRemove)
+                    if canBlock {
+                        if isBlocked {
+                            Button("Unblock User", action: onUnblock)
+                        } else {
+                            Button("Block User", role: .destructive, action: onBlock)
+                        }
+                    }
+                    if showActions {
+                        Divider()
+                        Button("Promote to admin", action: onPromote)
+                        Button("Remove & ban", role: .destructive, action: onRemove)
+                    }
                 } label: {
                     Image(systemName: "ellipsis").foregroundStyle(.tertiary)
                 }
+                .accessibilityIdentifier("group-member-menu")
             }
         }
         .task(id: pubkey) {

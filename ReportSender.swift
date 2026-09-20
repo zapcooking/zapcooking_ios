@@ -33,6 +33,13 @@ struct ReportTarget: Identifiable, Equatable, Hashable {
     var eventId: String?
     var coordinate: String?
     var groupId: String?
+    /// The NIP-29 relay the reported message lives on. A room report is also
+    /// published there, through the room's authenticated session, so the
+    /// relay operator's moderation query (`kinds:[1984] #h:<group>`) sees it.
+    var groupRelayUrl: String? = nil
+    /// The room's kind-39001 admins, added as plain `p` recipients so they
+    /// can find the report the same way the pantry moderators do.
+    var groupAdmins: [String] = []
 
     static func event(_ event: NostrEvent, groupId: String? = nil) -> ReportTarget {
         let coordinate: String?
@@ -47,6 +54,22 @@ struct ReportTarget: Identifiable, Equatable, Hashable {
             eventId: event.id,
             coordinate: coordinate,
             groupId: groupId
+        )
+    }
+
+    /// A NIP-29 chat message. No `NostrEvent` is retained for group messages
+    /// (`GroupMessage` keeps id / sender / content only), so the target is
+    /// built from those fields plus the room it was seen in.
+    static func groupMessage(id: String, senderPubkey: String, groupId: String,
+                             relayUrl: String, admins: [String]) -> ReportTarget {
+        ReportTarget(
+            id: "e:\(id)",
+            reportedPubkey: senderPubkey,
+            eventId: id,
+            coordinate: nil,
+            groupId: groupId,
+            groupRelayUrl: relayUrl,
+            groupAdmins: admins
         )
     }
 
@@ -92,7 +115,8 @@ enum ReportSender {
         keypair: Keypair?,
         extraRecipients: [String] = Nip56.pantryModAdmins,
         relays: [String]? = nil,
-        publish: ((NostrEvent, [String]) async -> [String])? = nil
+        publish: ((NostrEvent, [String]) async -> [String])? = nil,
+        groupPublish: ((NostrEvent, String) async -> Bool)? = nil
     ) async -> ReportOutcome {
         guard let keypair, !keypair.privkey.isEmpty,
               !NostrKey.isWatchOnly(pubkey: keypair.pubkey) else {
@@ -104,7 +128,7 @@ enum ReportSender {
             category: category,
             eventId: target.eventId,
             groupId: target.groupId,
-            recipients: extraRecipients
+            recipients: extraRecipients + target.groupAdmins
         )
         let content = Nip56.reportContent(category: category, reason: reason)
 
@@ -137,7 +161,24 @@ enum ReportSender {
             accepted = await RelayPool.publish(event: event, to: Array(dest), timeout: 8)
         }
 
-        let outcome = ReportOutcome.of(hasSigner: true, relayAccepted: !accepted.isEmpty)
+        // A room report also goes to the room's relay, over the NIP-42
+        // session `GroupRelayPool` already holds for it (a plain
+        // `RelayPool.publish` has no AUTH and pantry would refuse it). The
+        // room relay alone accepting is enough for `.sent`: that is where the
+        // operator reads reports from.
+        var roomAccepted = false
+        if let roomRelay = target.groupRelayUrl {
+            if let groupPublish {
+                roomAccepted = await groupPublish(event, roomRelay)
+            } else {
+                switch await GroupRelayPool.shared.publishWithAuthRetry(event, to: roomRelay) {
+                case .ok, .duplicate: roomAccepted = true
+                default: roomAccepted = false
+                }
+            }
+        }
+
+        let outcome = ReportOutcome.of(hasSigner: true, relayAccepted: !accepted.isEmpty || roomAccepted)
         if outcome.hidesReportedContent {
             ReportedContent.shared.hide(target)
         }

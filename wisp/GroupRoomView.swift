@@ -27,6 +27,7 @@ struct GroupRoomView: View {
         .background(Color.wispBackground)
         .wispTopHeader { header }
         .toolbar(.hidden, for: .navigationBar)
+        .groupModerationDialogs(viewModel)
         .navigationDestination(isPresented: $showDetail) {
             GroupDetailView(viewModel: viewModel)
         }
@@ -67,7 +68,15 @@ struct GroupRoomView: View {
                             isMine: msg.senderPubkey == viewModel.keypair.pubkey,
                             replyTarget: msg.replyToId.flatMap { id in
                                 viewModel.messages.first(where: { $0.id == id })
-                            }
+                            },
+                            // Guideline 1.2: report and block on every message
+                            // that isn't ours; remove & ban for the relay's
+                            // admins. Watch-only accounts can't sign a report
+                            // (`ReportSender` answers `.needsKey`) or a block
+                            // list, so they get no menu.
+                            onReport: viewModel.keypair.isWatchOnly ? nil : { viewModel.report(msg) },
+                            onBlock: viewModel.keypair.isWatchOnly ? nil : { viewModel.askToBlock(msg.senderPubkey) },
+                            onRemove: viewModel.isAdmin ? { viewModel.askToRemove(msg.senderPubkey) } : nil
                         )
                         .id(msg.id)
                         .onTapGesture { viewModel.setReplyTarget(msg) }
@@ -137,6 +146,12 @@ private struct GroupMessageBubble: View {
     let message: GroupMessage
     let isMine: Bool
     let replyTarget: GroupMessage?
+    /// Moderation, in the order Android's bubble menu uses: report
+    /// (everyone) → block (everyone) → remove & ban (admins). Nil hides the
+    /// item; all nil (or our own message) hides the menu.
+    var onReport: (() -> Void)? = nil
+    var onBlock: (() -> Void)? = nil
+    var onRemove: (() -> Void)? = nil
 
     @State private var profile: ProfileData?
     @State private var replyProfile: ProfileData?
@@ -180,6 +195,10 @@ private struct GroupMessageBubble: View {
                     .padding(.vertical, 8)
                     .background(isMine ? Color.wispPrimary : Color.wispSurfaceVariant,
                                 in: RoundedRectangle(cornerRadius: 14))
+                    .modifier(ModerationMenu(
+                        enabled: !isMine && (onReport != nil || onBlock != nil || onRemove != nil),
+                        onReport: onReport, onBlock: onBlock, onRemove: onRemove
+                    ))
 
                 if !message.reactions.isEmpty {
                     HStack(spacing: 4) {
@@ -256,5 +275,40 @@ private struct GroupMessageBubble: View {
 
     private func short(_ s: String) -> String {
         s.count >= 8 ? Nip19.shortNpub(hex: s) : s
+    }
+}
+
+/// Long-press menu on a bubble. Applied conditionally so our own messages
+/// don't get an empty menu; the avatar's quick-follow long-press is a
+/// separate gesture on a separate view and is unaffected.
+private struct ModerationMenu: ViewModifier {
+    let enabled: Bool
+    let onReport: (() -> Void)?
+    let onBlock: (() -> Void)?
+    let onRemove: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.contextMenu {
+                if let onReport {
+                    Button(action: onReport) { Label("Report", systemImage: "flag") }
+                        .accessibilityIdentifier("report-group-message")
+                }
+                if let onBlock {
+                    Button(role: .destructive, action: onBlock) {
+                        Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                    .accessibilityIdentifier("block-group-message-author")
+                }
+                if let onRemove {
+                    Button(role: .destructive, action: onRemove) {
+                        Label("Remove & ban", systemImage: "person.badge.minus")
+                    }
+                    .accessibilityIdentifier("remove-group-member")
+                }
+            }
+        } else {
+            content
+        }
     }
 }
