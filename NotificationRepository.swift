@@ -230,6 +230,9 @@ final class NotificationRepository {
             if changed, persist {
                 Task { await EventPersistQueue.shared.enqueue(event) }
             }
+            if changed {
+                fireEffects(for: item, persist: persist)
+            }
             return changed
         }
         // Insert in timestamp-desc sorted position so the FIFO eviction at the
@@ -300,6 +303,10 @@ final class NotificationRepository {
         if flatItems.count > Self.flatCap { flatItems.removeLast(flatItems.count - Self.flatCap) }
         summary = computeSummary24h()
         bumpLatestTimestamp(item.timestamp)
+        // Live insertion of a synthetic row. Duplicates never reach here
+        // (`insertSeen` above). The `soundEligibleAfter` floor drops polls
+        // that ended before this session, matching live ingest.
+        fireEffects(for: item, persist: true)
         return true
     }
 

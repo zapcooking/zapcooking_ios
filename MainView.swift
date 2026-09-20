@@ -2012,7 +2012,7 @@ struct MainView: View {
     @ViewBuilder
     private func burstOverlay(_ tab: BottomTab) -> some View {
         if tab == .notifications {
-            ZapBurstView(isActive: bursts.zapBurst)
+            ZapBurstView(isActive: bursts.zapBurst, restartToken: bursts.zapGeneration)
                 .frame(width: 120, height: 120)
                 .allowsHitTesting(false)
         }

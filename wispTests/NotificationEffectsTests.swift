@@ -159,4 +159,17 @@ struct NotificationEffectsTests {
         try await Task.sleep(for: .seconds(NotificationBurstStore.zapDuration))
         #expect(!store.zapBurst)
     }
+
+    /// `ZapBurstView` starts particles on a false→true edge of `isActive`.
+    /// Refiring while already bursting never produces that edge, so the
+    /// generation token has to move or the second zap draws nothing.
+    @Test func refiring_bumpsGeneration() {
+        let store = NotificationBurstStore()
+        #expect(store.zapGeneration == 0)
+        store.fireZap()
+        #expect(store.zapGeneration == 1)
+        store.fireZap()
+        #expect(store.zapGeneration == 2)
+        #expect(store.zapBurst)
+    }
 }
