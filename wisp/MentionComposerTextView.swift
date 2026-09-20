@@ -87,9 +87,11 @@ enum ComposerTextStyling {
         ]
     }
 
-    static var pillFillColor: UIColor { UIColor(Color.wispPrimary).withAlphaComponent(0.18) }
-    static var pillTextColor: UIColor { UIColor(Color.wispPrimary) }
-    static var linkColor: UIColor { UIColor(Color.wispPrimary) }
+    // Same tiers as the rendered post (`RichInlineTextView`): a mention
+    // pill is an interactive entity, a URL run is a link.
+    static var pillFillColor: UIColor { UIColor(Color.zapSubtleFill) }
+    static var pillTextColor: UIColor { UIColor(Color.zapInteractive) }
+    static var linkColor: UIColor { UIColor(Color.zapLink) }
 
     /// First-occurrence-per-mention ranges, mirroring `materializeMentions` so
     /// the visible pills line up exactly with what gets published. Returns the

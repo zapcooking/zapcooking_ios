@@ -1,167 +1,92 @@
-# GATE — concern/note-review (Cheffy Note Review)
-Port of the web's Cheffy note photo review (frontend `eb99f009`) with
-Android's structure (`NoteReview.kt` / `NoteReviewViewModel.kt` /
-`NoteReviewSheet.kt` / `NoteReviewReplyPublisher.kt`) and none of its credit
-purchase. Off main at 563e09d (#85). **This concern publishes** (a kind-1
-reply), so §7.13 applies to the live gate.
+# GATE — concern/color-hierarchy (one brand orange, four intensities)
+Visual-system refactor only: no new event kind, nothing published, no
+network change, so §7.13's live-write protocol does not apply. Off main at
+e53d346 (#89), rebased there after #90's Copilot review (the only conflict
+was #89's GATE.md, replaced by this one). Local build + serial suites on
+Seth's MacBook Air (the Air is the gate machine until the Mac Studio lands);
+the box block below is the standard form for the Studio.
 
-**Machine.** The MacinCloud box is gone; every number here was produced on
-Seth's MacBook Air (Xcode 26.3, iPhone 17 simulator on iOS 26.2, shared
-DerivedData, `-skipPackagePluginValidation`, serial) from the worktree
-`~/Projects/zc-ios-note-review`.
-
-**Frozen at this commit.** App code is frozen at **c0b1a2e** (0d1198d + the merge of main at c7b01e6 + the Copilot review fixes 6058b30 + the live-gate dish fixture). This GATE.md is the
-only commit after it and is the HEAD commit — `gate.sh` refuses to run
-otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+**Frozen at this commit.** App code is frozen at **ea500a6** (95954f5, the
+rebased refactor, plus ea500a6, the Copilot review fixes: MusicTrackCardView
+retry arrow and the "+N more" zap badge → `zapInteractive`, the
+RichInlineTextView comment, the gray-message assertion in the pill render
+test). The previous GATE.md (31d4bfa, at fac5921) is superseded. This
+GATE.md is the only commit after ea500a6 and is the HEAD commit — `gate.sh`
+refuses to run otherwise. A review fix re-opens the freeze: push a fresh
+GATE.md last.
 
 ## What landed
-- `wisp/NoteReview.swift` — phases `choose · signing · loading · draft ·
-  posting · postTimeout · posted · deadEnd · membersOnly · error` (no upsell,
-  no paying), `canPost` (draft only), the web copy pools verbatim (dead-end
-  register, sign-failed, generic, rate-limited, membership-unavailable,
-  post-timeout, publish-failed), sheet copy, disclosure footer + per-mode
-  defaults + seed rule, `phaseForResult` (`MEMBERSHIP_UNAVAILABLE` → error,
-  never the gate). `NoteReviewResult` typed results.
-- `wisp/NoteReviewService.swift` — `POST /api/zappy/note-review` on the
-  existing NIP-98 `authedPost` spine and the compute client; request capped
-  to 1000 chars of note text before signing; pure response/error mapper.
-- `wisp/ImageUrls.swift` — strict parity port of the web detector the server
-  validates with. `wisp/NoteReviewTrigger.swift` — eligibility (flag ∧ image)
-  and the measured 356pt inline threshold. `FeatureFlags.noteReviewEnabled`.
-- `wisp/NoteReviewReplyPublisher.swift` — NIP-10 reply + client tag,
-  `ThreadViewModel`'s relay rule behind the `NoteReviewReplyTransport`
-  protocol; non-empty accept → posted, empty → postTimeout HOLDING the signed
-  event (retry re-broadcasts the same id), failed only for an empty relay set.
-  Pinned hermetically by `NoteReviewReplyPublisherTests`. `wisp/NoteReviewPreferences.swift` —
-  per-account disclosure booleans, nothing else.
-- `wisp/NoteReviewViewModel.swift`, `wisp/NoteReviewSheet.swift` — the session
-  and the sheet; a verified non-member sees `Cheffy.membersOnlyMessage` and a
-  Close button only.
-- `PostCardView.swift` — overflow-menu item "Ask Cheffy about this photo"
-  whenever the (inner) note is a public kind-1 carrying an https image and a
-  loaded key can sign, and the adaptive inline slot before the expand chevron
-  above the threshold. Both route through `ComposePresenter.openNoteReview`
-  so the keyboard-raising sheet is hosted from MainView's stable root
-  (`MainView.swift`, `wisp/ComposePresenter.swift`); the sheet refuses
-  interactive dismissal while posting.
-- Issues filed, NOT fixed here: zapcooking_ios #88 (main's #85 left three
-  OnlyFood structural-cap tests expecting the old cap) and zap_cooking_android
-  #259 (converge on the web copy).
+- `Theme.swift` — `ResolvedTheme` derives `interactive` (0.90), `link`
+  (0.80), `subtle` (0.30) and `subtleFill` (0.14) from `primary` in one
+  explicit init; `resolveTheme(systemColorScheme:contrast:)` collapses the
+  text tiers to full primary under Increase Contrast (`RootContainer` reads
+  `\.colorSchemeContrast`).
+- `wisp/ZapColors.swift` — the documented ladder and the accessors
+  `Color.zapPrimary` / `zapInteractive` / `zapLink` / `zapSubtle` /
+  `zapSubtleFill` / `textPrimary` / `textSecondary` / `borderSubtle`.
+- Migrated: `RichInlineTextView` (#hashtag / @mention → interactive, URL →
+  link), `ComposerTextStyling`, `ArticleView` markdown links,
+  `LinkPreviewView` (raw URL → link tier; card = site gray / title white /
+  domain gray + "Open ↗" link tier), `TopZapperPill` (bolt + amount value
+  tier, message gray, capsule `zapSubtle`; now internal), `PostCardView`
+  in-content actions and the "Private" pill, `QuotedNoteView`, `ThreadView`,
+  `NotificationRowView` poll labels / badges / washes, the ARTICLE / MUSIC /
+  PoW badges and both card retry arrows.
+- Not moved (semantic or primary-tier): compose FABs, selected bottom-bar
+  glyph, new-posts pill, zap action tint, bookmark active, repost green,
+  paid amber, unread dot, `.orange` warning glyphs, avatars, curated
+  presets, wallet / onboarding / settings accents.
 
-## Gate 1 — build green; hermetic, serial (MacBook Air)
-```sh
-cd ~/Projects/zc-ios-note-review
-git fetch origin && git checkout concern/note-review && git pull --ff-only
-xcodebuild build-for-testing -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
-  -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-eueeqfatbdatzkdydeposrjcguue \
-  -skipPackagePluginValidation
-xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
-  -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-eueeqfatbdatzkdydeposrjcguue \
-  -skipPackagePluginValidation -parallel-testing-enabled NO \
-  -only-testing:wispTests -resultBundlePath ~/gate-note-review.xcresult
-GATE_KNOWN_FAILURES="FeedRenderableTests/mentionTaggedNoteFollowsReplyGate OnlyFoodIngestParityTests/repost_dropped_whenInnerIsStructuralSpam_orUnparseable OnlyFoodIngestParityTests/poll_isAccepted_andStructuralCapApplies OnlyFoodOwnPublishTests/ownNote_overStructuralCap_isNotInserted" \
-  sh ci_scripts/gate.sh --parse ~/gate-note-review.xcresult
+## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
+- `build-for-testing` (iPhone 17 / OS 26.2, shared DerivedData,
+  `-skipPackagePluginValidation`): **green** at fac5921 and again at
+  ea500a6. Warnings in touched files: **zero** (the only "ThreadView*" hits
+  are `ThreadViewModel.swift`, untouched). Total warning lines 701 —
+  pre-existing Swift 6 diagnostics, none from this branch.
+- Serial runs on the Air (`-parallel-testing-enabled NO`): at fac5921,
+  `ColorHierarchyTests` + `BrandColorParityTests` + `EmptyStateGroundTests`
+  **16/16** in 76 s and `ColorHierarchyRenderTests` **4/4** in 51 s (after
+  two test-only fixes: the nested window host needed `@MainActor`, and the
+  ImageRenderer roots needed `.environment(AppSettings.shared)` for the
+  pill's avatar). At ea500a6, `ColorHierarchyTests` +
+  `ColorHierarchyRenderTests` **10/10** serial. Renders written to
+  `wispTests/.zc_snapshot_dir`: `hierarchy-ladder-dark`,
+  `hierarchy-ladder-dark-ax2`, `zap-pill-dark`, `zap-pill-dark-no-message`,
+  `rich-text-tiers-dark`.
+- pbxproj: no diff (three-dot). New files are under `wisp/` and `wispTests/`.
+- Gate 4 (by hand) is Seth's device pass: OnlyFood + Follows feeds, a post
+  with #hashtags / @mentions / a long raw URL / a link card, the zap pill,
+  the zap action once zapped, bottom bar, FAB, colourful avatars, dark
+  mode, an accessibility text size, and Settings → Accessibility → Increase
+  Contrast (tiers should snap to full orange).
+
+## Gate 1 — hermetic, serial (Mac Studio / box form)
 ```
-**Result on the Air, 2026-09-19:** build green (three attempts: a Swift 6.2
-frontend crash on a stored-closure default value in the publisher, fixed by an
-explicit `init`; then three isolation warnings in new files, fixed).
-Warnings in touched files at 6058b30: **zero**.
-
-First full serial run (0d1198d): **935 passed / 5 failed / 20 skipped / 960
-total** — #4 (known), the three OnlyFood structural-cap tests above (main's,
-#88, reproduced on a second serial run), and one `RecipeAuthoredFeedTests`
-"signal kill" that passed on rerun.
-
-After the merge of main (Memories #87) and the review fixes (6058b30): **980
-passed / 5 failed / 21 skipped / 1006 total** — the same four known, plus
-`RecipeComposeViewModelTests/addImageBytes_failedUpload_blocksUntilRemoved`
-"timed out waiting for condition" on a 703 s run while the Air was under
-disk pressure (see #91); the branch does not touch recipe compose. A serial
-rerun of that suite was in flight when this file was frozen; its result goes
-in the PR conversation.
-
-**Environmental finding during these runs:** the simulator's test host died at
-launch in `dyld_sim` because the disk had fallen to 6.5 GB — 35 GB of leaked
-`CFNetworkDownload_*.tmp` JPEGs in the wisp app container's `tmp` (issue #91).
-Cleared by hand; the leak resumes with every hosted-window run until fixed. The box's #57 SafetyTests trio passes on the Air, as issue #57
-records. The four failures listed in `GATE_KNOWN_FAILURES` above are the
-Air's post-#85 baseline; a fifth is this concern's.
-
-**Count.** 1006 tests ran; this branch adds **107** over main (`ImageUrlsTests`
-18, `NoteReviewTests` 23, `NoteReviewTriggerTests` 9, `NoteReviewServiceTests`
-18, `NoteReviewViewModelTests` 29, `NoteReviewReplyPublisherTests` 6,
-`NoteReviewLiveTests` 3 opt-in, plus the seven-control width case in
-`BottomBarAndActionRowTests`).
-
-## Gate 2 — unit coverage
-Inside Gate 1: the phase machine (every result → phase, including
-`membershipUnavailable` → error and `≠ membersOnly`, `notMember` →
-`membersOnly`), the four dead-end lines verbatim + the register check (no
-"dish", no "not food") + rotation away from the previous line for every
-line and every roll, `canPost` over `Phase.allCases`, the phase set pinned
-with no upsell/paying, the disclosure footer/defaults/seed rule, the
-per-account preferences; the view model (signing → loading → draft with the
-selected image and capped note text, regenerate skips signing, start over,
-double-tap posts once, post is a no-op from every non-draft phase,
-postTimeout retains the signed event and retry republishes the same id
-without a second sign, failed/signRejected keep the draft, footer only at
-the hand-off, picker); the response mapper (typed codes, status fallbacks,
-bare 403 → error not the gate, 401 → signFailed, `creditsRemaining`
-ignored, compute-client pin); the trigger matrix; `ImageUrls` (Android's
-17 cases + one). New suites alone: 106/106 in 184 s.
-
-## Gate 3 — no credit / purchase surface
-```sh
-git grep -n -i -E 'credit-invoice|credit-status|creditInvoice|creditStatus|UPSELL|PAYING|price|purchase|bolt11|21 sat|invoice' -- \
-  'wisp/NoteReview*' 'wisp/ImageUrls.swift' 'wispTests/NoteReview*' 'wispTests/ImageUrlsTests.swift'
-git diff origin/main...HEAD -- PostCardView.swift FeatureFlags.swift | grep -i -E 'credit|upsell|paying|price|purchase|invoice'
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests
 ```
-Expected: the first prints only comment lines that name what is absent
-(`NoteReview.swift` header, `NoteReviewPreferences.swift`, `NoteReviewService.swift`
-header, the service test's `creditsRemaining`-is-ignored case); no code
-symbol, no phase, no copy. The second prints only `FeatureFlags`' pre-existing
-`noteReviewCreditPurchaseEnabled` context (unchanged, still hard `false`,
-pinned by `ZapGateTests.sellNothingFlagsStayOff`). Verified at c0b1a2e.
+Pass = main's failure set on that machine and nothing else; judge the
+`.xcresult` via `xcresulttool get test-results summary`
+(`sh ci_scripts/gate.sh --parse <bundle>`). Expect +10 tests over main
+(`ColorHierarchyTests` 6, `ColorHierarchyRenderTests` 4).
 
-## Gate 4 — LIVE, member key: both modes draft
-```sh
-cd ~/Projects/zc-ios-note-review
-curl -s 'https://zap.cooking/api/membership?pubkeys=937bbd4b37352ac75743b04d9e043b44d03c3333e333f0ec35049dc95236c02d'   # must say "active":true
-touch wispTests/.note_review_live_enable    # wispTests/.zc_member_nsec is in place (mode 600)
-xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' \
-  -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-eueeqfatbdatzkdydeposrjcguue \
-  -skipPackagePluginValidation -parallel-testing-enabled NO \
-  -only-testing:wispTests/NoteReviewLiveTests 2>&1 | grep -E 'NoteReview live:|✘|✔'
-rm wispTests/.note_review_live_enable
+## Gate 2 — the colour suites alone
 ```
-**Run 1 (2026-09-19, first key):** `NOT_MEMBER` — that key never had a
-membership (`active: false`). **Run 2 (replacement key, `active: true` to
-2027-09-01):** comment drafted in **10.8 s** (172 chars); recipe mode came back
-`NOT_FOOD` in 3.0 s for the produce-collage fixture, which the client mapped to
-the dead end correctly. Fixture switched to a single dish (pizza margherita);
-rerun result in the PR conversation.
+xcodebuild test -project wisp.xcodeproj -scheme wisp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -skipPackagePluginValidation \
+  -parallel-testing-enabled NO \
+  -only-testing:wispTests/ColorHierarchyTests \
+  -only-testing:wispTests/ColorHierarchyRenderTests \
+  -only-testing:wispTests/BrandColorParityTests
+```
+Put a directory in `wispTests/.zc_snapshot_dir` first to keep the PNGs.
 
-## Gate 5 — LIVE §7.13: publish a drafted reply, verify, delete, key held
-Same command as Gate 4 (`publishDraftedReply_verify_delete_keyHeldUntilGone`).
-An EPHEMERAL key publishes the parent note and the reply to
-`RelayDefaults.defaults`; the member key only signs the NIP-98 draft
-request; both events are re-queried, then deleted with the key held until
-the ids are gone. **PASSED on the Air, 2026-09-19 (run 2):** parent
-`a7b57fe9…525b` accepted by primal, nos.lol and nostr.net; member draft landed
-in **5.1 s**; reply `5ebe3482…9d4e` posted through the real publisher,
-re-queried on the defaults (`verified=true`); both deleted with the key held —
-delete accepted on all three relays for each id, re-queries empty. Nothing
-leaked. (Run 1 with the non-member key exercised the same cleanup path.)
-
-## Gate 6 — BY HAND: non-member sees message-only copy
-Seth's device pass. Backed live: `nonMember_isTypedNotMember_andLandsTheMessageOnlyGate`
-**PASSED** on the Air twice (ephemeral key → typed `NOT_MEMBER` in 10.1 s /
-4.5 s → view model phase `membersOnly`). The sheet renders `Cheffy.membersOnlyMessage`
-and Close, identifier `note-review-gated`; no price, invoice, or link-out.
-
-## Gate 7 — pbxproj
-`git diff origin/main...HEAD --stat -- wisp.xcodeproj` → empty at c0b1a2e.
-All new files are under `wisp/` / `wispTests/`.
+## Gate 6 — project file
+```
+git diff origin/main...HEAD --stat -- wisp.xcodeproj
+```
+Must print nothing.

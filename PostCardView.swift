@@ -413,11 +413,11 @@ struct PostCardView: View {
                             Text("Private")
                                 .font(.caption2.weight(.semibold))
                         }
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
-                            Capsule().fill(Color.wispPrimary.opacity(0.12))
+                            Capsule().fill(Color.zapSubtleFill)
                         )
                         .accessibilityLabel("Private reply")
                     }
@@ -586,7 +586,7 @@ struct PostCardView: View {
                             } label: {
                                 Text(contentExpanded ? "Show less" : "Show more")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.wispPrimary)
+                                    .foregroundStyle(Color.zapInteractive)
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 7)
                                     .background(Color.wispSurfaceVariant.opacity(0.6), in: Capsule())
@@ -2111,12 +2111,12 @@ struct PostCardView: View {
                 } label: {
                     Text("Retry")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                 }
                 .buttonStyle(.plain)
             } else {
                 ProgressView()
-                    .tint(Color.wispPrimary)
+                    .tint(Color.zapInteractive)
                     .scaleEffect(0.8)
                 Text("Loading reposted note…")
                     .font(.caption)
@@ -2216,7 +2216,12 @@ private struct TapToExpand: ViewModifier {
 
 // MARK: - Top Zapper Pill
 
-private struct TopZapperPill: View {
+/// The top zap on a post: avatar, bolt, amount, and the zap message when
+/// there is one (e.g. "Gratitude from Zap Cooking"). Hierarchy
+/// (ZapColors.swift): the bolt and the amount are the value tier and read
+/// first; the message is supporting gray; the capsule is a subtle accent
+/// hairline so the pill frames the amount without competing with it.
+struct TopZapperPill: View {
     let zapper: Zapper
     let profile: ProfileData?
     let onTap: () -> Void
@@ -2225,13 +2230,17 @@ private struct TopZapperPill: View {
         Button(action: onTap) {
             HStack(spacing: 6) {
                 CachedAvatarView(url: profile?.picture, size: 18)
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 11))
-                Text(CurrencyFormatter.short(sats: zapper.sats))
-                    .font(.caption2.weight(.semibold))
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11))
+                    Text(CurrencyFormatter.short(sats: zapper.sats))
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Color.wispZapColor)
                 if !zapper.message.isEmpty {
                     Text(zapper.message)
                         .font(.caption2)
+                        .foregroundStyle(Color.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -2239,9 +2248,8 @@ private struct TopZapperPill: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .overlay(
-                Capsule().stroke(Color.wispZapColor.opacity(0.3), lineWidth: 1)
+                Capsule().stroke(Color.zapSubtle, lineWidth: 1)
             )
-            .foregroundStyle(Color.wispZapColor)
         }
         .buttonStyle(.plain)
     }
@@ -2651,7 +2659,7 @@ private struct NoteDetailsPanel: View {
                 } label: {
                     Text(relaysExpanded ? "Show less" : "+\(hidden) more")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)
