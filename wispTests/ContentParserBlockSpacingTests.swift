@@ -65,6 +65,30 @@ struct ContentParserBlockSpacingTests {
         #expect(t == "thanks")
     }
 
+    /// A blank line that carries indentation is still a blank line: a
+    /// `\n`-only trim used to leave `please pay\n   ` behind, and the
+    /// indented remainder rendered as a full text row above the card.
+    @Test func indentedBlankLineBeforeInvoiceIsTrimmed() throws {
+        let segments = ContentParser.parse(content: "please pay\n   \n\(Self.invoice)", tags: [])
+        #expect(segments.count == 2)
+        guard case .text(let t) = segments.first else { return }
+        #expect(t == "please pay")
+    }
+
+    /// CRLF-terminated posts: neither side of the card may keep a stray `\r`.
+    @Test func crlfAroundInvoiceIsTrimmedOnBothSides() throws {
+        let segments = ContentParser.parse(
+            content: "pay\r\n\r\n\(Self.invoice)\r\n\r\nthanks", tags: []
+        )
+        #expect(segments.count == 3)
+        guard case .text(let head) = segments.first, case .text(let tail) = segments.last else {
+            Issue.record("expected text on both sides of the invoice, got \(segments)")
+            return
+        }
+        #expect(head == "pay")
+        #expect(tail == "thanks")
+    }
+
     @Test func singleNewlineBeforeInvoiceAlsoTightened() throws {
         let segments = ContentParser.parse(content: "pay\n\(Self.invoice)", tags: [])
         guard case .text(let t) = segments.first else { return }

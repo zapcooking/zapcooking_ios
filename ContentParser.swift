@@ -110,9 +110,11 @@ enum ContentParser {
     private static let leadingBlankLinesRegex = try! NSRegularExpression(
         pattern: #"\A[ \t\r\n]*\n"#
     )
-    /// Everything from the first trailing newline to the end of the post.
+    /// Everything from the first trailing newline to the end of the post,
+    /// plus any spaces / tabs / a stray CR sitting on the same line before it
+    /// so a CRLF-terminated post doesn't keep a lone `\r`.
     private static let trailingBlankLinesRegex = try! NSRegularExpression(
-        pattern: #"\n[ \t\r\n]*\z"#
+        pattern: #"[ \t\r]*\n[ \t\r\n]*\z"#
     )
 
     /// Lightning / email address shape (`user@domain.tld`). Deliberately broad;
@@ -354,6 +356,14 @@ enum ContentParser {
             return [seg]
         }
 
+        /// Shared by passes 5 and 6: delete every match of `regex` in `s`.
+        func strip(_ s: String, _ regex: NSRegularExpression) -> String {
+            let ns = s as NSString
+            return regex.stringByReplacingMatches(
+                in: s, range: NSRange(location: 0, length: ns.length), withTemplate: ""
+            )
+        }
+
         // Pass 5: trim blank lines adjacent to block segments.
         //
         // Block segments (image, video, quoted note, invoice, link preview…)
@@ -393,13 +403,13 @@ enum ContentParser {
                     pruned.append(seg)
                     continue
                 }
+                // Whitespace-aware on purpose: a blank line that carries
+                // indentation (`text\n   \n<card>`) or a CRLF terminator is
+                // still a blank line, and a `\n`-only trim would leave the
+                // indented / `\r` remainder behind as a full text row.
                 var t = text
-                if prevIsBlock {
-                    while t.first == "\n" { t.removeFirst() }
-                }
-                if nextIsBlock {
-                    while t.last == "\n" { t.removeLast() }
-                }
+                if prevIsBlock { t = strip(t, leadingBlankLinesRegex) }
+                if nextIsBlock { t = strip(t, trailingBlankLinesRegex) }
                 if t.allSatisfy({ $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" }) { continue }
                 pruned.append(.text(t))
             }
@@ -426,13 +436,6 @@ enum ContentParser {
                     in: s, range: NSRange(location: 0, length: ns.length), withTemplate: "\n\n"
                 )
             }
-            func strip(_ s: String, _ regex: NSRegularExpression) -> String {
-                let ns = s as NSString
-                return regex.stringByReplacingMatches(
-                    in: s, range: NSRange(location: 0, length: ns.length), withTemplate: ""
-                )
-            }
-
             var normalized: [ContentSegment] = []
             normalized.reserveCapacity(segments.count)
             let lastIndex = segments.count - 1

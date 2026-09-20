@@ -25,6 +25,13 @@ struct ContentParserBlankLineTests {
 
     // MARK: - Surplus is removed
 
+    /// CRLF padding is padding too — and the `\r` before the final `\n` must
+    /// go with it, or the post keeps an invisible trailing character.
+    @Test func trailingCrlfPaddingIsDropped() throws {
+        #expect(try soleText("gm\r\n\r\n") == "gm")
+        #expect(try soleText("gm\r\n") == "gm")
+    }
+
     @Test func trailingNewlinesAreDropped() throws {
         #expect(try soleText("gm\n\n\n") == "gm")
         #expect(try soleText("gm\n") == "gm")
