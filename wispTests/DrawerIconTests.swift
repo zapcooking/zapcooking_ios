@@ -122,6 +122,17 @@ struct NavGlyphAssetTests {
         #expect(outline < fill, "outline \(outline) px vs fill \(fill) px")
     }
 
+    /// The Gadgets cup is its own artwork, not a reused nav glyph, and it
+    /// has to be template-rendered so the bar's tint reaches it.
+    @Test func gadgetsCup_isBundled_andTemplateRendered() throws {
+        let cup = try #require(UIImage(named: "ZapNavGadgets"))
+        #expect(cup.renderingMode != .alwaysOriginal)
+        for other in ["ZapNavFlame", "ZapNavRecipes"] {
+            let sibling = try #require(UIImage(named: other))
+            #expect(Self.render(cup) != Self.render(sibling), "cup matches \(other)")
+        }
+    }
+
     private static func render(_ image: UIImage) -> Data? {
         let side: CGFloat = 64
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in

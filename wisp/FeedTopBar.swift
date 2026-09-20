@@ -13,9 +13,10 @@ enum FeedTopBarControl: Equatable, Hashable, CaseIterable {
     /// Leading, general kinds only: the content-filter cycle. Hidden on the
     /// hashtag-backed OnlyFood feed (unchanged).
     case contentFilter
-    /// Leading: the Gadgets sheet (timers). Android carries the same grid
-    /// glyph beside its avatar, and the drawer row alone made a timer three
-    /// taps away mid-cook. Visible on every kind.
+    /// Trailing: the Gadgets sheet (timers), drawn with Android's measuring
+    /// cup. Android groups it with the Intelligence atom in the bar's
+    /// actions; the drawer row alone made a timer three taps away mid-cook.
+    /// Visible on every kind.
     case gadgets
     /// Centre: the kind picker, overlaid so it stays centred.
     case feedPicker
@@ -30,9 +31,11 @@ enum FeedTopBarLayout {
     /// drawer's Feed Relay row (and the picker's Relay entry); Online Now was
     /// removed from the app.
     static func controls(kind: FeedKind, cheffyVisible: Bool) -> [FeedTopBarControl] {
-        var controls: [FeedTopBarControl] = [.avatar, .gadgets]
+        var controls: [FeedTopBarControl] = [.avatar]
         if kind != .onlyFood { controls.append(.contentFilter) }
         controls.append(.feedPicker)
+        // Trailing group, in Android's order: gadgets then the AI entry.
+        controls.append(.gadgets)
         if cheffyVisible { controls.append(.cheffy) }
         return controls
     }
@@ -43,8 +46,10 @@ enum FeedTopBarLayout {
     static let cheffyTargetSize: CGFloat = 44
     static let cheffyGlyphSize: CGFloat = 30
 
-    /// The Gadgets glyph sits between the 32 pt avatar and the 30 pt Cheffy
-    /// mark, inside the same 44 pt target every bar control gets.
+    /// The Gadgets cup sits beside the 30 pt Cheffy mark inside the same
+    /// 44 pt target every bar control gets. Android draws its cup a touch
+    /// smaller than its neighbours so the full-bleed artwork matches their
+    /// visual height; same trick here.
     static let gadgetsTargetSize: CGFloat = 44
     static let gadgetsGlyphSize: CGFloat = 22
 }

@@ -50,18 +50,24 @@ struct FeedTopBarPolishTests {
         }
     }
 
-    /// Gadgets rides beside the avatar on every kind — Android puts the same
-    /// grid glyph there, and a timer three taps deep in the drawer is three
-    /// too many with something on the hob.
-    @Test func gadgetsEntry_sitsBesideTheAvatar_onEveryKind() {
+    /// Gadgets rides in the trailing group on every kind, ahead of the AI
+    /// entry — Android's own order. A timer three taps deep in the drawer is
+    /// three too many with something on the hob.
+    @Test func gadgetsEntry_leadsTheTrailingGroup_onEveryKind() throws {
         for kind in everyKind {
             for cheffy in [true, false] {
                 let controls = FeedTopBarLayout.controls(kind: kind, cheffyVisible: cheffy)
                 #expect(controls.contains(.gadgets), "\(kind)")
                 #expect(controls.filter { $0 == .gadgets }.count == 1, "\(kind)")
-                let avatar = try? #require(controls.firstIndex(of: .avatar))
-                let gadgets = try? #require(controls.firstIndex(of: .gadgets))
-                #expect(gadgets == (avatar ?? -2) + 1, "\(kind): gadgets must follow the avatar")
+                let gadgets = try #require(controls.firstIndex(of: .gadgets))
+                let picker = try #require(controls.firstIndex(of: .feedPicker))
+                #expect(gadgets > picker, "\(kind): gadgets is a trailing control")
+                if cheffy {
+                    let cheffyIdx = try #require(controls.firstIndex(of: .cheffy))
+                    #expect(gadgets < cheffyIdx, "\(kind): gadgets comes before the AI entry")
+                } else {
+                    #expect(controls.last == .gadgets, "\(kind)")
+                }
             }
         }
         #expect(FeedTopBarLayout.gadgetsTargetSize >= 44)
