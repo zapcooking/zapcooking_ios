@@ -10,6 +10,7 @@ import Foundation
 /// singleton, and they clear it. Run in parallel, a clear wipes another
 /// test's data out from under it (upstream learned this the hard way).
 @Suite(.serialized)
+@MainActor
 struct DeletionTests {
 
     private let alice = String(repeating: "a", count: 64)
@@ -153,6 +154,38 @@ struct DeletionTests {
             ["p", bob]
         ])
         #expect(Nip09.deletedEventIds(deletion) == [noteId, otherNoteId])
+    }
+
+    /// The helper applies the same NIP-09 rule as ingest: a hint naming
+    /// someone other than the signer is not a deletion, and an empty id is
+    /// not a target.
+    @Test func deletedEventIdsAppliesTheAuthorHintAndSkipsEmptyIds() {
+        let deletion = event(kind: 5, pubkey: alice, tags: [
+            ["e", noteId, "wss://relay.example.com", alice],
+            ["e", otherNoteId, "", bob],
+            ["e", ""],
+            ["e", noteId, "", ""],
+        ])
+        #expect(Nip09.deletedEventIds(deletion) == [noteId, noteId])
+    }
+
+    /// A kind-5 with mixed hints must not record the mismatched target's
+    /// signer either: the strict lookup the quote card uses reads the signer
+    /// map, and it has to agree with the id set the app-wide gate reads.
+    @Test func ingestRecordsNoSignerForAMismatchedHint() {
+        DeletionTracker.shared.clear()
+        defer { DeletionTracker.shared.clear() }
+        DeletionTracker.shared.ingest(event(kind: 5, pubkey: alice, tags: [
+            ["e", noteId],
+            ["e", otherNoteId, "wss://relay.example.com", bob],
+            ["e", ""],
+        ]))
+        #expect(DeletionTracker.shared.isDeleted(noteId))
+        #expect(DeletionTracker.shared.isDeleted(eventId: noteId, author: alice))
+        #expect(!DeletionTracker.shared.isDeleted(otherNoteId))
+        #expect(!DeletionTracker.shared.isDeleted(eventId: otherNoteId, author: alice))
+        #expect(!DeletionTracker.shared.isDeleted(eventId: otherNoteId, author: bob))
+        #expect(!DeletionTracker.shared.isDeleted(""))
     }
 
     @Test func deletedEventIdsIgnoresOtherKinds() {

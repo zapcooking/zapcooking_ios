@@ -28,15 +28,18 @@ nonisolated final class QuoteGraph: @unchecked Sendable {
 
     private static let storageKey = "quote_graph_edges"
 
-    /// quoting event id -> the event id it quoted, plus that note's author
-    /// when the `q` tag named one. The author is what a NIP-09 signer check
-    /// needs, and what an outbox lookup searches with.
+    /// One `q` tag: the event id it quoted, plus that note's author when the
+    /// tag named one. The author is what a NIP-09 signer check needs, and
+    /// what an outbox lookup searches with.
     struct Edge: Codable, Equatable {
         let quotedId: String
         let quotedAuthor: String?
     }
 
-    private var edges: [String: Edge] = [:]
+    /// quoting event id -> every note it quoted, in the order they were
+    /// seen. A note can carry several `q` tags (`EventStore.persist` records
+    /// each one), and each is a link some chain may depend on.
+    private var edges: [String: [Edge]] = [:]
     /// Insertion order, oldest first, for the bound below.
     private var order: [String] = []
     private let lock = NSLock()
@@ -54,21 +57,26 @@ nonisolated final class QuoteGraph: @unchecked Sendable {
     func record(eventId: String, quotedId: String, quotedAuthor: String?) {
         guard !eventId.isEmpty, !quotedId.isEmpty, eventId != quotedId else { return }
         lock.lock()
-        let existing = edges[eventId]
-        // An author learned later is worth upgrading to — the first sighting
-        // may have come from a bare `note1…` with no attribution.
-        let isNew = existing == nil
-        let gainsAuthor = existing?.quotedAuthor == nil && quotedAuthor != nil
-        guard isNew || gainsAuthor else {
-            lock.unlock()
-            return
-        }
-        edges[eventId] = Edge(quotedId: quotedId, quotedAuthor: quotedAuthor)
-        if isNew {
-            order.append(eventId)
-            while order.count > Self.maxEdges {
-                let oldest = order.removeFirst()
-                edges.removeValue(forKey: oldest)
+        var list = edges[eventId] ?? []
+        if let i = list.firstIndex(where: { $0.quotedId == quotedId }) {
+            // An author learned later is worth upgrading to — the first
+            // sighting may have come from a bare `note1…` with no attribution.
+            guard list[i].quotedAuthor == nil, quotedAuthor != nil else {
+                lock.unlock()
+                return
+            }
+            list[i] = Edge(quotedId: quotedId, quotedAuthor: quotedAuthor)
+            edges[eventId] = list
+        } else {
+            let isNewQuoter = list.isEmpty
+            list.append(Edge(quotedId: quotedId, quotedAuthor: quotedAuthor))
+            edges[eventId] = list
+            if isNewQuoter {
+                order.append(eventId)
+                while order.count > Self.maxEdges {
+                    let oldest = order.removeFirst()
+                    edges.removeValue(forKey: oldest)
+                }
             }
         }
         lock.unlock()
@@ -77,12 +85,17 @@ nonisolated final class QuoteGraph: @unchecked Sendable {
 
     // MARK: - Read
 
-    /// What `eventId` quoted, if this client ever saw it.
+    /// The first note `eventId` quoted, if this client ever saw it.
     func quoted(by eventId: String) -> Edge? {
+        quotes(by: eventId).first
+    }
+
+    /// Every note `eventId` quoted, in the order its `q` tags were recorded.
+    func quotes(by eventId: String) -> [Edge] {
         lock.lock()
-        let edge = edges[eventId]
+        let list = edges[eventId] ?? []
         lock.unlock()
-        return edge
+        return list
     }
 
     /// The author of a note, as remembered from whoever quoted it. Answers
@@ -90,8 +103,10 @@ nonisolated final class QuoteGraph: @unchecked Sendable {
     func author(of quotedId: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
-        for edge in edges.values where edge.quotedId == quotedId {
-            if let author = edge.quotedAuthor { return author }
+        for list in edges.values {
+            for edge in list where edge.quotedId == quotedId {
+                if let author = edge.quotedAuthor { return author }
+            }
         }
         return nil
     }
@@ -129,10 +144,16 @@ nonisolated final class QuoteGraph: @unchecked Sendable {
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let stored = try? JSONDecoder().decode([String: Edge].self, from: data) else { return }
-        edges = stored
+        guard let data = UserDefaults.standard.data(forKey: Self.storageKey) else { return }
+        if let stored = try? JSONDecoder().decode([String: [Edge]].self, from: data) {
+            edges = stored
+        } else if let single = try? JSONDecoder().decode([String: Edge].self, from: data) {
+            // The first shape this key held: one edge per quoting id.
+            edges = single.mapValues { [$0] }
+        } else {
+            return
+        }
         // Order is lost across a restart; seed it so the bound still applies.
-        order = Array(stored.keys)
+        order = Array(edges.keys)
     }
 }

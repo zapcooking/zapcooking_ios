@@ -55,6 +55,14 @@ nonisolated final class DeletionTracker: @unchecked Sendable {
 
     private let saveQueue = DispatchQueue(label: "talk.wisp.deletion-tracker.save", qos: .utility)
 
+    /// Synchronous critical section for the async paths: `NSLock.lock()` is
+    /// unavailable from an async context, a sync helper is not.
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
     private init() {
         load()
     }
@@ -76,23 +84,17 @@ nonisolated final class DeletionTracker: @unchecked Sendable {
     /// seconds and could trip the watchdog.
     @discardableResult
     func ingestBatch(_ events: [NostrEvent]) -> Bool {
+        // NIP-09: only the original author may delete. `Nip09.deletedEventIds`
+        // applies the rule once for both records below — the id set the
+        // app-wide gate reads and the signer-per-id map the quote card
+        // verifies against the target's real author — so a kind-5 with mixed
+        // `e` tags (some hinting at another author) can never mark an id as
+        // deleted through one path and not the other.
         var newIds: [String] = []
-        for event in events where event.kind == Nip09.kindDeletion {
-            let author = event.pubkey
-            for tag in event.tags {
-                guard tag.count >= 2, tag[0] == "e" else { continue }
-                // NIP-09: only the original author may delete. The kind-5 can
-                // carry a relay hint in position 2 that we ignore here, and an
-                // optional author hint in position 3 — if present, it must match.
-                if tag.count >= 4, !tag[3].isEmpty, tag[3] != author { continue }
-                newIds.append(tag[1])
-            }
-        }
-        // Signer per id, for callers that can verify it against the target's
-        // real author rather than the kind-5's own optional hint.
         var signers: [(id: String, signer: String)] = []
         for event in events where event.kind == Nip09.kindDeletion {
             for id in Nip09.deletedEventIds(event) {
+                newIds.append(id)
                 signers.append((id, event.pubkey))
             }
         }
@@ -160,10 +162,9 @@ nonisolated final class DeletionTracker: @unchecked Sendable {
         guard let author else { return false }
         if isDeleted(eventId: eventId, author: author) { return true }
 
-        lock.lock()
-        let existing = inflightChecks[eventId]
-        let alreadyChecked = checkedOverNetwork.contains(eventId)
-        lock.unlock()
+        let (existing, alreadyChecked) = withLock {
+            (inflightChecks[eventId], checkedOverNetwork.contains(eventId))
+        }
 
         if let existing {
             await existing.value
@@ -173,25 +174,20 @@ nonisolated final class DeletionTracker: @unchecked Sendable {
 
         let relays = checkRelays(hints: relayHints)
         let task = Task {
-            let events = await RelayPool.query(
-                relays: relays,
-                filter: Nip09.deletionFilter(eventId: eventId, authors: [author]),
-                timeout: 5
-            )
+            let filter = await Nip09.deletionFilter(eventId: eventId, authors: [author])
+            let events = await RelayPool.query(relays: relays, filter: filter, timeout: 5)
             // Route through the normal ingest so the app-wide gate and the
             // signer map learn about it too.
             DeletionTracker.shared.ingestBatch(events)
         }
-        lock.lock()
-        inflightChecks[eventId] = task
-        lock.unlock()
+        withLock { inflightChecks[eventId] = task }
 
         await task.value
 
-        lock.lock()
-        inflightChecks[eventId] = nil
-        checkedOverNetwork.insert(eventId)
-        lock.unlock()
+        withLock {
+            inflightChecks[eventId] = nil
+            checkedOverNetwork.insert(eventId)
+        }
 
         return isDeleted(eventId: eventId, author: author)
     }

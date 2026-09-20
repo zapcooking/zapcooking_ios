@@ -69,6 +69,25 @@ struct QuoteGraphTests {
         #expect(g.quoted(by: quoter) == nil)
     }
 
+    /// A note with several `q` tags is several links. `EventStore.persist`
+    /// records each one; losing all but the first would strand every chain
+    /// that ran through the others.
+    @Test func everyQuoteOfANoteIsKept() {
+        let g = fresh()
+        let second = String(repeating: "4", count: 64)
+        let secondAuthor = String(repeating: "5", count: 64)
+        g.record(eventId: quoter, quotedId: quoted, quotedAuthor: author)
+        g.record(eventId: quoter, quotedId: second, quotedAuthor: secondAuthor)
+        #expect(g.quotes(by: quoter).map(\.quotedId) == [quoted, second])
+        #expect(g.quoted(by: quoter)?.quotedId == quoted)
+        #expect(g.author(of: quoted) == author)
+        #expect(g.author(of: second) == secondAuthor)
+        // The same tag seen twice is one edge, and can still gain an author.
+        g.record(eventId: quoter, quotedId: second, quotedAuthor: nil)
+        #expect(g.quotes(by: quoter).count == 2)
+        #expect(g.author(of: second) == secondAuthor)
+    }
+
     @Test func clearEmptiesTheGraph() {
         let g = fresh()
         g.record(eventId: quoter, quotedId: quoted, quotedAuthor: author)
