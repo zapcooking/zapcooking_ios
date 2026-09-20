@@ -1441,6 +1441,71 @@ in 3.5), grocery lists + meal planner (NIP-44
 self-encrypted, `GroceryEvents`/`MealPlanEvents`), NIP-22 comments, trend pill,
 Memories, recipe packs.
 
+#### Upstream carry-over (post-fork Wisp iOS)
+
+The fork base is upstream `d51f260` (2026-07-28); upstream merged 39 PRs /
+59 non-merge commits through `4e8a5d3` (2026-09-16) that the fork never
+reviewed. The full audit — per-file port plans, ordering, verification —
+lives in `docs/wisp_ios_feature_comparison_and_backlog.md`. Phase 1 (13
+concerns, one PR each) is tracked as issues #100–#112.
+
+**Recommended to pull forward into Phase 1** (two tiny wallet correctness
+fixes, ~30 lines total — cheap, and the symptom is alarming):
+
+1. `3abf5d0` — Spark publishes a fabricated `0` balance before the first
+   sync and `WalletStore` caches it, so a funded wallet renders a
+   confident "0 sats" and reloads it on next cold launch. Gate the zero
+   behind `hasSyncedOnce`. **Issue #113.**
+2. `714e6aa` — don't render a zero balance while one is still loading.
+   **Issue #113.**
+
+**Ranked backlog** (recorded so it isn't lost; every SHA is upstream):
+
+3. **Strict inbox-only routing** — `e3b0f79` + `2ad8bc0` (~130 lines
+   across `ThreadViewModel`, `NotificationsViewModel`, `ArticleViewModel`).
+   Deliberately excluded from Phase 1: it removes the scored/fallback
+   safety nets so a thread or notification with no discoverable NIP-65
+   list goes cache-only and sends no query at all. That is the right
+   direction, but it should land after the fork's relay-decommissioning
+   work (`RelayDecommission`, `RelayListRepair`) settles and with a
+   measurement of how many food-community authors actually publish
+   kind-10002. `2ad8bc0` is not separable — without it engagement ids
+   burn and the spinner never clears.
+4. **On-chain send and receive** — `9a3e067`, `e4e4e09`, plus
+   `5a5fc8a`/`7e526fe`. Already filed as issue #63. ~700 lines, 4 new
+   files under `wisp/`. Largest single feature upstream added.
+5. **Wallet display correctness** — `978c8ad` (token amounts rendered as
+   sats, +302 lines), `57b635c` (conversions mislabelled "Received", +59).
+6. **Emoji pack discovery** — `f3dd49b`, `ced9682`, `ec1e088`, `1edf5e1`,
+   `40d4a64` (~500 lines, 2 new views under `wisp/`). Packs are currently
+   coordinate-pasted only. Includes naddr sharing, drifted-relay
+   resolution and a low-quality/offensive filter. Good fit for a food
+   community later; no correctness impact.
+7. **Feed articles filter** — `c405e5b`. The follows-feed subscription
+   (`FeedViewModel`) never requests kind 30023, so articles from follows
+   are invisible, and `FeedContentFilter` folds articles into `.notes`.
+   Deferred only because `FeedViewModel` is the fork's most-rewritten
+   file (416 lines diverged); revisit right after the article-reading
+   port (issue #109) lands.
+8. **NWC connection-string export** — `64ae96f` (+201-line
+   `wisp/NwcConnectionStringView.swift`).
+9. **Lightning-address prompt on the balance screen** — `6df1471`
+   (~26 lines).
+10. **Login single-entry refactor** — `32f4b0c` in full (the part scoped
+    out of Phase 1 concern 13 / issue #112). Only worth doing if the
+    fork's auth surface is being reworked anyway.
+11. **Repost kind 16** — `9de54de`. Upstream only added a `TODO`; both
+    trees hardcode `kind: 6` in `RepostSender.swift:46` for non-kind-1
+    targets. No gap versus upstream, but a real NIP-18 violation in
+    both. Filed as its own bug: issue #114.
+
+**Not carried (fork diverged deliberately, recorded so nobody re-audits
+them):** `1dddc3e` client tag `Wisp` → `Wisp iOS` (the fork sets its own);
+the Google Drive backup surface (`GoogleAuth*`, `DriveBackupService.swift`)
+predates the fork base and was removed on purpose; upstream has no NIP-56
+reporting — `ReportSender`/`ReportSheet`/`ReportedContent`/`Nip56.swift`
+are fork-only and must be preserved through every port above.
+
 ---
 
 ## 6. Conventions for agents
