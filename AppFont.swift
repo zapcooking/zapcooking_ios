@@ -1,8 +1,31 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 enum AppFont {
     private static var large: Bool { AppSettings.shared.largeText }
+
+    /// Orbitron Bold — the countdown face, bundled from the same
+    /// `orbitron_bold.ttf` Android uses for its timer card and floating bar.
+    /// Deliberately outside the large-text scale: the digits are already
+    /// display-sized and the card is laid out around a fixed height.
+    ///
+    /// Falls back to a bold monospaced system face if the font ever fails to
+    /// register, so a missing resource degrades to legible digits rather
+    /// than silently swapping in the proportional body face — which is what
+    /// SwiftUI's `Font.custom` does on a miss, and what made the mismatch
+    /// hard to spot.
+    static func timerDisplay(size: CGFloat) -> Font {
+        isOrbitronAvailable
+            ? .custom(orbitronBold, fixedSize: size)
+            : .system(size: size, weight: .bold, design: .monospaced)
+    }
+
+    static let orbitronBold = "Orbitron-Bold"
+
+    static var isOrbitronAvailable: Bool {
+        UIFont(name: orbitronBold, size: 12) != nil
+    }
 
     static var titleLarge: Font {
         .system(size: large ? 22 : 20, weight: .bold)

@@ -21,6 +21,10 @@
 	<array>
 		<string>lightning</string>
 	</array>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Orbitron-Bold.ttf</string>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Zap Cooking saves images and videos from posts to your Photos library.</string>
 	<key>UIBackgroundModes</key>

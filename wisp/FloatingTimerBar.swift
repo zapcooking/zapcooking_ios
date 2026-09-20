@@ -44,7 +44,7 @@ private struct FloatingTimerBarContent: View {
             }
             HStack(spacing: 8) {
                 Text(timer.status == .done ? "Done!" : CookingTimer.formatRemaining(remaining))
-                    .font(.system(size: 26, weight: .bold, design: .monospaced))
+                    .font(AppFont.timerDisplay(size: 26))
                     .monospacedDigit()
                     .foregroundStyle(timer.status == .done ? Color.wispPrimary : Color.wispOnSurface)
                     .opacity(timer.status == .running ? 1 : 0.75)
