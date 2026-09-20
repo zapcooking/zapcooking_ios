@@ -1,39 +1,44 @@
-# GATE — concern/nip22-comments (#125: NIP-22 comments — ingest, render, publish kind 1111, profile tab)
-Introduces a published kind (1111, only as a reply to an externally-rooted
-comment). The hermetic suites cover kind selection and tag shape
-(`ComposeReplyKindTests`, `Nip22CommentTests`); §7.13's live write is
-Seth's device pass below.
+# GATE — concern/longform-articles (#126: mentions as names, summary, headings, tappable body, share/zap row, quoted-article cards)
+Stacked on #125 (base branch `concern/nip22-comments`); this GATE.md is
+for the three longform commits plus their review fix. Nothing new is
+published by this concern; the zap row goes through the existing
+`ZapRoute` seam.
 
-**Frozen at this commit.** App code is frozen at **b6b3b20**. This GATE.md
+**Frozen at this commit.** App code is frozen at **2bc6806**. This GATE.md
 is the only commit after it and is the HEAD commit — `gate.sh` refuses to
 run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 Rebased onto main at 4d89593 (#120). The MacBook Air is the gate machine
 until the Mac Studio lands; the box block below is the standard form.
+Note: the code hash above is the longform review-fix commit; #125's
+GATE.md commit sits between the two concerns in the stack.
 
 ## What changed since the last gate run
-- Rebased onto main 4d89593. Two conflicts with main's NIP-09 deletion
-  PR (#116), both the same shape — each side added a kind to the same
-  list — resolved as the union: `EventStore.persistedKinds` gains 5 and
-  1111; `ThreadViewModel`'s reply subscription asks for kinds
-  [1, 5, 1111] and keeps the deletion intercept ahead of the reply guard.
-- `Nip22.swift` moved from the repo root to `wisp/Nip22.swift` (own
-  commit) so the synchronized folder registers it; the
-  `project.pbxproj` diff is gone.
-- Copilot review fixes (one commit): `CommentsTabView` uses
-  `FeedEventNavigationLink` and triggers `MediaLookaheadPrefetcher` like
-  the other list tabs; the `nip22ReplyTags` doc no longer says "computed
-  once"; the `Nip22` header says the app composes kind 1111 and names
-  `ExternalRef` correctly. No test delta.
+- Rebased onto the rebased #125 (which is on main 4d89593). No
+  conflicts. The `project.pbxproj` diff this PR inherited from #125 is
+  gone with #125's file move.
+- Copilot review fixes (one commit, six findings):
+  `ArticleZapRow` is gated by `ZapGate.postZapVisible()` like every
+  other post-level zap surface and opens through `ZapRoute.open` (root
+  presenter, wallet-setup prompt on no wallet) instead of a local
+  `.sheet` inside the article `LazyVStack`; Share / Copy Link use
+  `https://zap.cooking/r/{naddr}`; Share presents on the next runloop
+  tick; `ArticleFeedPreview` gains `linked: false` and the quoted
+  kind-30023 branch uses it (the outer `articleTapOrNoteButton` already
+  is the link); `MarkdownBlocks.profilePubkey` strips `nostr:` in any
+  casing. +1 test (mixed-case scheme).
 
-- Warning fix (b6b3b20): the Air's first serial run at 9d4aac3 (1097/2/21 of 1120, baseline pair only) flagged one warning on an added line — `await self?.flushCommentsPending()` in `ProfileViewModel.enqueueComment`, a no-op await on a synchronous MainActor method. Dropped the `await`; re-run below.
+- Re-stacked on #125's re-frozen tip 3b389f9 (its one-line no-op-await warning fix, b6b3b20); this branch's commits are unchanged in content, rebased only.
+
+- Warning fix (2bc6806): the Air's first serial run at 492b382 (1121/2/21 of 1144, baseline pair only) flagged one warning on an added line — `atxHeading`'s new call to `String.trimmingLeadingWhitespace()`, a private extension method that was main-actor-isolated by default and already warned at its pre-existing call site on main. Marked the helper `nonisolated`; both sites are clean. Re-run below.
 
 ## Local (MacBook Air, Xcode 27.0, iOS 26.2 sim, -derivedDataPath shared)
-- Full serial `-only-testing:wispTests` at b6b3b20: **1097 passed / 2 failed / 21 skipped / 1120** — exactly the Air's clean-main set under Xcode 27 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` and #117 `ColorHierarchyTests/textTiers…`; main at 4d89593 ran 1077/3/21 of 1101 the same morning, its third failure a load flake that passes alone; `RecipeComposeViewModelTests` passed in this run and in the 9d4aac3 run). +19 tests over main. Zero warnings on lines this branch adds (verified by intersecting the compiler's warning lines with the branch's added hunks). Machine: Seth's MacBook Air, Xcode 27.0, iOS 26.2 simulator, serial, 490 s of tests.
+- Full serial `-only-testing:wispTests` at 2bc6806: **1121 passed / 2 failed / 21 skipped / 1144** — exactly the Air's clean-main set under Xcode 27 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` and #117 `ColorHierarchyTests/textTiers…`; main at 4d89593 ran 1077/3/21 of 1101 the same morning, its third failure a load flake that passes alone; `RecipeComposeViewModelTests` passed in this run and in the 492b382 run). +43 tests over main (+24 over #125's 1120). Zero warnings on lines this branch adds (compiler warning lines intersected with the branch's added hunks). Machine: Seth's MacBook Air, Xcode 27.0, iOS 26.2 simulator, serial, 530 s of tests.
 - pbxproj: no diff (three-dot).
-- Gate 4 (by hand): open a profile with NIP-22 comments → Comments tab
-  lists them with the source page card on top-level ones; reply to one
-  → the published event is kind 1111 with `I`/`K` root tags (check in
-  another client); a kind-1 reply to a normal note is unchanged.
+- Gate 4 (by hand): open a long article — the zap row under the byline
+  opens the root zap sheet (or the wallet prompt), and disappears when
+  `FeatureFlags.zapsOnPosts` is off; Share hands off a zap.cooking/r/
+  link; a note quoting an article by nevent shows the card and one tap
+  opens the reader once.
 
 ## Gate 1 — hermetic, serial (Mac Studio / box form)
 ```
