@@ -1923,13 +1923,21 @@ final class ComposeViewModel {
             // wallet-connect endpoints someone had put in their NIP-65 list.
             // Same filter-then-cap the feed pool uses; `DraftsViewModel` already
             // caps its copy of this helper at 5.
-            let top = board.scoredRelays
-                .filter { RelayUrlValidator.isConnectable($0.url) }
-                .prefix(5)
-                .map(\.url)
+            let top = Self.capWriteRelays(board.scoredRelays.map(\.url))
             if !top.isEmpty { return top }
         }
         return ["wss://relay.primal.net", "wss://nos.lol"]
+    }
+
+    /// How many scoreboard relays a post advertises / a draft is published to.
+    nonisolated static let maxAdvertisedRelays = 5
+
+    /// The filter-then-cap behind `topWriteRelays()`, split out so the 480-tag
+    /// regression has a hermetic test: `urls` is the scoreboard order (best
+    /// first), the result keeps at most `maxAdvertisedRelays` of the ones a
+    /// socket can actually be opened to.
+    nonisolated static func capWriteRelays(_ urls: [String]) -> [String] {
+        Array(urls.filter { RelayUrlValidator.isConnectable($0) }.prefix(maxAdvertisedRelays))
     }
 }
 
