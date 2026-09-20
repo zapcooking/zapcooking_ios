@@ -30,6 +30,7 @@ struct ComposeView: View {
     @State private var photosPickerMaxCount: Int = 8
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
+    @State private var showTagPicker = false
 
     /// Draft to load on first appear. Nil for `.new` and `.reply`/`.quote` composers.
     /// Loaded from `.task` rather than `init` to defeat SwiftUI's State preservation
@@ -107,7 +108,15 @@ struct ComposeView: View {
                             quoteContextHeader
 
                             if !viewModel.suggestedHashtags.isEmpty {
-                                HashtagSuggestionRow(viewModel: viewModel)
+                                HashtagSuggestionRow(viewModel: viewModel) {
+                                    // Same hop as the GIF picker: let the
+                                    // keyboard collapse before the sheet
+                                    // presents, or the presentation races it.
+                                    contentFocused = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        showTagPicker = true
+                                    }
+                                }
                             }
 
                             actionsRow
@@ -267,6 +276,11 @@ struct ComposeView: View {
         }
         .sheet(isPresented: $showDraftsSheet) {
             DraftsScheduledView(keypair: viewModel.keypair)
+        }
+        .sheet(isPresented: $showTagPicker, onDismiss: { contentFocused = true }) {
+            FoodTagPickerView(viewModel: viewModel)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAccountPicker) {
             accountPickerSheet

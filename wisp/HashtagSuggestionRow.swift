@@ -1,11 +1,12 @@
 import SwiftUI
 import UIKit
 
-/// The OnlyFood composer's tag pills: one row, no wrap, no scroll. As many
-/// of `OnlyFoodCompose.suggestedTags` as fit at the current width (four at
-/// 375pt), in the measured-usage order, then a trailing "+" pill that will
-/// open the full food-tag set. The composer stays calm and the overflow
-/// becomes a discovery affordance instead of clutter.
+/// The OnlyFood composer's tag pills: one row, no wrap, no scroll. Selected
+/// food tags come first (so a tag from the picker or the keyboard is never
+/// hidden), then as many of `OnlyFoodCompose.suggestedTags` as fit at the
+/// current width (three at 375pt), then a trailing "+" pill that opens the
+/// full food-tag set (`FoodTagPickerView`). When more tags are selected
+/// than fit, the "+" reads "+N": N selected tags are past the cut.
 ///
 /// Treatment: an **outlined** chip reads as "available, tap me"; a
 /// **filled** orange chip reads as "on". Orange is reserved for the
@@ -22,9 +23,10 @@ struct HashtagSuggestionRow: View {
     @Bindable var viewModel: ComposeViewModel
     /// Row width before geometry lands: 375pt device minus the 16pt gutters.
     var assumedWidth: CGFloat = 375 - 2 * 16
+    /// The "+" pill's action: the composer presents `FoodTagPickerView`.
+    var onMore: () -> Void = {}
 
     @State private var measuredWidth: CGFloat? = nil
-    @State private var showTagPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -38,12 +40,13 @@ struct HashtagSuggestionRow: View {
             // No trailing Spacer: it would add one more `spacing` gap the
             // fit computation does not count. The frame leads the row.
             HStack(spacing: HashtagPillMetrics.spacing) {
-                ForEach(visibleTags, id: \.self) { tag in
+                ForEach(layout.visible, id: \.self) { tag in
                     pill(tag)
                 }
                 morePill
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.easeInOut(duration: 0.2), value: layout.visible)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
             if viewModel.suggestedTagsOverCap {
                 Text("OnlyFood hides notes with more than \(OnlyFoodCompose.maxTags) tags.")
@@ -58,12 +61,17 @@ struct HashtagSuggestionRow: View {
         .accessibilityIdentifier("tag-suggestions")
     }
 
-    /// The pills that fit, in order.
-    var visibleTags: [String] {
-        let tags = viewModel.suggestedHashtags
-        let count = HashtagPillMetrics.visibleCount(tags: tags, available: measuredWidth ?? assumedWidth)
-        return Array(tags.prefix(count))
+    /// The pills that fit, in order, and how many selected tags are hidden.
+    var layout: (visible: [String], hiddenSelected: Int) {
+        HashtagPillMetrics.layout(
+            order: OnlyFoodCompose.rowOrder(bodyTags: viewModel.hashtags, suggested: viewModel.suggestedHashtags),
+            isSelected: { viewModel.isSuggestedHashtagSelected($0) },
+            available: measuredWidth ?? assumedWidth
+        )
     }
+
+    /// The pills that fit, in order.
+    var visibleTags: [String] { layout.visible }
 
     private var countLabel: some View {
         let count = viewModel.suggestedTagCount
@@ -76,9 +84,54 @@ struct HashtagSuggestionRow: View {
     private func pill(_ tag: String) -> some View {
         let selected = viewModel.isSuggestedHashtagSelected(tag)
         let blocked = !selected && viewModel.suggestedTagsAtCap
-        return Button {
+        return HashtagChip(tag: tag, selected: selected, blocked: blocked) {
             viewModel.toggleSuggestedHashtag(tag)
-        } label: {
+        }
+        .accessibilityIdentifier("tag-pill-\(tag)")
+    }
+
+    /// The trailing "+": outlined like an unselected chip, so it reads as
+    /// one more thing to tap. "+N" when N selected tags are past the cut.
+    private var morePill: some View {
+        let hidden = layout.hiddenSelected
+        return Button(action: onMore) {
+            Group {
+                if hidden > 0 {
+                    Text("+\(hidden)")
+                        .font(HashtagPillMetrics.font)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()
+                } else {
+                    Image(systemName: "plus")
+                        .font(HashtagPillMetrics.font.weight(.semibold))
+                        .frame(width: HashtagPillMetrics.plusGlyphWidth)
+                }
+            }
+            .padding(.horizontal, HashtagPillMetrics.horizontalPadding)
+            .padding(.vertical, HashtagPillMetrics.verticalPadding)
+            .overlay(
+                Capsule().strokeBorder(HashtagPillMetrics.outline, lineWidth: HashtagPillMetrics.strokeWidth)
+            )
+            .foregroundStyle(Color.primary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(hidden > 0 ? "More tags, \(hidden) selected not shown" : "More tags")
+        .accessibilityIdentifier("tag-pill-more")
+    }
+}
+
+/// One tag chip, shared by the row and the picker: outlined when
+/// available, filled with the brand orange when selected, dimmed and
+/// inert when the note is at the cap.
+struct HashtagChip: View {
+    let tag: String
+    let selected: Bool
+    let blocked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
             Text("#\(tag)")
                 .font(HashtagPillMetrics.font)
                 .lineLimit(1)
@@ -99,29 +152,6 @@ struct HashtagSuggestionRow: View {
         .disabled(blocked)
         .accessibilityLabel("#\(tag)")
         .accessibilityValue(selected ? "added" : (blocked ? "tag limit reached" : "not added"))
-        .accessibilityIdentifier("tag-pill-\(tag)")
-    }
-
-    /// The trailing "+": outlined like an unselected chip, so it reads as
-    /// one more thing to tap. The picker it opens is a follow-up; the tap
-    /// is wired to `showTagPicker` and presents nothing yet.
-    private var morePill: some View {
-        Button {
-            showTagPicker = true
-        } label: {
-            Image(systemName: "plus")
-                .font(HashtagPillMetrics.font.weight(.semibold))
-                .frame(width: HashtagPillMetrics.plusGlyphWidth)
-                .padding(.horizontal, HashtagPillMetrics.horizontalPadding)
-                .padding(.vertical, HashtagPillMetrics.verticalPadding)
-                .overlay(
-                    Capsule().strokeBorder(HashtagPillMetrics.outline, lineWidth: HashtagPillMetrics.strokeWidth)
-                )
-                .foregroundStyle(Color.primary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("More tags")
-        .accessibilityIdentifier("tag-pill-more")
     }
 }
 
@@ -157,8 +187,10 @@ nonisolated enum HashtagPillMetrics {
         return ceil(text) + 2 * horizontalPadding + 1
     }
 
-    static func plusWidth() -> CGFloat {
-        plusGlyphWidth + 2 * horizontalPadding
+    /// The "+" pill's width: the glyph, or "+N" measured like a chip.
+    static func plusWidth(hidden: Int = 0, font: UIFont = uiFont()) -> CGFloat {
+        guard hidden > 0 else { return plusGlyphWidth + 2 * horizontalPadding }
+        return pillWidth(label: "+\(hidden)", font: font)
     }
 
     /// How many of `tags` fit in `available` points alongside the "+".
@@ -168,5 +200,20 @@ nonisolated enum HashtagPillMetrics {
         return OnlyFoodCompose.visiblePillCount(
             widths: widths, plusWidth: plusWidth(), spacing: spacing, available: available
         )
+    }
+
+    /// The row: the leading entries of `order` that fit, and how many
+    /// selected entries are past the cut (the "+N").
+    static func layout(
+        order: [String], isSelected: (String) -> Bool, available: CGFloat
+    ) -> (visible: [String], hiddenSelected: Int) {
+        let font = uiFont()
+        let widths = order.map { pillWidth(label: "#\($0)", font: font) }
+        let result = OnlyFoodCompose.rowLayout(
+            widths: widths, selected: order.map(isSelected),
+            plusWidth: { plusWidth(hidden: $0, font: font) },
+            spacing: spacing, available: available
+        )
+        return (Array(order.prefix(result.count)), result.hiddenSelected)
     }
 }
