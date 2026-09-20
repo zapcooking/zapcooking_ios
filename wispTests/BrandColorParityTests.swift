@@ -106,12 +106,14 @@ struct BrandColorParityTests {
 
     // MARK: - Contrast
 
-    /// WCAG 2 contrast of the dark primary — link, hashtag and small-label
-    /// text — on the custom dark grounds. Background and surface clear AA
-    /// for normal text (4.5). SurfaceVariant is Android/web's exact chip
-    /// token (#374151, Themes.kt) where the same orange measures 3.26 —
+    /// WCAG 2 contrast of the dark primary — the 100% tier (FAB, selected
+    /// glyph, zap amounts) — on the dark grounds. Background and surface
+    /// clear AA for normal text (4.5). SurfaceVariant is Android/web's exact
+    /// chip token (#374151, Themes.kt) where the same orange measures 3.26 —
     /// parity wins there, so it's held to the AA large-text floor (3.0)
-    /// instead of quietly drifting the shared token.
+    /// instead of quietly drifting the shared token. The derived interactive
+    /// / link tiers that links, hashtags and mentions use are measured in
+    /// `ColorHierarchyTests`.
     @Test func darkPrimary_clearsAA_onEveryDarkGround() throws {
         let dark = Themes.dark
         let primary = try Self.argb(dark.primary)

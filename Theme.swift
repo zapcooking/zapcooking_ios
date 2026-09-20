@@ -35,6 +35,71 @@ nonisolated struct ResolvedTheme: Equatable {
     /// Static UI everywhere else uses `zap`, not this.
     let zapAnimation: Color
 
+    // MARK: Colour hierarchy (Zap Cooking)
+    //
+    // One hue, four intensities. `primary` is the 100% tier: the compose
+    // FAB, the selected bottom-bar glyph, the zap action and a transferred
+    // sat amount (`zap`), and any other genuinely primary action. The three
+    // tiers below are derived from `primary` here, in one place, so views
+    // consume `Color.zapInteractive` / `.zapLink` / `.zapSubtle` instead of
+    // scattering `.opacity(...)` literals. `ZapColors.swift` documents the
+    // full ladder and which surface uses which tier.
+
+    /// ~90%: `@mentions`, `#hashtags` and other short tappable entities
+    /// inside post content. Clearly interactive, subordinate to the post.
+    let interactive: Color
+    /// ~80%: URLs and link text. Interactive, but visually below mentions
+    /// and well below a zap amount.
+    let link: Color
+    /// ~30%: hairline borders and inactive accent marks (the zap pill's
+    /// capsule stroke).
+    let subtle: Color
+    /// ~14%: tinted washes behind an accent-coloured label (badge fills,
+    /// the highlighted thread row). Lower than `subtle` because a fill
+    /// covers far more area than a stroke.
+    let subtleFill: Color
+    /// True when the system "Increase Contrast" setting was on at resolve
+    /// time: every tier above collapses back to full-strength primary and
+    /// the washes deepen, so nothing tappable drops below the 100% tier's
+    /// measured contrast.
+    let increasedContrast: Bool
+
+    static let interactiveOpacity: Double = 0.90
+    static let linkOpacity: Double = 0.80
+    static let subtleOpacity: Double = 0.30
+    static let subtleFillOpacity: Double = 0.14
+    static let increasedContrastSubtleOpacity: Double = 0.55
+    static let increasedContrastSubtleFillOpacity: Double = 0.24
+
+    init(
+        isDark: Bool,
+        palette: ThemePalette,
+        primary: Color,
+        zap: Color,
+        bookmark: Color,
+        zapAnimation: Color,
+        increasedContrast: Bool = false
+    ) {
+        self.isDark = isDark
+        self.palette = palette
+        self.primary = primary
+        self.zap = zap
+        self.bookmark = bookmark
+        self.zapAnimation = zapAnimation
+        self.increasedContrast = increasedContrast
+        if increasedContrast {
+            interactive = primary
+            link = primary
+            subtle = primary.opacity(Self.increasedContrastSubtleOpacity)
+            subtleFill = primary.opacity(Self.increasedContrastSubtleFillOpacity)
+        } else {
+            interactive = primary.opacity(Self.interactiveOpacity)
+            link = primary.opacity(Self.linkOpacity)
+            subtle = primary.opacity(Self.subtleOpacity)
+            subtleFill = primary.opacity(Self.subtleFillOpacity)
+        }
+    }
+
     static let `default` = ResolvedTheme(
         isDark: true,
         palette: Themes.dark,
@@ -63,7 +128,13 @@ extension AppSettings {
     /// `Themes` supplies every color — the accent picker and the fifteen
     /// selectable presets are both gone, and with them the accent override
     /// and its light-mode darkening step.
-    func resolveTheme(systemColorScheme: ColorScheme?) -> ResolvedTheme {
+    /// - Parameter contrast: the system contrast setting (`\.colorSchemeContrast`).
+    ///   `.increased` collapses the derived accent tiers to full strength; see
+    ///   `ResolvedTheme.increasedContrast`.
+    func resolveTheme(
+        systemColorScheme: ColorScheme?,
+        contrast: ColorSchemeContrast = .standard
+    ) -> ResolvedTheme {
         let useDark: Bool
         switch colorScheme {
         case .system: useDark = (systemColorScheme ?? .dark) == .dark
@@ -77,7 +148,8 @@ extension AppSettings {
             primary: palette.primary,
             zap: palette.zap,
             bookmark: palette.bookmark,
-            zapAnimation: Self.vividZapColor(palette.zap)
+            zapAnimation: Self.vividZapColor(palette.zap),
+            increasedContrast: contrast == .increased
         )
     }
 
