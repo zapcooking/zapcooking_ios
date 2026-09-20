@@ -281,6 +281,13 @@ struct ProfileView: View {
                     onNoteTap: onNoteTap,
                     onHashtagTap: onHashtagTap
                 )
+            case .comments:
+                CommentsTabView(
+                    viewModel: viewModel,
+                    onProfileTap: onProfileTap,
+                    onNoteTap: onNoteTap,
+                    onHashtagTap: onHashtagTap
+                )
             case .gallery:
                 GalleryTabView(viewModel: viewModel, onNoteTap: onNoteTap)
             case .media:

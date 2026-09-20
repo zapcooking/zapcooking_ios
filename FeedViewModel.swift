@@ -201,6 +201,12 @@ final class FeedViewModel {
     nonisolated static func isFeedRenderable(_ event: NostrEvent, includeReplies: Bool) -> Bool {
         if event.isRootNote { return true }
         if includeReplies && event.kind == 1 { return true }
+        // NIP-22 comments are deliberately absent here: they surface on the
+        // profile Comments tab, not the timeline. Matching Jumble and
+        // Amethyst, which both keep external-content comments out of the
+        // feed — a comment on a blog post is conversation about that
+        // article, not a broadcast to the author's followers. A dedicated
+        // follows-wide Comments feed is planned separately.
         switch event.kind {
         case 6, 20, Nip88.kindPoll, Nip69.kindZapPoll: return true
         default: return false
