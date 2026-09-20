@@ -4,6 +4,14 @@ import Observation
 /// Per-category Proof of Work preferences. Mirrors the Android `PowPreferences` keys
 /// so the conceptual settings line up across platforms. Storage is global (not keyed
 /// by pubkey) — same as `AppSettings`.
+///
+/// A value is only **stored** once the user flips it on the Settings screen
+/// (`didSet` writes; the `init` read does not). Anyone who never opened the
+/// screen has no key and follows the default. Note PoW defaults **off** for
+/// Zap Cooking: it is relay spam deterrence with no user-visible benefit for
+/// a food audience, and the per-post shield that used to expose it is gone
+/// from the composer (Settings → Proof of Work is the single control).
+/// Reactions and DMs keep Wisp's defaults.
 @Observable
 @MainActor
 final class PowPreferences {
@@ -12,7 +20,7 @@ final class PowPreferences {
     nonisolated static let minDifficulty = 8
     nonisolated static let maxDifficulty = 32
 
-    private struct Keys {
+    nonisolated private enum Keys {
         static let noteEnabled = "pow_note_enabled"
         static let noteDifficulty = "pow_note_difficulty"
         static let reactionEnabled = "pow_reaction_enabled"
@@ -63,7 +71,7 @@ final class PowPreferences {
 
     private init() {
         let defaults = UserDefaults.standard
-        self.notePowEnabled = defaults.object(forKey: Keys.noteEnabled) as? Bool ?? true
+        self.notePowEnabled = defaults.object(forKey: Keys.noteEnabled) as? Bool ?? false
         self.noteDifficulty = Self.clamp(defaults.object(forKey: Keys.noteDifficulty) as? Int ?? 16)
         self.reactionPowEnabled = defaults.object(forKey: Keys.reactionEnabled) as? Bool ?? true
         self.reactionDifficulty = Self.clamp(defaults.object(forKey: Keys.reactionDifficulty) as? Int ?? 12)
@@ -81,7 +89,7 @@ final class PowPreferences {
     nonisolated static func snapshot() -> Snapshot {
         let d = UserDefaults.standard
         return Snapshot(
-            noteEnabled: d.object(forKey: Keys.noteEnabled) as? Bool ?? true,
+            noteEnabled: d.object(forKey: Keys.noteEnabled) as? Bool ?? false,
             noteDifficulty: clamp(d.object(forKey: Keys.noteDifficulty) as? Int ?? 16),
             reactionEnabled: d.object(forKey: Keys.reactionEnabled) as? Bool ?? true,
             reactionDifficulty: clamp(d.object(forKey: Keys.reactionDifficulty) as? Int ?? 12),

@@ -41,10 +41,10 @@ struct ArticleFeedPreview: View {
                     HStack(alignment: .center, spacing: 8) {
                         Text(ArticleTapRouting.badge(for: event))
                             .font(AppFont.labelSmall)
-                            .foregroundStyle(Color.wispPrimary)
+                            .foregroundStyle(Color.zapInteractive)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.wispPrimary.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                            .background(Color.zapSubtleFill, in: RoundedRectangle(cornerRadius: 4))
                         Text(title ?? "Untitled Article")
                             .font(AppFont.scaled(15, weight: .semibold))
                             .foregroundStyle(Color.wispOnSurface)
