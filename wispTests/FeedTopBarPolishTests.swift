@@ -37,7 +37,7 @@ struct FeedTopBarPolishTests {
     @Test func topBar_hasNoOnlinePillOrRelayMenu_onAnyKind() {
         // The control vocabulary itself has no pill: the only way a pill
         // could come back is a new case here, which this pins.
-        #expect(Set(FeedTopBarControl.allCases) == [.avatar, .contentFilter, .feedPicker, .cheffy])
+        #expect(Set(FeedTopBarControl.allCases) == [.avatar, .gadgets, .contentFilter, .feedPicker, .cheffy])
         for kind in everyKind {
             for cheffy in [true, false] {
                 let controls = FeedTopBarLayout.controls(kind: kind, cheffyVisible: cheffy)
@@ -48,6 +48,29 @@ struct FeedTopBarPolishTests {
                 #expect(controls.filter { $0 == .cheffy }.count <= 1)
             }
         }
+    }
+
+    /// Gadgets rides in the trailing group on every kind, ahead of the AI
+    /// entry — Android's own order. A timer three taps deep in the drawer is
+    /// three too many with something on the hob.
+    @Test func gadgetsEntry_leadsTheTrailingGroup_onEveryKind() throws {
+        for kind in everyKind {
+            for cheffy in [true, false] {
+                let controls = FeedTopBarLayout.controls(kind: kind, cheffyVisible: cheffy)
+                #expect(controls.contains(.gadgets), "\(kind)")
+                #expect(controls.filter { $0 == .gadgets }.count == 1, "\(kind)")
+                let gadgets = try #require(controls.firstIndex(of: .gadgets))
+                let picker = try #require(controls.firstIndex(of: .feedPicker))
+                #expect(gadgets > picker, "\(kind): gadgets is a trailing control")
+                if cheffy {
+                    let cheffyIdx = try #require(controls.firstIndex(of: .cheffy))
+                    #expect(gadgets < cheffyIdx, "\(kind): gadgets comes before the AI entry")
+                } else {
+                    #expect(controls.last == .gadgets, "\(kind)")
+                }
+            }
+        }
+        #expect(FeedTopBarLayout.gadgetsTargetSize >= 44)
     }
 
     // MARK: - Item 5: Cheffy entry

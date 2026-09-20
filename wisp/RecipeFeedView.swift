@@ -17,7 +17,7 @@ struct RecipeFeedView: View {
     var onSousChef: (() -> Void)?
     /// Cheffy entry (Concern C-E). Same contract: nil when
     /// `CheffyGate.entryVisible()` is false. With both entries present the
-    /// sparkle becomes Android's Intelligence menu (Sous Chef → Cheffy).
+    /// atom becomes Android's Intelligence menu (Sous Chef → Cheffy).
     var onCheffy: (() -> Void)?
 
     @Bindable var viewModel: RecipeFeedViewModel
@@ -42,10 +42,12 @@ struct RecipeFeedView: View {
         self.viewModel = viewModel ?? RecipeFeedViewModel()
     }
 
-    private var sparkle: some View {
-        Image(systemName: "sparkles")
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundStyle(SousChefView.sousChefPurple)
+    /// Android's Intelligence glyph — the atom, tinted like its siblings in
+    /// the bar rather than the web client's purple sparkle.
+    private var intelligenceGlyph: some View {
+        AtomIcon(size: 24, tint: Color.wispOnSurfaceVariant)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     private var columns: [GridItem] {
@@ -79,9 +81,9 @@ struct RecipeFeedView: View {
 
                 Spacer(minLength: 0)
 
-                // Android's Intelligence menu slot in this top bar (purple
-                // sparkle, web parity): a menu when both AI tools are on,
-                // a direct button when only one is, nothing when neither.
+                // Android's Intelligence menu slot in this top bar: a menu
+                // when both AI tools are on, a direct button when only one
+                // is, nothing when neither.
                 if let onSousChef, let onCheffy {
                     Menu {
                         Button(action: onSousChef) {
@@ -93,17 +95,17 @@ struct RecipeFeedView: View {
                         }
                         .accessibilityIdentifier("cheffy-entry")
                     } label: {
-                        sparkle
+                        intelligenceGlyph
                     }
                     .accessibilityLabel("AI tools")
                     .accessibilityIdentifier("intelligence-menu")
                 } else if let onSousChef {
-                    Button(action: onSousChef) { sparkle }
+                    Button(action: onSousChef) { intelligenceGlyph }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Sous Chef")
                         .accessibilityIdentifier("sous-chef-entry")
                 } else if let onCheffy {
-                    Button(action: onCheffy) { sparkle }
+                    Button(action: onCheffy) { intelligenceGlyph }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Cheffy")
                         .accessibilityIdentifier("cheffy-entry")
