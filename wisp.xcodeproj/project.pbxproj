@@ -86,6 +86,7 @@
 		4CDFAB0000000000000DF101 /* Nip37.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF001 /* Nip37.swift */; };
 		4CDFAB0000000000000DF102 /* Nip09.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF002 /* Nip09.swift */; };
 		CFB7EF5B4C80F43ABDB8DFC8 /* DeletionTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */; };
+		4CFFQG010000000000000A51 /* QuoteGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFQG000000000000000A51 /* QuoteGraph.swift */; };
 		4CDFAB0000000000000DF103 /* DraftsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF003 /* DraftsViewModel.swift */; };
 		4CDFAB0000000000000DF104 /* ScheduleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF004 /* ScheduleSheet.swift */; };
 		4CDFAB0000000000000DF105 /* DraftsScheduledView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF005 /* DraftsScheduledView.swift */; };
@@ -449,6 +450,7 @@
 		4CDFAB0000000000000DF001 /* Nip37.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip37.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF002 /* Nip09.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip09.swift; sourceTree = "<group>"; };
 		2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionTracker.swift; sourceTree = "<group>"; };
+		4CFFQG000000000000000A51 /* QuoteGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuoteGraph.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF003 /* DraftsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftsViewModel.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF004 /* ScheduleSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleSheet.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF005 /* DraftsScheduledView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftsScheduledView.swift; sourceTree = "<group>"; };
@@ -1002,6 +1004,7 @@
 				4CDFAB0000000000000DF201 /* Nip38.swift */,
 				4CDFAB0000000000000DF002 /* Nip09.swift */,
 				2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */,
+				4CFFQG000000000000000A51 /* QuoteGraph.swift */,
 				4CDFAB0000000000000DF003 /* DraftsViewModel.swift */,
 				4CDFAB0000000000000DF004 /* ScheduleSheet.swift */,
 				4CDFAB0000000000000DF005 /* DraftsScheduledView.swift */,
@@ -1527,6 +1530,7 @@
 				4CDFAB0000000000000DF200 /* Nip38.swift in Sources */,
 				4CDFAB0000000000000DF102 /* Nip09.swift in Sources */,
 				CFB7EF5B4C80F43ABDB8DFC8 /* DeletionTracker.swift in Sources */,
+				4CFFQG010000000000000A51 /* QuoteGraph.swift in Sources */,
 				4CDFAB0000000000000DF103 /* DraftsViewModel.swift in Sources */,
 				4CDFAB0000000000000DF104 /* ScheduleSheet.swift in Sources */,
 				4CDFAB0000000000000DF105 /* DraftsScheduledView.swift in Sources */,
