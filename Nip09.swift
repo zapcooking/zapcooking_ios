@@ -15,4 +15,42 @@ nonisolated enum Nip09 {
     static func deletionTagsForAddressable(kind: Int, pubkey: String, dTag: String) -> [[String]] {
         [["a", "\(kind):\(pubkey):\(dTag)"], ["k", String(kind)]]
     }
+
+    // MARK: - Reading deletion requests
+
+    /// Filter for the deletion requests targeting `eventId`.
+    ///
+    /// `authors` should carry the target event's author when it's known: a
+    /// deletion request is only meaningful from the author of the event it
+    /// names, so constraining the query keeps a stranger's stray kind-5 out of
+    /// the response entirely.
+    ///
+    /// `NostrFilter` is main-actor isolated like the rest of the request
+    /// types, so this is too; a background check awaits it before querying.
+    @MainActor
+    static func deletionFilter(eventId: String, authors: [String]?) -> NostrFilter {
+        var f = NostrFilter()
+        f.kinds = [kindDeletion]
+        f.eTags = [eventId]
+        if let authors, !authors.isEmpty { f.authors = authors }
+        f.limit = 8
+        return f
+    }
+
+    /// The event ids a kind-5 asks to retract. Empty for any other kind, so
+    /// callers can feed it arbitrary events without pre-filtering.
+    /// The event ids a kind-5 asks to delete, under NIP-09's rules: an `e`
+    /// tag with a non-empty id, whose optional author hint (position 3;
+    /// position 2 is a relay hint) is absent, empty, or names the kind-5's
+    /// own signer. A tag whose hint names someone else is not a deletion of
+    /// anything — only the original author may delete — and is skipped, so
+    /// callers recording deletion semantics never see it.
+    static func deletedEventIds(_ event: NostrEvent) -> [String] {
+        guard event.kind == kindDeletion else { return [] }
+        return event.tags.compactMap { tag in
+            guard tag.count >= 2, tag[0] == "e", !tag[1].isEmpty else { return nil }
+            if tag.count >= 4, !tag[3].isEmpty, tag[3] != event.pubkey { return nil }
+            return tag[1]
+        }
+    }
 }
