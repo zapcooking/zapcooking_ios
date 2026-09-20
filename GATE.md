@@ -1,51 +1,32 @@
-# GATE — concern/food-tag-picker (the "+" opens the full food-tag set; selected first; "+N")
-UI only: no new event kind, nothing published, no network change, so
-§7.13's live-write protocol does not apply. Off main at d5c3698 (#92, with
-#93's fixture fix underneath). This is the picker commit that was pushed
-to `concern/compose-toolbar` after #92 merged and never landed, cherry-
-picked clean. Local build + serial suites on Seth's MacBook Air (the Air
-is the gate machine until the Mac Studio lands); the box block below is
-the standard form for the Studio.
+# GATE — concern/small-correctness-batch (#129: NIP-05 _@domain, mute copy, onboarding skip, following count, contacts retry, untrimmed nsec)
+Seventeen files, small and independent; nothing published by the tests.
+Last in the merge order on purpose: it absorbs the line-level overlap
+with #125 (`ProfileTabs` / `ProfileView` / `ProfileViewModel`) and #128
+(`PostCardView`); the dry-run merge in order is clean.
 
-**Frozen at this commit.** App code is frozen at **c69b544**. This GATE.md
+**Frozen at this commit.** App code is frozen at **5ebd7ea**. This GATE.md
 is the only commit after it and is the HEAD commit — `gate.sh` refuses to
 run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
+Rebased onto main at 4d89593 (#120). The MacBook Air is the gate machine
+until the Mac Studio lands; the box block below is the standard form.
 
-## What landed
-- `wisp/FoodTagPickerView.swift` — the sheet behind the row's "+": every
-  `FoodHashtags` tag (85), "Popular" (the eight pills) then the rest
-  alphabetical, search (leading "#" ignored, case-insensitive, substring),
-  empty state. Taps use the row's `toggleSuggestedHashtag` (cap applies).
-  Presented from `ComposeView` at medium / large detent after the keyboard
-  hop; editor refocused on dismiss.
-- `wisp/HashtagSuggestionRow.swift` / `wisp/OnlyFoodCompose.swift` —
-  selected food tags first in body order (`rowOrder`), then the
-  suggestions that fit, then the "+", which reads "+N" when N selected
-  tags are past the cut (`rowLayout` iterates the wider "+N" to a fixed
-  point). `HashtagChip` shared by row and picker. Accessibility label
-  "More tags, N selected not shown".
-- `wispTests/FoodTagPickerTests.swift` — 8 hermetic tests: the set,
-  search, row order, a picked tag first, "+N" arithmetic and convergence,
-  six selected fitting at 375pt, renders (pinned row, "+N" row, the picker
-  in a hosted 375pt window).
+## What changed since the last gate run
+- Rebased onto main 4d89593. No conflicts.
+- Copilot review fix (one commit): the contacts retry keys off a real
+  miss — `loadContacts` found no kind-3 while the target's write relays
+  were still unknown — instead of `followingPubkeys.isEmpty`, which was
+  also true for a genuinely empty contact list and cost every such
+  profile a second 10-second timeout before `start()` completed. No test
+  delta (the retry is a live relay path).
 
-## Local (MacBook Air, Xcode 26.3, -derivedDataPath shared)
-- Full serial `-only-testing:wispTests` at c69b544: **1019 passed / 1 failed /
-  21 skipped / 1041** — the one is #4
-  `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate`, main's set on
-  the Air now that #93 is in. `gate.sh --parse`: PASS. +8 tests over main.
-  Warnings in touched files: **zero**.
-- A first attempt ran zero tests: the simulator app's tmp held 44 GB of
-  the #91 `CFNetworkDownload_*.tmp` leak and the disk was at 3.2 GB free.
-  Cleared (app scratch), rerun above.
-- Renders written to the dir named in `wispTests/.zc_snapshot_dir`:
-  `compose-pills-pinned-375`, `compose-pills-plusN-375`,
-  `compose-tag-picker-375`.
-- pbxproj: no diff (three-dot). New files are under `wisp/` and `wispTests/`.
-- Gate 4 (by hand) is Seth's device pass: the "+" sheet at medium detent
-  with the keyboard hop in and back out, a picked tag like #sushi pinning
-  first, "+N" once more than fit are selected, chips dimming at the cap,
-  and Dynamic Type at a large size (fewer pills fit, "+N" appears sooner).
+## Local (MacBook Air, Xcode 27.0, iOS 26.2 sim, -derivedDataPath shared)
+- Full serial `-only-testing:wispTests` at 5ebd7ea: **1084 passed / 2 failed / 21 skipped / 1107** — exactly the Air's clean-main set under Xcode 27 (#4 `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` and #117 `ColorHierarchyTests/textTiers…`; main at 4d89593 ran 1077/3/21 of 1101 the same morning, its third failure a load flake that passes alone; `RecipeComposeViewModelTests` passed in this run). +6 tests over main. Zero warnings on lines this branch adds (compiler warning lines intersected with the branch's added hunks). Machine: Seth's MacBook Air, Xcode 27.0, iOS 26.2 simulator, serial, 579 s of tests.
+- pbxproj: no diff (three-dot).
+- Gate 4 (by hand): a profile with an empty contact list finishes
+  loading without a 10 s tail; a profile whose kind-3 lives only on its
+  own write relays shows a non-zero following count; `_@domain` NIP-05
+  renders as the bare domain; the onboarding follow step can be skipped;
+  an nsec pasted with surrounding whitespace adds the account.
 
 ## Gate 1 — hermetic, serial (Mac Studio / box form)
 ```
@@ -55,22 +36,8 @@ xcodebuild test -project wisp.xcodeproj -scheme wisp \
   -parallel-testing-enabled NO \
   -only-testing:wispTests
 ```
-Pass = main's failure set on that machine and nothing else (#4, plus the
-box's #57 trio); judge the `.xcresult` via `xcresulttool get test-results
-summary` (`sh ci_scripts/gate.sh --parse <bundle>`). Expect +8 tests over
-main.
-
-## Gate 2 — the compose suites alone
-```
-xcodebuild test -project wisp.xcodeproj -scheme wisp \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  -skipPackagePluginValidation \
-  -parallel-testing-enabled NO \
-  -only-testing:wispTests/FoodTagPickerTests \
-  -only-testing:wispTests/ComposeToolbarTests \
-  -only-testing:wispTests/OnlyFoodComposeTests
-```
-Put a directory in `wispTests/.zc_snapshot_dir` first to keep the PNGs.
+Pass = main's failure set on that machine and nothing else; judge the
+`.xcresult` via `sh ci_scripts/gate.sh --parse <bundle>`.
 
 ## Gate 6 — project file
 ```
