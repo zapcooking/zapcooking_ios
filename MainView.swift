@@ -814,7 +814,7 @@ struct MainView: View {
             }
             .recipeNavigation(keypair: keypair, path: $feedPath)
             .navigationDestination(for: HashtagFeedRoute.self) { route in
-                hashtagFeedView(for: route)
+                hashtagFeedView(for: route, path: $feedPath)
             }
             .navigationDestination(for: PeopleListFeedRoute.self) { route in
                 PeopleListFeedView(
@@ -912,9 +912,12 @@ struct MainView: View {
                     activeUserPubkey: keypair.pubkey,
                     onProfileTap: { pk in recipesPath.append(ProfileRoute(pubkey: pk)) },
                     onNoteTap: { eid in recipesPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
-                    onHashtagTap: { _ in },
+                    onHashtagTap: { tag in recipesPath.append(HashtagFeedRoute(tag: tag)) },
                     path: $recipesPath
                 )
+            }
+            .navigationDestination(for: HashtagFeedRoute.self) { route in
+                hashtagFeedView(for: route, path: $recipesPath)
             }
             .navigationDestination(for: ThreadRoute.self) { route in
                 ThreadView(
@@ -976,9 +979,12 @@ struct MainView: View {
                     activeUserPubkey: keypair.pubkey,
                     onProfileTap: { pk in kitchenPath.append(ProfileRoute(pubkey: pk)) },
                     onNoteTap: { eid in kitchenPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
-                    onHashtagTap: { _ in },
+                    onHashtagTap: { tag in kitchenPath.append(HashtagFeedRoute(tag: tag)) },
                     path: $kitchenPath
                 )
+            }
+            .navigationDestination(for: HashtagFeedRoute.self) { route in
+                hashtagFeedView(for: route, path: $kitchenPath)
             }
             .navigationDestination(for: ThreadRoute.self) { route in
                 ThreadView(
@@ -1033,9 +1039,12 @@ struct MainView: View {
                                     activeUserPubkey: keypair.pubkey,
                                     onProfileTap: { pk in searchPath.append(ProfileRoute(pubkey: pk)) },
                                     onNoteTap: { eid in searchPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
-                                    onHashtagTap: { _ in },
+                                    onHashtagTap: { tag in searchPath.append(HashtagFeedRoute(tag: tag)) },
                                     path: $searchPath
                                 )
+                            }
+                            .navigationDestination(for: HashtagFeedRoute.self) { route in
+                                hashtagFeedView(for: route, path: $searchPath)
                             }
                             .navigationDestination(for: ThreadRoute.self) { route in
                                 ThreadView(
@@ -1094,9 +1103,12 @@ struct MainView: View {
                                 activeUserPubkey: keypair.pubkey,
                                 onProfileTap: { pk in notificationsPath.append(ProfileRoute(pubkey: pk)) },
                                 onNoteTap: { eid in notificationsPath.append(ThreadRoute(eventId: eid, authorPubkey: route.pubkey)) },
-                                onHashtagTap: { _ in },
+                                onHashtagTap: { tag in notificationsPath.append(HashtagFeedRoute(tag: tag)) },
                                 path: $notificationsPath
                             )
+                        }
+                        .navigationDestination(for: HashtagFeedRoute.self) { route in
+                            hashtagFeedView(for: route, path: $notificationsPath)
                         }
                         .navigationDestination(for: ThreadRoute.self) { route in
                             ThreadView(
@@ -2122,13 +2134,16 @@ struct MainView: View {
     }
 
     @ViewBuilder
-    private func hashtagFeedView(for route: HashtagFeedRoute) -> some View {
+    /// `path` is the destination stack this view was pushed onto, so a
+    /// nested hashtag tap (tapping another `#tag` inside a hashtag feed)
+    /// pushes onto the same stack rather than always the Home feed's.
+    private func hashtagFeedView(for route: HashtagFeedRoute, path: Binding<NavigationPath>) -> some View {
         if let tag = route.tag {
             HashtagFeedView(
                 keypair: keypair,
                 source: .single(tag),
                 onHashtagTap: { newTag in
-                    feedPath.append(HashtagFeedRoute(tag: newTag))
+                    path.wrappedValue.append(HashtagFeedRoute(tag: newTag))
                 }
             )
         } else if let dTag = route.setDTag,
@@ -2137,7 +2152,7 @@ struct MainView: View {
                 keypair: keypair,
                 source: .set(set),
                 onHashtagTap: { newTag in
-                    feedPath.append(HashtagFeedRoute(tag: newTag))
+                    path.wrappedValue.append(HashtagFeedRoute(tag: newTag))
                 }
             )
         } else {
