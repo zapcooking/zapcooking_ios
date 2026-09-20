@@ -1190,11 +1190,20 @@ struct MainView: View {
         } center: {
             feedPicker
         } trailing: {
-            if controls.contains(.gadgets) {
-                gadgetsButton
-            }
-            if controls.contains(.cheffy) {
-                cheffyButton
+            // Tight group, not two widely-spaced buttons. `FeedTopBarFrame`
+            // spaces its children 12 pt apart, which on top of the padding
+            // inside each 44 pt target left the cup adrift in the middle of
+            // the bar and crowding the picker. Android does the same thing
+            // for the same reason — see the
+            // `LocalMinimumInteractiveComponentSize` override around its
+            // search / gadgets / atom trio.
+            HStack(spacing: 0) {
+                if controls.contains(.gadgets) {
+                    gadgetsButton
+                }
+                if controls.contains(.cheffy) {
+                    cheffyButton
+                }
             }
         }
         .padding(.horizontal, 16)
