@@ -156,7 +156,13 @@ struct NotificationEffectsTests {
         // Past the first window's deadline, still lit because of the second.
         try await Task.sleep(for: .seconds(NotificationBurstStore.zapDuration * 0.5))
         #expect(store.zapBurst)
-        try await Task.sleep(for: .seconds(NotificationBurstStore.zapDuration))
+        // Poll for the clear: a single `zapDuration` sleep races the
+        // MainActor continuation when render suites in the same process
+        // stall the run loop.
+        let deadline = Date().addingTimeInterval(NotificationBurstStore.zapDuration + 2)
+        while store.zapBurst, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         #expect(!store.zapBurst)
     }
 
