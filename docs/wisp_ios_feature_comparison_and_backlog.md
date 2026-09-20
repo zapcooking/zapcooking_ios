@@ -159,9 +159,11 @@ work). Locate the equivalent call sites by hand rather than applying the patch.
 `hashtagFeedView(for:)` (`:2050`) to `hashtagFeedView(for:path:)` as upstream did. The fork has two
 more tabs than upstream, so this covers more call sites than the original diff.
 
-### 9. NIP-22 external-content comments — `dd05780` + `a0a1e7e`, then `65d342e`, `91f30df`, `bdeaaf5`
+### 9. NIP-22 external-content comments — `dd05780` + `a0a1e7e`, then `bdeaaf5`, `65d342e`, `91f30df`
 The whole chain, as one concern. Build the external-content card in its **final** (post-`a0a1e7e`)
 position — above the comment text — rather than landing the wrong order and re-patching.
+(Upstream merge order is `bdeaaf5` **before** `65d342e`/`91f30df` — PR #427 landed first; port
+in that order or `91f30df` conflicts against code that hasn't landed.)
 
 - New `Nip22.swift` (104 lines): `kindComment`, `ExternalRef`, `isComment`, `externalRoot(of:)`,
   `externalParent(of:)`, `buildReplyTags(to:relayHint:)`.
