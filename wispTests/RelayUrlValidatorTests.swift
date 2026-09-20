@@ -24,6 +24,15 @@ struct RelayUrlValidatorTests {
         #expect(!RelayUrlValidator.isValid("wss://10.0.0.1"))
     }
 
+    @Test func rejectsSingleLabelAndMangledHosts() {
+        // `wss://https//relay.example.com` parses as host `https`, path
+        // `//relay.example.com` — a copy-paste shape seen in real kind-10002
+        // lists that used to pass and consume one of a poll's relay slots.
+        #expect(!RelayUrlValidator.isValid("wss://https//relay.example.com"))
+        #expect(!RelayUrlValidator.isValid("wss://relay"))
+        #expect(!RelayUrlValidator.isConnectable("wss://https//relay.example.com"))
+    }
+
     @Test func rejectsExplicitPort() {
         // Mirrors Android: relays should be on the default 443 — explicit ports are usually
         // dev/local nodes that don't belong in a published relay list.
