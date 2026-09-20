@@ -5,8 +5,11 @@ network change, so §7.13's live-write protocol does not apply. Off main at
 is the gate machine until the Mac Studio lands); the box block below is
 the standard form for the Studio.
 
-**Frozen at this commit.** App code is frozen at **9ee955d**. This GATE.md
-is the only commit after it and is the HEAD commit — `gate.sh` refuses to
+**Frozen at this commit.** App code is frozen at **ea26ce0** (9ee955d, the
+concern, plus ea26ce0, the Copilot review fixes: uploads-first
+`publishBlocker` in poll mode, the pill row's uncounted trailing gap, the
+outline note). The previous GATE.md (cbeb2a2, at 9ee955d) is superseded.
+This GATE.md is the only commit after ea26ce0 and is the HEAD commit — `gate.sh` refuses to
 run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
 
 ## What landed
@@ -25,7 +28,7 @@ run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
   `HashtagPillMetrics`, `OnlyFoodCompose.visiblePillCount`) then a "+"
   pill wired to state that presents nothing yet. Outlined unselected,
   filled orange selected, dimmed at the cap.
-- `wispTests/ComposeToolbarTests.swift` — 16 hermetic tests incl. 375pt
+- `wispTests/ComposeToolbarTests.swift` — 17 hermetic tests incl. 375pt
   renders (pills none / one / cap via ImageRenderer; toolbar idle / active
   and the whole composer via a hosted 375pt window).
 
@@ -34,21 +37,21 @@ run otherwise. A review fix re-opens the freeze: push a fresh GATE.md last.
   `-skipPackagePluginValidation`): **green**. Warnings in touched files:
   **zero** (the six `PowPreferences.swift` "main actor-isolated static
   property" warnings that main carries are gone with `nonisolated Keys`).
-- `ComposeToolbarTests` serial: **16/16**. With `OnlyFoodComposeTests` +
-  `ComposeSeedTests`: 37/37.
-- Full serial `-only-testing:wispTests`: **1007 passed / 4 failed / 21
+- `ComposeToolbarTests` serial: **17/17** at ea26ce0 (16/16 at 9ee955d). With
+  `OnlyFoodComposeTests` + `ComposeSeedTests`: 39/39 at ea26ce0.
+- Full serial `-only-testing:wispTests` at 9ee955d: **1007 passed / 4 failed / 21
   skipped / 1032** — the four are exactly main's Air set: #4
   `FeedRenderableTests/mentionTaggedNoteFollowsReplyGate` plus the three
   #88 structural-cap fixtures (`OnlyFoodIngestParityTests` ×2,
   `OnlyFoodOwnPublishTests` ×1), which are fixed on their own branch
   (`fix/onlyfood-cap-fixtures`, 26/26 in those two suites with the patch
-  applied here). Nothing new. +16 tests over main.
+  applied here). Nothing new. +17 tests over main (16 at 9ee955d; the review fix adds one).
 - Renders written to the dir named in `wispTests/.zc_snapshot_dir`:
   `compose-pills-{none,one,cap}-375`, `compose-toolbar-{idle,active}-375`,
   `compose-sheet-empty-375`.
 - pbxproj: no diff (three-dot). New files are under `wisp/` and `wispTests/`.
 - Gate 4 (by hand) is Seth's device pass: OnlyFood composer at the
-  smallest width (pills: four + "+", selected orange only), text / gallery
+  smallest width (pills: three + "+", selected orange only), text / gallery
   / poll / reply composers (glyphs, no shield, Publish reason in each
   empty state, "Wait for uploads to finish." during an upload), the
   sensitive banner, a scheduled post (calendar badge), and Settings →
@@ -64,7 +67,7 @@ xcodebuild test -project wisp.xcodeproj -scheme wisp \
 ```
 Pass = main's failure set on that machine and nothing else; judge the
 `.xcresult` via `xcresulttool get test-results summary`
-(`sh ci_scripts/gate.sh --parse <bundle>`). Expect +16 tests over main.
+(`sh ci_scripts/gate.sh --parse <bundle>`). Expect +17 tests over main.
 Until `fix/onlyfood-cap-fixtures` merges, main's set includes the three
 #88 tests; after it, #4 alone (plus the box's #57 trio).
 
