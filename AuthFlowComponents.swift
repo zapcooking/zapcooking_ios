@@ -25,6 +25,9 @@ struct AuthFlowHeader: View {
             Image("ZcLogo")
                 .resizable()
                 .scaledToFit()
+                // Auth flows sit on the splash's dark ground, so the logo
+                // is pinned to its white variant.
+                .environment(\.colorScheme, .dark)
                 .frame(width: 96, height: 96)
                 .shadow(color: .black.opacity(0.6), radius: 30, y: 10)
             Text("Zap Cooking")

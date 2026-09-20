@@ -1,6 +1,16 @@
 {
   "images" : [
     {
+      "filename" : "ZcLogoInk.svg",
+      "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
       "filename" : "ZcLogo.svg",
       "idiom" : "universal"
     }

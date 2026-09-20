@@ -261,6 +261,8 @@ struct KeysSettingsView: View {
                         Image("ZcLogo")
                             .resizable()
                             .scaledToFit()
+                            // White-circle badge — pinned to the ink variant.
+                            .environment(\.colorScheme, .light)
                             .frame(width: 40, height: 40)
                     }
                 }

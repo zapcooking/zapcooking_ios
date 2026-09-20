@@ -217,6 +217,10 @@ struct ProfileQrSheet: View {
                     Image("ZcLogo")
                         .resizable()
                         .scaledToFit()
+                        // The badge is a white circle whatever the app's
+                        // appearance, so the logo is pinned to its ink
+                        // variant — the white one lost its pan ring here.
+                        .environment(\.colorScheme, .light)
                         .frame(width: 36, height: 36)
                 }
             }

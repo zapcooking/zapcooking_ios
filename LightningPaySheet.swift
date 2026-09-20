@@ -103,6 +103,8 @@ struct LightningPaySheet: View {
                     Image("ZcLogo")
                         .resizable()
                         .scaledToFit()
+                        // White-circle badge — pinned to the ink variant.
+                        .environment(\.colorScheme, .light)
                         .frame(width: 36, height: 36)
                 }
             }
