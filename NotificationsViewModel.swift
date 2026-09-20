@@ -277,11 +277,11 @@ final class NotificationsViewModel {
         persistEnabledTypes()
     }
 
-    private var enabledTypesKey: String { "notif_enabled_types_\(keypair.pubkey)" }
-
+    /// Storage is `NotificationFilterStore` — the notification and DM
+    /// repositories read the same set on arrival to decide whether a sound,
+    /// haptic or bottom-bar burst fires, so the key has one owner.
     private func persistEnabledTypes() {
-        let raws = enabledTypes.map(\.rawValue)
-        UserDefaults.standard.set(raws, forKey: enabledTypesKey)
+        NotificationFilterStore.save(enabledTypes, pubkey: keypair.pubkey)
     }
 
     private func loadFilterFromDefaults() {
@@ -290,12 +290,7 @@ final class NotificationsViewModel {
         if UserDefaults.standard.object(forKey: oldKey) != nil {
             UserDefaults.standard.removeObject(forKey: oldKey)
         }
-        if let raws = UserDefaults.standard.stringArray(forKey: enabledTypesKey) {
-            let decoded = raws.compactMap(NotificationFilter.init(rawValue:))
-            enabledTypes = Set(decoded)
-        } else {
-            enabledTypes = Set(NotificationFilter.allCases)
-        }
+        enabledTypes = NotificationFilterStore.load(pubkey: keypair.pubkey)
     }
 
     // MARK: - Relay set resolution

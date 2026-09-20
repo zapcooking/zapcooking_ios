@@ -197,6 +197,7 @@
 		4CFF210C0000000000000306 /* InterfaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210B0000000000000306 /* InterfaceSettingsView.swift */; };
 		4CFF210E0000000000000307 /* ExchangeRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210D0000000000000307 /* ExchangeRateService.swift */; };
 		4CFF21100000000000000308 /* CurrencyFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210F0000000000000308 /* CurrencyFormatter.swift */; };
+		4CFF21A20000000000000901 /* NotificationEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21A10000000000000901 /* NotificationEffects.swift */; };
 		4CFF21120000000000000309 /* AvatarPrefetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21110000000000000309 /* AvatarPrefetcher.swift */; };
 		4CFF2114000000000000030A /* EmojiText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF2113000000000000030A /* EmojiText.swift */; };
 		4CFF610100000000000A0001 /* GiphyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0001 /* GiphyConfig.swift */; };
@@ -558,6 +559,7 @@
 		4CFF210B0000000000000306 /* InterfaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfaceSettingsView.swift; sourceTree = "<group>"; };
 		4CFF210D0000000000000307 /* ExchangeRateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExchangeRateService.swift; sourceTree = "<group>"; };
 		4CFF210F0000000000000308 /* CurrencyFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyFormatter.swift; sourceTree = "<group>"; };
+		4CFF21A10000000000000901 /* NotificationEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationEffects.swift; sourceTree = "<group>"; };
 		4CFF21110000000000000309 /* AvatarPrefetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarPrefetcher.swift; sourceTree = "<group>"; };
 		4CFF2113000000000000030A /* EmojiText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiText.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0001 /* GiphyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiphyConfig.swift; sourceTree = "<group>"; };
@@ -913,6 +915,7 @@
 				4CFFEE0000000000000E0005 /* EmojiLibrarySheet.swift */,
 				4CFFEE0000000000000E0006 /* CustomEmojiSettingsView.swift */,
 				4CFFAA0000000000000A0001 /* NotificationSounds.swift */,
+				4CFF21A10000000000000901 /* NotificationEffects.swift */,
 				4CFFAA0000000000000A0002 /* Haptics.swift */,
 				4CFF99000000000000000001 /* RecipeParser.swift */,
 				4CFF99000000000000000002 /* RecipeSerializer.swift */,
@@ -1436,6 +1439,7 @@
 				4CFFEE0100000000000E0005 /* EmojiLibrarySheet.swift in Sources */,
 				4CFFEE0100000000000E0006 /* CustomEmojiSettingsView.swift in Sources */,
 				4CFFAA0100000000000A0001 /* NotificationSounds.swift in Sources */,
+				4CFF21A20000000000000901 /* NotificationEffects.swift in Sources */,
 				4CFFAA0100000000000A0002 /* Haptics.swift in Sources */,
 				4CFF99010000000000000001 /* RecipeParser.swift in Sources */,
 				4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */,
