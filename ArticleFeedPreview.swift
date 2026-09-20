@@ -22,58 +22,72 @@ struct ArticleFeedPreview: View {
 
     private var dTag: String { firstTag("d") ?? "" }
 
+    /// `false` renders the card with no navigation of its own. `QuotedNoteView`
+    /// uses this form: its outer `articleTapOrNoteButton` already owns the
+    /// long-form route, and a `NavigationLink` nested inside another one
+    /// leaves a tap with two controls competing for it.
+    var linked: Bool = true
+
     var body: some View {
+        if linked {
+            ArticleTapLink(
+                event: event,
+                author: event.pubkey,
+                dTag: dTag,
+                relayHints: relayHints
+            ) {
+                card
+            }
+            .buttonStyle(.plain)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         let title = firstTag("title")
         let summary = firstTag("summary")
         let image = firstTag("image")
 
-        return ArticleTapLink(
-            event: event,
-            author: event.pubkey,
-            dTag: dTag,
-            relayHints: relayHints
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let image, let imageUrl = URL(string: image) {
-                    heroImage(imageUrl, urlString: image, title: title)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .center, spacing: 8) {
-                        Text(ArticleTapRouting.badge(for: event))
-                            .font(AppFont.labelSmall)
-                            .foregroundStyle(Color.zapInteractive)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.zapSubtleFill, in: RoundedRectangle(cornerRadius: 4))
-                        Text(title ?? "Untitled Article")
-                            .font(AppFont.scaled(15, weight: .semibold))
-                            .foregroundStyle(Color.wispOnSurface)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if let summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(summary)
-                            .font(AppFont.bodySmall)
-                            .foregroundStyle(Color.wispOnSurfaceVariant)
-                            .lineLimit(3)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+        return VStack(alignment: .leading, spacing: 0) {
+            if let image, let imageUrl = URL(string: image) {
+                heroImage(imageUrl, urlString: image, title: title)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.wispSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.wispOutline, lineWidth: 1)
-            )
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(ArticleTapRouting.badge(for: event))
+                        .font(AppFont.labelSmall)
+                        .foregroundStyle(Color.zapInteractive)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.zapSubtleFill, in: RoundedRectangle(cornerRadius: 4))
+                    Text(title ?? "Untitled Article")
+                        .font(AppFont.scaled(15, weight: .semibold))
+                        .foregroundStyle(Color.wispOnSurface)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(summary)
+                        .font(AppFont.bodySmall)
+                        .foregroundStyle(Color.wispOnSurfaceVariant)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.wispSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.wispOutline, lineWidth: 1)
+        )
     }
 
     /// Hero image: aspect ratio from the article's NIP-92 imeta tag when
