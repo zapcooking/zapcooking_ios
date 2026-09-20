@@ -100,6 +100,16 @@ final class PostPublisher {
         // retry minutes after a stopped mining run (or after the user sat on the
         // error) would otherwise publish a note timestamped at the failed try.
         draft.createdAt = NostrClock.now()
+        // Put the optimistic feed row back in step with the attempt: `cancel()`
+        // cleared it, and after a relay failure it is still `.failed`, so
+        // without this the feed shows a missing or stale row while the retry
+        // mines and broadcasts. Same call the composer makes at hand-off.
+        PendingPostStore.shared.start(
+            content: draft.content,
+            tags: draft.tags,
+            pubkey: draft.signingKeypair.pubkey,
+            kind: draft.kind
+        )
         submit(draft)
     }
 
@@ -273,7 +283,11 @@ final class PostPublisher {
         guard let key = draft.autosaveKey,
               let stored = defaults.dictionary(forKey: key),
               let snapshot = draft.autosaveSnapshot,
-              stored["content"] as? String == snapshot.content else { return false }
+              // The whole property list, not just the body: the bucket also
+              // carries `explicit`, attachments, mentions and `scheduleAt`, and
+              // a newer draft can keep the same text while changing any of
+              // those. Plist values compare by value through NSDictionary.
+              NSDictionary(dictionary: stored).isEqual(to: snapshot.payload) else { return false }
         defaults.removeObject(forKey: key)
         return true
     }

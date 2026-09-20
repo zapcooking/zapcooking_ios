@@ -55,6 +55,9 @@ struct PostStatusPill: View {
                         .foregroundStyle(.white.opacity(0.85))
                 }
                 .buttonStyle(.plain)
+                // Icon-only, and the failed state stays up until acknowledged,
+                // so VoiceOver needs an action name rather than "xmark".
+                .accessibilityLabel("Dismiss")
             }
         }
         .padding(.horizontal, 14)

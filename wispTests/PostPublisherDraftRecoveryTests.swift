@@ -91,6 +91,16 @@ struct PostPublisherDraftRecoveryTests {
         #expect(defaults.dictionary(forKey: Self.key)?["content"] as? String == "a different post")
     }
 
+    /// Same body, different settings is still a newer draft: the comparison
+    /// covers the whole autosave payload, not only `content`.
+    @Test func successKeepsADraftWithTheSameBodyButDifferentSettings() {
+        let defaults = makeDefaults()
+        defaults.set(["content": "old", "explicit": true, "powEnabled": false], forKey: Self.key)
+
+        #expect(PostPublisher.clearAutosaveIfStillThisDraft(makeDraft(content: "old"), defaults: defaults) == false)
+        #expect(defaults.dictionary(forKey: Self.key)?["explicit"] as? Bool == true)
+    }
+
     /// The common path: the composer already emptied the bucket at hand-off, so
     /// there is nothing left to clear.
     @Test func successOnAnEmptyBucketIsANoOp() {
