@@ -114,27 +114,91 @@ struct ColorHierarchyTests {
         #expect(try Self.near(Self.alpha(ComposerTextStyling.pillFillColor), ResolvedTheme.subtleFillOpacity))
     }
 
-    // MARK: - Contrast (measured, composited over the custom dark grounds)
+    // MARK: - Contrast (measured on the grounds that actually render)
 
-    /// WCAG 2 contrast of each text tier, composited with its alpha over
-    /// every dark ground. Primary is pinned at AA normal text
-    /// elsewhere (`BrandColorParityTests`); the interactive tier holds AA on
-    /// the feed background and stays within a tenth of it on the surfaces;
-    /// the link tier clears the AA large-text / UI-component floor (3.0)
-    /// everywhere. Increased Contrast restores the 100% figures.
-    @Test func textTiers_keepTheirContrastFloors_onEveryDarkGround() throws {
+    /// The dark grounds orange tier text is really painted on. `surfaceVariant`
+    /// is almost never a text ground at full strength: quoted notes, link
+    /// previews and the rich-content embeds fill with it at 30% over the feed
+    /// background and stroke with it; the reply / quote banners use 40%; the
+    /// "Show more" pill, hashtag chips and reaction chips use 60%; only the
+    /// group-chat bubble (`GroupRoomView`) hosts rich content on the raw token.
+    /// Measuring the raw token alone (the pre-#117 version of this test) both
+    /// missed the 60% chips and failed a ground that renders once.
+    static let interactiveFloorOnBackground = 4.5
+    static let interactiveFloorOnSurfaces = 3.8
+    static let linkFloor = 3.0
+
+    /// Composited dark ground: `wash` of `surfaceVariant` over `base`
+    /// (`wash == 1` is the raw token).
+    private static func ground(_ palette: ThemePalette, wash: Double, over base: Color) throws -> Int {
+        let sv = try argb(palette.surfaceVariant), b = try argb(base)
+        return wash >= 1 ? sv : composite(sv, over: b, alpha: wash)
+    }
+
+    private static func measure(_ name: String, _ ground: Int, primary: Int,
+                                interactiveFloor: Double, sourceLocation: SourceLocation = #_sourceLocation) {
+        let full = contrast(primary, ground)
+        let interactive = contrast(composite(primary, over: ground, alpha: ResolvedTheme.interactiveOpacity), ground)
+        let link = contrast(composite(primary, over: ground, alpha: ResolvedTheme.linkOpacity), ground)
+        #expect(full > interactive && interactive > link, "\(name): \(full) / \(interactive) / \(link)", sourceLocation: sourceLocation)
+        #expect(interactive >= interactiveFloor, "\(name) interactive: \(String(format: "%.2f", interactive)) (floor \(interactiveFloor))", sourceLocation: sourceLocation)
+        #expect(link >= linkFloor, "\(name) link: \(String(format: "%.2f", link)) (floor \(linkFloor))", sourceLocation: sourceLocation)
+    }
+
+    /// WCAG 2 contrast of each text tier, composited with its alpha over the
+    /// rendered dark grounds: the feed background, the surface, and the 25%,
+    /// 30% and 40% `surfaceVariant` washes over the background (thread and
+    /// notification rows, quoted notes, link previews, embeds, the reply and
+    /// quote banners — post cards have no fill of their own, so these washes
+    /// sit on the feed background), plus the deepest nesting the feed
+    /// produces: a quoted note (30%) inside an expanded notification row
+    /// (25%). The interactive tier holds AA on the feed background and stays
+    /// within a tenth of it on the washes; the link tier clears the AA
+    /// large-text / UI-component floor everywhere. Increased Contrast
+    /// restores the 100% figures.
+    @Test func textTiers_keepTheirContrastFloors_onTheRenderedDarkGrounds() throws {
         let dark = Themes.dark
         let primary = try Self.argb(dark.primary)
-        let grounds = [("background", dark.background), ("surface", dark.surface), ("surfaceVariant", dark.surfaceVariant)]
-        for (name, ground) in grounds {
-            let g = try Self.argb(ground)
-            let full = Self.contrast(primary, g)
-            let interactive = Self.contrast(Self.composite(primary, over: g, alpha: ResolvedTheme.interactiveOpacity), g)
-            let link = Self.contrast(Self.composite(primary, over: g, alpha: ResolvedTheme.linkOpacity), g)
-            #expect(full > interactive && interactive > link, "\(name): \(full) / \(interactive) / \(link)")
-            #expect(interactive >= (name == "background" ? 4.5 : 3.8), "\(name) interactive: \(String(format: "%.2f", interactive))")
-            #expect(link >= 3.0, "\(name) link: \(String(format: "%.2f", link))")
+        Self.measure("background", try Self.argb(dark.background), primary: primary, interactiveFloor: Self.interactiveFloorOnBackground)
+        Self.measure("surface", try Self.argb(dark.surface), primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
+        for wash in [0.25, 0.3, 0.4] {
+            Self.measure("surfaceVariant@\(wash) over background", try Self.ground(dark, wash: wash, over: dark.background),
+                         primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
         }
+        let row = try Self.ground(dark, wash: 0.25, over: dark.background)
+        let nested = Self.composite(try Self.argb(dark.surfaceVariant), over: row, alpha: 0.3)
+        Self.measure("surfaceVariant@0.3 inside a @0.25 notification row", nested,
+                     primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
+    }
+
+    /// The 60% wash is the chip recipe (`PostCardView` "Show more" pill,
+    /// `HashtagChipsView`, `ArticleView` topic chip, reaction chips), where the
+    /// interactive tier is used as text. Over the feed background it measures
+    /// 3.59 against the 3.8 floor; over a surface card 3.31 / 2.88. KNOWN
+    /// FAILURE, issue #134 — listed in `ci_scripts/gate.sh` `KNOWN_FAILURES`
+    /// until the chip recipe changes. Do not lower the floors to pass it.
+    @Test func textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes() throws {
+        let dark = Themes.dark
+        let primary = try Self.argb(dark.primary)
+        Self.measure("surfaceVariant@0.6 over background", try Self.ground(dark, wash: 0.6, over: dark.background),
+                     primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
+        Self.measure("surfaceVariant@0.6 over surface", try Self.ground(dark, wash: 0.6, over: dark.surface),
+                     primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
+    }
+
+    /// The raw token (#374151, Android/web parity, pinned in
+    /// `BrandColorParityTests`) as a text ground. It renders as one exactly once:
+    /// the group-chat bubble for other people's messages
+    /// (`wisp/GroupRoomView.swift`, `RichContentView` on `wispSurfaceVariant`),
+    /// where hashtags and mentions sit at the interactive tier (2.88 against
+    /// 3.8) and URLs at the link tier (2.53 against 3.0). KNOWN FAILURE, issue
+    /// #117 — the fix is on the bubble, not the token, and only if group chat
+    /// ships. Listed in `ci_scripts/gate.sh` `KNOWN_FAILURES`.
+    @Test func textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble() throws {
+        let dark = Themes.dark
+        let primary = try Self.argb(dark.primary)
+        Self.measure("surfaceVariant (group-chat bubble)", try Self.ground(dark, wash: 1, over: dark.background),
+                     primary: primary, interactiveFloor: Self.interactiveFloorOnSurfaces)
     }
 
     // MARK: - Helpers

@@ -1,6 +1,8 @@
 #!/bin/sh
-# Hermetic gate for the MacinCloud box (`~/gate.sh <branch>`). This file is the
-# versioned copy — `cp ci_scripts/gate.sh ~/gate.sh` on the box after a change.
+# Hermetic gate for the gate machine (`~/gate.sh <branch>`). This file is the
+# versioned copy — `cp ci_scripts/gate.sh ~/gate.sh` on the machine after a
+# change. Written for the MacinCloud box (now gone); the Mac Studio takes the
+# same form, the MacBook Air uses `--parse` on its own bundle.
 #
 #   ~/gate.sh <branch>            run the gate on <branch>
 #   ~/gate.sh --parse <bundle>    re-read an existing .xcresult and judge it
@@ -13,8 +15,11 @@
 #   with a stale-module error (C-E, 2026-09-02). They are Air-only flags.
 # - `-skipPackagePluginValidation` is required headless (swift-secp256k1's
 #   SharedSourcesPlugin cannot show its trust prompt).
-# - Serial (`-parallel-testing-enabled NO`); the box's known failure set is
-#   #4 FeedRenderableTests plus three SafetyTests (issue #57).
+# - Serial (`-parallel-testing-enabled NO`); the known failure set is
+#   KNOWN_FAILURES below, and every entry names the issue that owns it.
+# - The gate file lives at gates/<pr>-<slug>.md (one per branch). Nine root
+#   GATE.md files collided on merge in the 2026-09-20 wave; a root GATE.md is
+#   still accepted for branches cut before that.
 # - The pbxproj guard is THREE-dot: changes on the branch since it forked,
 #   not every difference from main's tip (main's #41 touched
 #   project.pbxproj / Package.resolved and false-positived the two-dot form).
@@ -23,17 +28,42 @@
 #   "Executed N tests" lines belong to the (empty) XCTest portion and read
 #   0/0/0 while the real suite is running (C-J, 2026-09-03). A zero total is
 #   a FAILED gate, never a pass.
-# - GATE.md must be the LAST commit on the branch. Review fixes are code and
-#   re-open the freeze; a gate run against a HEAD that is not the GATE.md
-#   commit is refused (#47/#48 shipped a crash through exactly that gap).
+# - The gate file must be the LAST commit on the branch. Review fixes are
+#   code and re-open the freeze; a gate run against a HEAD that is not the
+#   gate-file commit is refused (#47/#48 shipped a crash through exactly
+#   that gap).
 set -eu
 
 REPO="${GATE_REPO:-$HOME/Development/zapcooking_ios}"
 DEST="${GATE_DEST:-platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5}"
-# Known environmental failures on this box (issue #57). Suite/function, no
-# parens. Anything else failing belongs to the branch. Override with
-# GATE_KNOWN_FAILURES="A/b C/d" when #57 changes.
-KNOWN="${GATE_KNOWN_FAILURES:-FeedRenderableTests/mentionTaggedNoteFollowsReplyGate SafetyTests/notificationDropsReplyInBlockedSubThread SafetyTests/notificationIngestZapJudgedByResolvedActor SafetyTests/purgeNonWotQualifiedScrubsInMemoryItems}"
+# KNOWN_FAILURES — tests that fail on main and are therefore not the branch's.
+# Suite/function, no parens, one appended line per entry, each with the issue
+# that owns it and why it is still here. Anything else failing belongs to the
+# branch. A gate that always says FAIL is a gate nobody reads (the old
+# SafetyTests trio printed FAIL on all nine runs of the 2026-09-20 wave), so an
+# entry is added only with an issue and removed the moment the issue closes.
+# Override for a one-off run with GATE_KNOWN_FAILURES="A/b C/d".
+KNOWN_FAILURES=""
+# issue #4 — mention e-tags treated as roots; fails identically on every
+# machine since the C-E baseline (2026-09-02). Remove when #4 closes.
+KNOWN_FAILURES="$KNOWN_FAILURES FeedRenderableTests/mentionTaggedNoteFollowsReplyGate"
+# issue #117 — the raw dark surfaceVariant (#374151, Android/web parity) hosts
+# rich content only in the group-chat bubble, where the tiers measure 2.88 /
+# 2.53. Deliberately failing: the fix is on the bubble, and only if group chat
+# ships in v1. Remove when #117 closes.
+KNOWN_FAILURES="$KNOWN_FAILURES ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble"
+# issue #134 — the 60% surfaceVariant chip wash (Show more pill, hashtag chips)
+# measures 3.59 interactive over the background and 2.88 link over a surface.
+# Deliberately failing until the chip recipe changes. Remove when #134 closes.
+KNOWN_FAILURES="$KNOWN_FAILURES ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes"
+# Retired 2026-09-20: SafetyTests/notificationDropsReplyInBlockedSubThread,
+# SafetyTests/notificationIngestZapJudgedByResolvedActor and
+# SafetyTests/purgeNonWotQualifiedScrubsInMemoryItems (issue #57) only ever
+# failed on the decommissioned MacinCloud box; they pass on every serial run
+# since. ColorHierarchyTests/textTiers_keepTheirContrastFloors_onEveryDarkGround
+# (issue #117) failed from #94 and was never listed; PR #132 split it into
+# the rendered-ground case (passes) and the two entries above.
+KNOWN="${GATE_KNOWN_FAILURES:-$KNOWN_FAILURES}"
 
 # --- judge a result bundle -------------------------------------------------
 # Prints "<passed> passed / <failed> failed / <skipped> skipped / <total> total",
@@ -83,7 +113,7 @@ rc = 0
 if total == 0:
     print("gate: FAIL — zero tests in the bundle. A gate that runs nothing is not green."); rc = 6
 if unexpected:
-    print(f"gate: FAIL — {len(unexpected)} failure(s) outside the known set (issue #57): " + ", ".join(unexpected)); rc = 7
+    print(f"gate: FAIL — {len(unexpected)} failure(s) outside the known set (KNOWN_FAILURES in gate.sh): " + ", ".join(unexpected)); rc = 7
 for k in sorted(known - seen_known):
     print(f"gate:   note    known failure did not fail this run: {k}")
 ran = os.environ.get("GATE_RAN") or "(--parse: tree not recorded)"
@@ -118,19 +148,24 @@ if [ "$ON" != "$BRANCH" ]; then
   exit 2
 fi
 
-# Freeze — GATE.md is the last commit, or this is not a gate.
-if [ ! -f GATE.md ]; then
-  echo "gate: no GATE.md on $BRANCH — stop"; exit 4
-fi
-GATE_SHA="$(git log -1 --format=%h -- GATE.md)"
+# The gate file — the one file under gates/ (or a root GATE.md) that this
+# branch adds or changes relative to its merge-base with main. Exactly one.
+GATE_FILE="$(git diff --name-only origin/main...HEAD -- 'gates/*.md' GATE.md | tr '\n' ' ' | sed 's/ *$//')"
+case "$GATE_FILE" in
+  "")  echo "gate: no gate file on $BRANCH (expected gates/<pr>-<slug>.md) — stop"; exit 4 ;;
+  *" "*) echo "gate: more than one gate file on $BRANCH ($GATE_FILE) — keep one — stop"; exit 4 ;;
+esac
+
+# Freeze — the gate file is the last commit, or this is not a gate.
+GATE_SHA="$(git log -1 --format=%h -- "$GATE_FILE")"
 if [ "$GATE_SHA" != "$HEAD_SHA" ]; then
-  echo "gate: FREEZE BROKEN — GATE.md last changed in $GATE_SHA but HEAD is $HEAD_SHA."
+  echo "gate: FREEZE BROKEN — $GATE_FILE last changed in $GATE_SHA but HEAD is $HEAD_SHA."
   echo "gate: commits after the gate file (review fixes count):"
   git log --oneline "$GATE_SHA..HEAD"
-  echo "gate: push a fresh GATE.md pinning $HEAD_SHA, then rerun — stop"
+  echo "gate: push a fresh $GATE_FILE pinning $HEAD_SHA, then rerun — stop"
   exit 4
 fi
-echo "gate: $BRANCH @ $HEAD_SHA (GATE.md commit) — freeze intact"
+echo "gate: $BRANCH @ $HEAD_SHA ($GATE_FILE commit) — freeze intact"
 
 # Gate 6 — no project-file changes on the branch (three-dot form).
 if git diff --stat origin/main...HEAD -- wisp.xcodeproj | grep -q .; then
@@ -140,8 +175,8 @@ if git diff --stat origin/main...HEAD -- wisp.xcodeproj | grep -q .; then
 fi
 
 # Gate 1 — hermetic wispTests, serial. Live suites stay skipped (no sentinel).
-# xcodebuild exits non-zero whenever any test fails — including the four
-# known ones — so its status is recorded but the verdict is the bundle's.
+# xcodebuild exits non-zero whenever any test fails — including the known
+# ones — so its status is recorded but the verdict is the bundle's.
 rm -rf "$BUNDLE"
 set +e
 xcodebuild test -project wisp.xcodeproj -scheme wisp \
