@@ -133,6 +133,7 @@ struct PostCardView: View {
         case quoteCompose
         case replyCompose
         case emojiLibrary
+        case noteReview
 
         var id: Int {
             switch self {
@@ -140,6 +141,7 @@ struct PostCardView: View {
             case .quoteCompose: return 2
             case .replyCompose: return 3
             case .emojiLibrary: return 4
+            case .noteReview: return 5
             }
         }
     }
@@ -211,6 +213,46 @@ struct PostCardView: View {
         guard let kp = NostrKey.load() else { return false }
         return NostrKey.isWatchOnly(pubkey: kp.pubkey)
     }
+
+    /// The single Cheffy Note Review eligibility source feeding both the
+    /// overflow-menu entry and the adaptive inline slot: the flag, an image
+    /// detected in the (inner, for reposts) note by the server-parity
+    /// detector, and an account that can sign. Watch-only sees nothing —
+    /// the action row is already hidden for them; the menu is not, so the
+    /// check is explicit here (Android finding 0.4).
+    ///
+    /// Also required: a loaded key that can sign (a missing key is not
+    /// "not watch-only"), a public row (`isPrivate` decrypted NIP-17 rows
+    /// must never be uploaded to the endpoint or replied to publicly), and
+    /// a kind-1 target (the feed also renders polls / gallery events here).
+    private var noteReviewEligible: Bool {
+        guard let keypair = NostrKey.load(), !keypair.privkey.isEmpty,
+              !NostrKey.isWatchOnly(pubkey: keypair.pubkey) else { return false }
+        let target = resolveRepost().event
+        return !isPrivate
+            && target.kind == 1
+            && NoteReviewTrigger.isEligible(noteContent: target.content)
+    }
+
+    /// Open the Note Review sheet from the stable root when a presenter is
+    /// in the environment (the draft editor raises the keyboard — see
+    /// `ComposePresenter`); the in-card `.sheet(item:)` is the fallback for
+    /// hosts without one.
+    private func openNoteReview() {
+        let target = resolveRepost().event
+        if let composePresenter {
+            composePresenter.openNoteReview(NoteReviewPresentation(
+                parent: target,
+                imageUrls: NoteReviewTrigger.eligibleImageUrls(noteContent: target.content),
+                onViewReply: { reply in onNoteTap?(reply.id) }
+            ))
+        } else {
+            activeSheet = .noteReview
+        }
+    }
+
+    /// Measured width of the action row, for `NoteReviewTrigger.meetsInlineWidth`.
+    @State private var actionRowWidth: CGFloat = 0
 
     /// Event id reactions and reposts target — the inner note for kind-6
     /// reposts, otherwise the post's own id.
@@ -371,11 +413,11 @@ struct PostCardView: View {
                             Text("Private")
                                 .font(.caption2.weight(.semibold))
                         }
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
-                            Capsule().fill(Color.wispPrimary.opacity(0.12))
+                            Capsule().fill(Color.zapSubtleFill)
                         )
                         .accessibilityLabel("Private reply")
                     }
@@ -544,7 +586,7 @@ struct PostCardView: View {
                             } label: {
                                 Text(contentExpanded ? "Show less" : "Show more")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.wispPrimary)
+                                    .foregroundStyle(Color.zapInteractive)
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 7)
                                     .background(Color.wispSurfaceVariant.opacity(0.6), in: Capsule())
@@ -784,6 +826,16 @@ struct PostCardView: View {
                     activeSheet = nil
                     sendReaction(picked)
                 })
+            case .noteReview:
+                if let keypair = NostrKey.load() {
+                    let target = resolveRepost().event
+                    NoteReviewSheet(
+                        parent: target,
+                        imageUrls: NoteReviewTrigger.eligibleImageUrls(noteContent: target.content),
+                        keypair: keypair,
+                        onViewReply: { reply in onNoteTap?(reply.id) }
+                    )
+                }
             }
         }
         .confirmationDialog(
@@ -1066,6 +1118,20 @@ struct PostCardView: View {
             }
             .buttonStyle(.plain)
             Spacer(minLength: 0)
+            // Adaptive Cheffy Note Review slot (web `NoteActionBar` ml-auto
+            // analog; Android's issue-#150 sixth slot). Rendered only when
+            // the row's MEASURED width clears `NoteReviewTrigger.inlineMinRowWidth`
+            // — absent below it (a 375pt device stays menu-only), never
+            // shrunk, never left to HStack squeeze semantics. The overflow
+            // menu carries the same entry at every width.
+            if noteReviewEligible && NoteReviewTrigger.meetsInlineWidth(actionRowWidth) {
+                ActionRowButton(item: ActionRowItem(glyph: .custom(AnyView(CheffyIcon(size: ActionRowItem.glyphSize))))) {
+                    openNoteReview()
+                }
+                .accessibilityLabel(NoteReview.entryTitle)
+                .accessibilityIdentifier("note-review-inline")
+                Spacer(minLength: 0)
+            }
             // Expand / collapse goes through the same 44×44 control as every
             // other item in the row (§6: no per-icon overrides).
             ActionRowButton(item: ActionRowItem(glyph: .symbol(expanded ? "chevron.up" : "chevron.down"))) {
@@ -1073,6 +1139,11 @@ struct PostCardView: View {
             }
         }
         .foregroundStyle(.secondary)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            actionRowWidth = width
+        }
     }
 
     /// Zap button with the in-flight pulse + success burst overlay. While
@@ -1231,11 +1302,23 @@ struct PostCardView: View {
         disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
+        popoverMenuItem(title: title, role: role, disabled: disabled, icon: { Image(systemName: systemImage) }, action: action)
+    }
+
+    /// Same row with an arbitrary trailing icon (the Cheffy brand mark).
+    @ViewBuilder
+    private func popoverMenuItem<Icon: View>(
+        title: String,
+        role: ButtonRole? = nil,
+        disabled: Bool = false,
+        @ViewBuilder icon: () -> Icon,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(role: role, action: action) {
             HStack(spacing: 12) {
                 Text(title)
                 Spacer(minLength: 0)
-                Image(systemName: systemImage)
+                icon()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1273,6 +1356,18 @@ struct PostCardView: View {
                     activeSheet = .addToList
                 }
                 Divider()
+
+                // Cheffy Note Review — image-bearing notes only, always
+                // present when eligible (the narrow-screen fallback for the
+                // adaptive inline slot; web `PostActionsMenu` parity).
+                if noteReviewEligible {
+                    popoverMenuItem(title: NoteReview.entryTitle, icon: { CheffyIcon(size: 20) }) {
+                        showOverflowMenu = false
+                        openNoteReview()
+                    }
+                    .accessibilityIdentifier("note-review-menu")
+                    Divider()
+                }
 
                 if isMine {
                     popoverMenuItem(title: "Pin to Profile", systemImage: "pin") {
@@ -2005,12 +2100,12 @@ struct PostCardView: View {
                 } label: {
                     Text("Retry")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                 }
                 .buttonStyle(.plain)
             } else {
                 ProgressView()
-                    .tint(Color.wispPrimary)
+                    .tint(Color.zapInteractive)
                     .scaleEffect(0.8)
                 Text("Loading reposted note…")
                     .font(.caption)
@@ -2110,7 +2205,12 @@ private struct TapToExpand: ViewModifier {
 
 // MARK: - Top Zapper Pill
 
-private struct TopZapperPill: View {
+/// The top zap on a post: avatar, bolt, amount, and the zap message when
+/// there is one (e.g. "Gratitude from Zap Cooking"). Hierarchy
+/// (ZapColors.swift): the bolt and the amount are the value tier and read
+/// first; the message is supporting gray; the capsule is a subtle accent
+/// hairline so the pill frames the amount without competing with it.
+struct TopZapperPill: View {
     let zapper: Zapper
     let profile: ProfileData?
     let onTap: () -> Void
@@ -2119,13 +2219,17 @@ private struct TopZapperPill: View {
         Button(action: onTap) {
             HStack(spacing: 6) {
                 CachedAvatarView(url: profile?.picture, size: 18)
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 11))
-                Text(CurrencyFormatter.short(sats: zapper.sats))
-                    .font(.caption2.weight(.semibold))
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11))
+                    Text(CurrencyFormatter.short(sats: zapper.sats))
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Color.wispZapColor)
                 if !zapper.message.isEmpty {
                     Text(zapper.message)
                         .font(.caption2)
+                        .foregroundStyle(Color.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -2133,9 +2237,8 @@ private struct TopZapperPill: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .overlay(
-                Capsule().stroke(Color.wispZapColor.opacity(0.3), lineWidth: 1)
+                Capsule().stroke(Color.zapSubtle, lineWidth: 1)
             )
-            .foregroundStyle(Color.wispZapColor)
         }
         .buttonStyle(.plain)
     }
@@ -2545,7 +2648,7 @@ private struct NoteDetailsPanel: View {
                 } label: {
                     Text(relaysExpanded ? "Show less" : "+\(hidden) more")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color.wispPrimary)
+                        .foregroundStyle(Color.zapInteractive)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)

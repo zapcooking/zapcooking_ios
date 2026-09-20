@@ -62,7 +62,7 @@ struct LinkPreviewView: View {
                     .foregroundStyle(.secondary)
                 Text(url)
                     .font(.callout)
-                    .foregroundStyle(Color.wispPrimary)
+                    .foregroundStyle(Color.zapLink)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
@@ -112,28 +112,47 @@ struct LinkPreviewView: View {
                         .clipped()
                 }
 
+                // Human-readable hierarchy (ZapColors.swift): site name and
+                // description gray, title white, and one link-tier line at
+                // the foot carrying the domain and the action — so the raw
+                // URL never has to appear when metadata resolved.
                 VStack(alignment: .leading, spacing: 4) {
-                    let label = data.siteName ?? domain(from: url) ?? ""
-                    if !label.isEmpty {
-                        Text(label.uppercased())
+                    if let site = data.siteName, !site.isEmpty {
+                        Text(site.uppercased())
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.textSecondary)
                             .lineLimit(1)
                     }
                     if let title = data.title, !title.isEmpty {
                         Text(title)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(Color.textPrimary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
                     if let desc = data.description, !desc.isEmpty {
                         Text(desc)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.textSecondary)
                             .lineLimit(3)
                             .multilineTextAlignment(.leading)
                     }
+                    HStack(spacing: 6) {
+                        if let host = domain(from: url) {
+                            Text(host)
+                                .font(.caption)
+                                .foregroundStyle(Color.textSecondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        HStack(spacing: 3) {
+                            Text("Open")
+                            Image(systemName: "arrow.up.right")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.zapLink)
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)

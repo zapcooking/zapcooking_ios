@@ -55,6 +55,15 @@ enum FeatureFlags {
     /// and no Cheffy surface is reachable.
     static let cheffyEnabled: Bool = true
 
+    /// Cheffy Note Review (Concern: note review) — member-gated
+    /// `POST /api/zappy/note-review` behind NIP-98, drafting a reply to a
+    /// photo in a kind-1 note. Operational kill switch, not a compliance
+    /// one: the gate is server-side and renders message-only (§4.3). When
+    /// `false`, the card's menu entry and inline slot disappear
+    /// (`NoteReviewTrigger.isEligible`) and no Note Review surface is
+    /// reachable.
+    static let noteReviewEnabled: Bool = true
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the
