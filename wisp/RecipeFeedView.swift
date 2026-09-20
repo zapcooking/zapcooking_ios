@@ -19,6 +19,10 @@ struct RecipeFeedView: View {
     /// `CheffyGate.entryVisible()` is false. With both entries present the
     /// atom becomes Android's Intelligence menu (Sous Chef → Cheffy).
     var onCheffy: (() -> Void)?
+    /// Gadgets sheet. Android carries the measuring cup on this bar as well
+    /// as the feed's, so a timer is one tap away from the recipe you are
+    /// about to cook.
+    var onGadgets: (() -> Void)?
 
     @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -31,6 +35,7 @@ struct RecipeFeedView: View {
         avatarURL: String? = nil,
         onSousChef: (() -> Void)? = nil,
         onCheffy: (() -> Void)? = nil,
+        onGadgets: (() -> Void)? = nil,
         viewModel: RecipeFeedViewModel? = nil
     ) {
         self.keypair = keypair
@@ -39,6 +44,7 @@ struct RecipeFeedView: View {
         self.avatarURL = avatarURL
         self.onSousChef = onSousChef
         self.onCheffy = onCheffy
+        self.onGadgets = onGadgets
         self.viewModel = viewModel ?? RecipeFeedViewModel()
     }
 
@@ -81,34 +87,56 @@ struct RecipeFeedView: View {
 
                 Spacer(minLength: 0)
 
-                // Android's Intelligence menu slot in this top bar: a menu
-                // when both AI tools are on, a direct button when only one
-                // is, nothing when neither.
-                if let onSousChef, let onCheffy {
-                    Menu {
-                        Button(action: onSousChef) {
-                            Label("Sous Chef", systemImage: "sparkles")
+                // Gadgets then the AI entry, tight against each other —
+                // the same trailing group and the same order the feed bar
+                // uses, and Android's. Wrapped in a zero-spacing stack so
+                // the header's 12 pt does not push them apart.
+                HStack(spacing: 0) {
+                    if let onGadgets {
+                        Button(action: onGadgets) {
+                            Image("ZapNavGadgets")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: FeedTopBarLayout.gadgetsGlyphSize)
+                                .foregroundStyle(Color.wispOnSurfaceVariant)
+                                .frame(width: FeedTopBarLayout.gadgetsTargetSize,
+                                       height: FeedTopBarLayout.gadgetsTargetSize)
+                                .contentShape(Rectangle())
                         }
-                        .accessibilityIdentifier("sous-chef-entry")
-                        Button(action: onCheffy) {
-                            Label("Cheffy", systemImage: "bubble.left.and.text.bubble.right")
-                        }
-                        .accessibilityIdentifier("cheffy-entry")
-                    } label: {
-                        intelligenceGlyph
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Gadgets")
+                        .accessibilityIdentifier("recipes-gadgets-entry")
                     }
-                    .accessibilityLabel("AI tools")
-                    .accessibilityIdentifier("intelligence-menu")
-                } else if let onSousChef {
-                    Button(action: onSousChef) { intelligenceGlyph }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Sous Chef")
-                        .accessibilityIdentifier("sous-chef-entry")
-                } else if let onCheffy {
-                    Button(action: onCheffy) { intelligenceGlyph }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Cheffy")
-                        .accessibilityIdentifier("cheffy-entry")
+
+                    // Android's Intelligence menu slot in this top bar: a
+                    // menu when both AI tools are on, a direct button when
+                    // only one is, nothing when neither.
+                    if let onSousChef, let onCheffy {
+                        Menu {
+                            Button(action: onSousChef) {
+                                Label("Sous Chef", systemImage: "sparkles")
+                            }
+                            .accessibilityIdentifier("sous-chef-entry")
+                            Button(action: onCheffy) {
+                                Label("Cheffy", systemImage: "bubble.left.and.text.bubble.right")
+                            }
+                            .accessibilityIdentifier("cheffy-entry")
+                        } label: {
+                            intelligenceGlyph
+                        }
+                        .accessibilityLabel("AI tools")
+                        .accessibilityIdentifier("intelligence-menu")
+                    } else if let onSousChef {
+                        Button(action: onSousChef) { intelligenceGlyph }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Sous Chef")
+                            .accessibilityIdentifier("sous-chef-entry")
+                    } else if let onCheffy {
+                        Button(action: onCheffy) { intelligenceGlyph }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Cheffy")
+                            .accessibilityIdentifier("cheffy-entry")
+                    }
                 }
             }
             categoryChips

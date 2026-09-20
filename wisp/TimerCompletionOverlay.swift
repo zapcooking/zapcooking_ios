@@ -12,24 +12,35 @@ struct TimerCompletionOverlay: View {
                 Color.black.opacity(0.72)
                     .ignoresSafeArea()
                     .onTapGesture(perform: onDismiss)
-                VStack(spacing: 16) {
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 56))
+                // Android's spacing is not uniform — 16 under the bell, 8
+                // under DONE!, 20 above the dismiss hint — so the stack
+                // spaces nothing and each element carries its own.
+                VStack(spacing: 0) {
+                    // Android's outlined `ic_bell_done`, not a filled bell:
+                    // the solid SF Symbol read as a much heavier mark at the
+                    // same point size.
+                    Image("ZapBellDone")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 64, height: 64)
                         .foregroundStyle(Color.wispPrimary)
                     Text("DONE!")
-                        .font(.system(size: 42, weight: .bold, design: .monospaced))
-                        .tracking(2)
+                        .font(AppFont.timerDisplay(size: 42))
+                        // Android's 0.06em at 42 pt.
+                        .tracking(42 * 0.06)
                         .foregroundStyle(Color.wispPrimary)
+                        .padding(.top, 16)
                     if !timer.label.isEmpty {
                         Text(timer.label)
-                            .font(AppFont.titleMedium)
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(Color.wispOnSurfaceVariant)
                             .multilineTextAlignment(.center)
+                            .padding(.top, 8)
                     }
                     Text("Tap anywhere to dismiss")
-                        .font(AppFont.bodySmall)
+                        .font(.system(size: 12))
                         .foregroundStyle(Color.wispOnSurfaceVariant.opacity(0.5))
-                        .padding(.top, 4)
+                        .padding(.top, 20)
                 }
                 .padding(.horizontal, 48)
                 .padding(.vertical, 40)

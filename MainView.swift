@@ -896,6 +896,7 @@ struct MainView: View {
                     avatarURL: viewModel.userProfile?.picture,
                     onSousChef: SousChefGate.entryVisible() ? { showSousChef = true } : nil,
                     onCheffy: CheffyGate.entryVisible() ? { showCheffy = true } : nil,
+                    onGadgets: { showCookingUtilitiesSheet = true },
                     viewModel: recipeFeedVM
                 )
                 if !drawerOpen && !isWatchOnly {
