@@ -97,6 +97,26 @@ enum ContentParser {
 
     private static let emojiShortcodeRegex = try! NSRegularExpression(pattern: #":([a-zA-Z0-9_-]+):"#)
 
+    /// A run of two or more newlines, tolerating spaces / tabs / stray CRs on
+    /// the blank lines between them. Collapsed to a single blank line by pass
+    /// 6. The run deliberately ends at its last newline so indentation on the
+    /// following line isn't swallowed with it.
+    private static let blankLineRunRegex = try! NSRegularExpression(
+        pattern: #"\n(?:[ \t\r]*\n)+"#
+    )
+    /// Blank lines at the very start of a post, up to and including the last
+    /// of them. Horizontal whitespace *after* the final newline is kept so a
+    /// deliberately indented first line survives.
+    private static let leadingBlankLinesRegex = try! NSRegularExpression(
+        pattern: #"\A[ \t\r\n]*\n"#
+    )
+    /// Everything from the first trailing newline to the end of the post,
+    /// plus any spaces / tabs / a stray CR sitting on the same line before it
+    /// so a CRLF-terminated post doesn't keep a lone `\r`.
+    private static let trailingBlankLinesRegex = try! NSRegularExpression(
+        pattern: #"[ \t\r]*\n[ \t\r\n]*\z"#
+    )
+
     /// Lightning / email address shape (`user@domain.tld`). Deliberately broad;
     /// each match is validated with `LnurlResolver.isLightningAddress` before it
     /// becomes a `.lightningAddress` segment. The `(?<![\w@.])` / `(?![\w@])`
@@ -336,28 +356,104 @@ enum ContentParser {
             return [seg]
         }
 
-        // Pass 5: trim blank lines preceding block segments
+        /// Shared by passes 5 and 6: delete every match of `regex` in `s`.
+        func strip(_ s: String, _ regex: NSRegularExpression) -> String {
+            let ns = s as NSString
+            return regex.stringByReplacingMatches(
+                in: s, range: NSRange(location: 0, length: ns.length), withTemplate: ""
+            )
+        }
+
+        // Pass 5: trim blank lines adjacent to block segments.
+        //
+        // Block segments (image, video, quoted note, invoice, link preview…)
+        // render as their own card in RichContentView's 8pt-spaced VStack.
+        // Blank lines around them used to survive as (possibly empty) text
+        // rows — each one a full line of height inside the UITextView plus
+        // VStack spacing on both sides — which read as a large gap between
+        // e.g. a paragraph and a lightning invoice. Trim newline runs on both
+        // sides of the adjacency, and drop the text segment entirely when
+        // nothing but whitespace remains.
         if trimBlankLines, segments.count > 1 {
-            for i in 0..<(segments.count - 1) {
-                let next = segments[i + 1]
-                let isBlock: Bool
-                switch next {
+            func isBlock(_ seg: ContentSegment) -> Bool {
+                switch seg {
                 // .nostrProfile (npub @mention) is rendered inline by
-                // RichInlineTextView, not as a card — leave preceding blank
+                // RichInlineTextView, not as a card — leave surrounding blank
                 // lines alone so a bio that puts a mention on its own line,
                 // or after a paragraph break, keeps the line break the user
                 // typed.
-                case .text, .inlineLink, .customEmoji, .hashtag, .nostrProfile: isBlock = false
-                case .link: isBlock = !linksAreInline
-                default: isBlock = true
-                }
-                if isBlock, case .text(let text) = segments[i] {
-                    let trimmed = trimTrailingNewlines(text)
-                    if trimmed != text {
-                        segments[i] = .text(trimmed.isEmpty ? "" : trimmed + "\n")
-                    }
+                case .text, .inlineLink, .customEmoji, .hashtag, .nostrProfile: return false
+                case .link: return !linksAreInline
+                default: return true
                 }
             }
+            var pruned: [ContentSegment] = []
+            pruned.reserveCapacity(segments.count)
+            for (i, seg) in segments.enumerated() {
+                guard case .text(let text) = seg else {
+                    pruned.append(seg)
+                    continue
+                }
+                let prevIsBlock = i > 0 && isBlock(segments[i - 1])
+                let nextIsBlock = i + 1 < segments.count && isBlock(segments[i + 1])
+                // Only block-adjacent text is eligible: a whitespace-only run
+                // between two inline segments is a joiner (e.g. the single
+                // space between two custom-emoji URLs) and must survive.
+                guard prevIsBlock || nextIsBlock else {
+                    pruned.append(seg)
+                    continue
+                }
+                // Whitespace-aware on purpose: a blank line that carries
+                // indentation (`text\n   \n<card>`) or a CRLF terminator is
+                // still a blank line, and a `\n`-only trim would leave the
+                // indented / `\r` remainder behind as a full text row.
+                var t = text
+                if prevIsBlock { t = strip(t, leadingBlankLinesRegex) }
+                if nextIsBlock { t = strip(t, trailingBlankLinesRegex) }
+                if t.allSatisfy({ $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" }) { continue }
+                pruned.append(.text(t))
+            }
+            segments = pruned
+        }
+
+        // Pass 6: normalize newline runs inside the text itself.
+        //
+        // Independent of pass 5, which only trims text sitting next to a block
+        // card. This one is about the prose: a post padded with trailing
+        // newlines, or paragraphs split by three or more, renders each extra
+        // newline as a real empty line inside the UITextView. That reads as a
+        // ragged gap the author usually didn't intend (often an artifact of the
+        // client they posted from) and the reader has no way to collapse.
+        //
+        // One blank line survives as the paragraph break — only the surplus
+        // goes, along with blank lines leading or trailing the whole post.
+        // Single newlines are never touched: a line break inside a stanza, an
+        // address, or a hand-made list is meaningful.
+        if trimBlankLines, !segments.isEmpty {
+            func collapse(_ s: String) -> String {
+                let ns = s as NSString
+                return blankLineRunRegex.stringByReplacingMatches(
+                    in: s, range: NSRange(location: 0, length: ns.length), withTemplate: "\n\n"
+                )
+            }
+            var normalized: [ContentSegment] = []
+            normalized.reserveCapacity(segments.count)
+            let lastIndex = segments.count - 1
+            for (i, seg) in segments.enumerated() {
+                guard case .text(let text) = seg else {
+                    normalized.append(seg)
+                    continue
+                }
+                var t = collapse(text)
+                // Edges of the rendered post, not of every text run: an
+                // interior segment's newlines are a real break between the
+                // inline pieces around it.
+                if i == 0 { t = strip(t, leadingBlankLinesRegex) }
+                if i == lastIndex { t = strip(t, trailingBlankLinesRegex) }
+                if t.isEmpty { continue }
+                normalized.append(.text(t))
+            }
+            segments = normalized
         }
 
         return segments
