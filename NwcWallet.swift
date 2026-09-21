@@ -244,6 +244,59 @@ final class NwcWallet: Wallet {
         }
     }
 
+    // MARK: - Liveness
+
+    /// Why a liveness probe concluded what it did.
+    enum Liveness {
+        /// The wallet answered (any decoded response — even an error code —
+        /// proves a live service).
+        case alive
+        /// The wallet answered and explicitly refused authorization: the
+        /// connection was revoked or restricted.
+        case refused
+        /// Nothing came back inside the probe window.
+        case unresponsive
+    }
+
+    /// Round-trip a cheap NIP-47 `get_info` to check the wallet service is
+    /// actually alive. `connect()` only opens the relay subscription — a
+    /// revoked or offline wallet still "connects", and every real RPC then
+    /// sits out the full 30 s request timeout in silence. The probe carries
+    /// its own few-second timeout so callers learn promptly.
+    func probeLiveness(timeout: TimeInterval = 7) async -> Liveness {
+        let result: Result<Nip47.Response, WalletError> = await send(.getInfo, timeout: timeout) { $0 }
+        switch result {
+        case .success:
+            return .alive
+        case .failure(let err):
+            return Self.classifyLiveness(err)
+        }
+    }
+
+    /// Maps a failed probe to liveness. A nil failure means a response came
+    /// back. `decodeFailed` and non-authorization RPC errors still prove a
+    /// live service answered (the wallet spoke, even if it refused the
+    /// method or sent something odd); authorization refusals mean the
+    /// connection was revoked or restricted; everything else — timeout, no
+    /// relay accepted the request, no session — is silence.
+    static func classifyLiveness(_ failure: WalletError?) -> Liveness {
+        switch failure {
+        case nil:
+            return .alive
+        case .rpcError(let code, let message):
+            let lower = (code + " " + message).lowercased()
+            if code == "UNAUTHORIZED" || code == "RESTRICTED"
+                || lower.contains("unauthorized") || lower.contains("revoked") || lower.contains("restricted") {
+                return .refused
+            }
+            return .alive
+        case .decodeFailed:
+            return .alive
+        default:
+            return .unresponsive
+        }
+    }
+
     // MARK: - Internals
 
     private func send<T>(_ request: Nip47.Request, timeout: TimeInterval = 30, _ map: @escaping (Nip47.Response) throws -> T) async -> Result<T, WalletError> {

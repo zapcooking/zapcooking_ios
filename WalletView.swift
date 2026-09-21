@@ -55,6 +55,17 @@ struct WalletView: View {
             }
         }
         .background(Color.wispBackground)
+        .alert(
+            "Wallet not responding",
+            isPresented: Binding(
+                get: { store.nwcConnectionProblem != nil },
+                set: { if !$0 { store.clearNwcConnectionProblem() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { store.clearNwcConnectionProblem() }
+        } message: {
+            Text(store.nwcConnectionProblem ?? "")
+        }
         .navigationDestination(for: WalletRoute.self) { route in
             switch route {
             case .settings:   WalletSettingsView(store: store)
