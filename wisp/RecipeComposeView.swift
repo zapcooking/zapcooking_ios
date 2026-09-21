@@ -34,6 +34,7 @@ struct RecipeComposeView: View {
     @State private var categoryDraft = ""
     @State private var showDiscard = false
     @State private var didApplySession = false
+    @State private var altEditorTarget: AltTextEditorTarget?
 
     init(
         keypair: Keypair,
@@ -185,6 +186,18 @@ struct RecipeComposeView: View {
             Button("Discard", role: .destructive, action: onDismiss)
         } message: {
             Text("You have unsaved changes. Closing now loses them — this form does not save drafts.")
+        }
+        .sheet(item: $altEditorTarget) { target in
+            AltTextEditorView(
+                target: target,
+                keypair: keypair
+            ) { savedText in
+                if let imageId = target.numericImageId {
+                    store.setAltText(savedText ?? "", forImageId: imageId)
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -351,7 +364,8 @@ struct RecipeComposeView: View {
     }
 
     private func photoThumb(_ item: RecipeComposeViewModel.ImageItem) -> some View {
-        ZStack(alignment: .topTrailing) {
+        let hasAlt = !item.alt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return ZStack(alignment: .topTrailing) {
             Group {
                 switch item.status {
                 case .done(let url):
@@ -375,6 +389,30 @@ struct RecipeComposeView: View {
             }
             .frame(width: 96, height: 96)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            // Same "+ ALT / ✓ ALT" chip the note composer shows; describes
+            // the image via the shared alt-text editor.
+            .overlay(alignment: .bottomLeading) {
+                Button {
+                    altEditorTarget = AltTextEditorTarget(
+                        attachmentID: UUID(),
+                        numericImageId: item.id,
+                        previewURL: store.hostedURL(forImageId: item.id),
+                        localBytes: nil,
+                        initialText: item.alt.isEmpty ? nil : item.alt
+                    )
+                } label: {
+                    Text(hasAlt ? "✓ ALT" : "+ ALT")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(hasAlt ? Color.wispPrimary : Color.black.opacity(0.6), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(store.hostedURL(forImageId: item.id) == nil)
+                .accessibilityLabel(hasAlt ? "Edit image description" : "Add image description")
+                .padding(4)
+            }
 
             Button {
                 store.removeImage(id: item.id)

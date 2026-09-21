@@ -45,6 +45,10 @@ final class RecipeComposeViewModel {
     struct ImageItem: Identifiable, Equatable {
         var id: Int
         var status: Status
+        /// Author-supplied accessibility description, published as the
+        /// NIP-92 imeta `alt` slot for this image's URL. Survives the
+        /// uploading → done transition (only `status` is rewritten).
+        var alt: String = ""
 
         enum Status: Equatable {
             case uploading
@@ -202,9 +206,19 @@ final class RecipeComposeViewModel {
         title = recipe.title ?? ""
         summary = recipe.summary ?? ""
         categories = recipe.categories
+        // Existing imeta `alt` descriptions prefill the form — `imeta` is an
+        // owned tag name, so an edit that didn't re-emit them would drop
+        // every description the author already wrote.
+        let existingAlt = ContentParser.imetaAltByUrl(event.tags)
         images = recipe.images
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { ImageItem(id: nextId(), status: .done(url: $0)) }
+            .map {
+                ImageItem(
+                    id: nextId(),
+                    status: .done(url: $0),
+                    alt: existingAlt[$0] ?? ""
+                )
+            }
 
         let c = recipe.content
         chefNotes = c.chefNotes ?? ""
@@ -447,6 +461,7 @@ final class RecipeComposeViewModel {
         )
         publishState = .publishing
         do {
+            let imageAltByURL = hostedImageAltByURL
             let result: RecipePublisher.Result
             if let original {
                 result = try await publisher.publishEdit(
@@ -454,6 +469,7 @@ final class RecipeComposeViewModel {
                     recipe: recipe,
                     categories: categories,
                     imageURLs: imageUrls,
+                    imageAltByURL: imageAltByURL,
                     keypair: keypair,
                     includeClientTag: includeClientTag
                 )
@@ -462,6 +478,7 @@ final class RecipeComposeViewModel {
                     recipe: recipe,
                     categories: categories,
                     imageURLs: imageUrls,
+                    imageAltByURL: imageAltByURL,
                     keypair: keypair,
                     includeClientTag: includeClientTag
                 )
@@ -484,6 +501,35 @@ final class RecipeComposeViewModel {
             if case .done(let url) = $0.status { return url }
             return nil
         }
+    }
+
+    /// `url → alt` for described, hosted images — the map the publisher
+    /// turns into imeta tags. Undescribed images are absent, so they emit
+    /// no tag (the no-empty-metadata rule).
+    var hostedImageAltByURL: [String: String] {
+        var map: [String: String] = [:]
+        for image in images {
+            guard case .done(let url) = image.status else { continue }
+            let trimmed = image.alt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { map[url] = trimmed }
+        }
+        return map
+    }
+
+    /// Set (or clear — blank-after-trim) one image's accessibility
+    /// description.
+    func setAltText(_ text: String, forImageId id: Int) {
+        guard let i = images.firstIndex(where: { $0.id == id }) else { return }
+        images[i].alt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The Blossom URL once the image finished uploading; nil while
+    /// uploading / failed. The alt chip only enables for hosted images —
+    /// that's what both the preview and the AI fetch need.
+    func hostedURL(forImageId id: Int) -> String? {
+        guard let item = images.first(where: { $0.id == id }) else { return nil }
+        if case .done(let url) = item.status { return url }
+        return nil
     }
 
     private func clean(_ rows: [Row]) -> [String] {

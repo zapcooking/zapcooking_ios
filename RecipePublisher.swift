@@ -120,6 +120,7 @@ final class RecipePublisher {
         recipe: RecipeParser.Recipe,
         categories: [String],
         imageURLs: [String],
+        imageAltByURL: [String: String] = [:],
         keypair: Keypair?,
         includeClientTag: Bool
     ) async throws -> Result {
@@ -136,6 +137,7 @@ final class RecipePublisher {
             recipe: recipe,
             categories: categories,
             imageURLs: images,
+            imageAltByURL: imageAltByURL,
             keypair: keypair,
             includeClientTag: includeClientTag,
             title: title
@@ -163,6 +165,7 @@ final class RecipePublisher {
         recipe: RecipeParser.Recipe,
         categories: [String],
         imageURLs: [String],
+        imageAltByURL: [String: String] = [:],
         keypair: Keypair?,
         includeClientTag: Bool
     ) async throws -> Result {
@@ -185,6 +188,7 @@ final class RecipePublisher {
             recipe: recipe,
             categories: categories,
             imageURLs: images,
+            imageAltByURL: imageAltByURL,
             keypair: keypair,
             includeClientTag: includeClientTag,
             title: title
@@ -259,6 +263,7 @@ final class RecipePublisher {
         recipe: RecipeParser.Recipe,
         categories: [String],
         imageURLs: [String],
+        imageAltByURL: [String: String] = [:],
         keypair: Keypair,
         includeClientTag: Bool,
         title: String,
@@ -275,6 +280,16 @@ final class RecipePublisher {
                 RecipeFormats.primary.slug(title)
             )
             var tags = unsigned.tags
+            // One imeta tag per described image — `url` matches the recipe's
+            // `image` tag string exactly (the alt-text handoff contract);
+            // undescribed images emit no tag. `imeta` is in
+            // `RecipeSerializer.ownedTagNames`, so an edit's merge drops the
+            // previous event's imetas and these become the only ones.
+            for url in imageURLs {
+                guard let alt = imageAltByURL[url]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !alt.isEmpty else { continue }
+                tags.append(["imeta", "url \(url)", "alt \(alt)"])
+            }
             if includeClientTag { tags.append(["client", "Zap Cooking"]) }
 
             let event = try await Signer.sign(
