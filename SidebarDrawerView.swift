@@ -4,6 +4,10 @@ struct SidebarDrawerView: View {
     let profile: ProfileData?
     let keypair: Keypair
     let onClose: () -> Void
+    /// Whether the drawer is currently presented. The mini-wallet widget keys
+    /// its balance refresh off this so a wallet the user never opens doesn't
+    /// spin up its relay socket / SDK at app launch.
+    var isVisible: Bool = false
     private var pubkey: String { keypair.pubkey }
     let onSelectTab: (BottomTab) -> Void
     let onLogout: () -> Void
@@ -41,6 +45,7 @@ struct SidebarDrawerView: View {
     var onOpenAbout: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
+    @Environment(WalletStore.self) private var walletStore
 
     @State private var settingsExpanded = false
     @State private var showAccountSwitcher = false
@@ -126,8 +131,15 @@ struct SidebarDrawerView: View {
                             .padding(.horizontal, 16)
                             .padding(.bottom, 12)
 
-                        Divider().overlay(Color.wispSurfaceVariant.opacity(0.5))
-                            .padding(.bottom, 8)
+                        if !keypair.isWatchOnly {
+                            SidebarMiniWalletView(keypair: keypair) {
+                                onSelectTab(.wallet)
+                            }
+                        }
+
+                        DrawerRow(icon: "person", label: "My Profile") {
+                            onOpenProfile()
+                        }
 
                         primaryItems
 
@@ -184,6 +196,15 @@ struct SidebarDrawerView: View {
         }
         .task(id: pubkey) {
             await loadStatus()
+        }
+        .task(id: isVisible) {
+            // Bring the configured wallet up (and refresh its balance) when
+            // the drawer opens, so the widget's figure is live rather than
+            // only as fresh as the last wallet-tab visit. `startIfConfigured`
+            // is idempotent — an already-connected wallet just gets a
+            // balance/transaction refresh.
+            guard isVisible, !keypair.isWatchOnly else { return }
+            await walletStore.startIfConfigured()
         }
         .sheet(isPresented: $showQRSheet) {
             ProfileQrSheet(
@@ -332,21 +353,14 @@ struct SidebarDrawerView: View {
 
     private var primaryItems: some View {
         VStack(spacing: 0) {
-            DrawerRow(icon: "person", label: "My Profile") {
-                onOpenProfile()
-            }
             DrawerRow(icon: "magnifyingglass", label: "Search") {
                 onSelectTab(.search)
             }
             // My Kitchen left the bottom bar in unified feed PR 6 (Messages
-            // took its slot); Wallet stays drawer-only for App Store review.
+            // took its slot); the wallet lives in the mini-wallet stripe near
+            // the top of the drawer — still drawer-only for App Store review.
             DrawerRow(icon: "fork.knife", label: "My Kitchen") {
                 onSelectTab(.kitchen)
-            }
-            if !keypair.isWatchOnly {
-                DrawerRow(icon: "creditcard", label: "Wallet") {
-                    onSelectTab(.wallet)
-                }
             }
             DrawerRow(
                 icon: "network",
@@ -437,4 +451,135 @@ struct SidebarDrawerView: View {
         .frame(maxWidth: .infinity)
     }
 
+}
+
+// MARK: - Mini wallet widget
+
+/// Compact live-balance stripe replacing the Wallet row in the drawer menu.
+/// Shows the active wallet's balance (compacted to "1.2M"-style once the
+/// grouped number gets long), a hide/show toggle that shares the wallet
+/// dashboard's per-pubkey display-mode state, and a "Set up wallet" call to
+/// action when no wallet is configured. Tapping the stripe opens the wallet
+/// tab.
+private struct SidebarMiniWalletView: View {
+    let keypair: Keypair
+    let onSelectWallet: () -> Void
+
+    @Environment(WalletStore.self) private var store
+    /// Same key the wallet dashboard's balance display uses, so hiding here
+    /// hides there and vice versa.
+    @AppStorage private var balanceDisplayRaw: String
+    @AppStorage("walletBalanceUnit") private var balanceUnitRaw: String = WalletBalanceUnit.sats.rawValue
+
+    init(keypair: Keypair, onSelectWallet: @escaping () -> Void) {
+        self.keypair = keypair
+        self.onSelectWallet = onSelectWallet
+        _balanceDisplayRaw = AppStorage(
+            wrappedValue: WalletBalanceDisplayMode.sats.rawValue,
+            WalletBalanceDisplayMode.storageKey(pubkey: keypair.pubkey)
+        )
+    }
+
+    private var displayMode: WalletBalanceDisplayMode {
+        WalletBalanceDisplayMode(rawValue: balanceDisplayRaw) ?? .sats
+    }
+
+    private var balanceUnit: WalletBalanceUnit {
+        WalletBalanceUnit(rawValue: balanceUnitRaw) ?? .sats
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "creditcard")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+
+            content
+
+            Spacer(minLength: 8)
+
+            if store.mode != nil {
+                hideToggleButton
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        // Same leading/trailing padding as `DrawerRow` so the icon and label
+        // line up with the rest of the menu; the edge-to-edge background
+        // stripe is what sets the widget apart.
+        .padding(.leading, 12)
+        .padding(.trailing, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.wispSurfaceVariant.opacity(0.5))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelectWallet)
+    }
+
+    @ViewBuilder private var content: some View {
+        if store.mode == nil {
+            // No wallet configured — the whole stripe acts as the setup button.
+            Text("Set up wallet")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.primary)
+        } else {
+            balanceLine
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .contentTransition(.numericText())
+                .animation(.easeInOut(duration: 0.25), value: store.balanceMsats)
+        }
+    }
+
+    /// One `Text` so VoiceOver reads the figure as a unit. Compacts long
+    /// balances ("1,234,567 sats" → "1.2M sats") to keep the stripe on one
+    /// line; fiat display mode renders the converted amount when a rate is
+    /// cached, falling back to the unit display like the dashboard does.
+    private var balanceLine: Text {
+        if displayMode == .hidden {
+            return Text("* * * * *")
+        }
+        guard let msats = store.balanceMsats else {
+            // Never render an unknown balance as "0" — see `awaitingBalance`
+            // in `WalletView.balanceCard`.
+            return Text("…")
+        }
+        let sats = msats / 1000
+        if displayMode == .fiat, let fiat = CurrencyFormatter.walletFiat(sats: sats) {
+            return Text(fiat)
+        }
+        if let symbol = balanceUnit.symbolPrefix {
+            return Text("\(Image(systemName: symbol)) \(numberString(sats))")
+        }
+        return Text("\(numberString(sats)) sats")
+    }
+
+    private func numberString(_ sats: Int64) -> String {
+        sats >= 1_000_000
+            ? CurrencyFormatter.formatSatsShort(sats)
+            : CurrencyFormatter.formatNumber(sats)
+    }
+
+    private var hideToggleButton: some View {
+        Button {
+            // Same hidden ↔ sats semantics as `WalletSettingsView`'s toggle —
+            // un-hiding returns to the sats display; the fiat state is a
+            // dashboard-tap state and isn't restored here.
+            balanceDisplayRaw = (displayMode == .hidden
+                ? WalletBalanceDisplayMode.sats
+                : .hidden).rawValue
+        } label: {
+            Image(systemName: displayMode == .hidden ? "eye" : "eye.slash")
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(displayMode == .hidden ? "Show balance" : "Hide balance")
+    }
 }
