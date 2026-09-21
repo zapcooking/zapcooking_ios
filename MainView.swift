@@ -785,6 +785,11 @@ struct MainView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 topBar.background(Color.wispBackground.opacity(0.85))
             }
+            // The NavigationStack paints the system background (black in
+            // dark mode) over the root ZStack's `wispBackground`, so the
+            // feed must paint its own like every other tab does — without
+            // this the feed reads black instead of the theme's dark navy.
+            .background(Color.wispBackground)
             .navigationDestination(for: ProfileRoute.self) { route in
                 ProfileView(
                     pubkey: route.pubkey,
