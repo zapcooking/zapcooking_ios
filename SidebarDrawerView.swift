@@ -471,7 +471,14 @@ private struct SidebarMiniWalletView: View {
     /// Same key the wallet dashboard's balance display uses, so hiding here
     /// hides there and vice versa.
     @AppStorage private var balanceDisplayRaw: String
+    /// Display mode saved when hiding, restored on un-hide so a fiat-mode
+    /// dashboard isn't reset to sats by the drawer's toggle — same key and
+    /// behavior as the Android stripe (zap_cooking_android#267) and
+    /// upstream wisp-ios#474.
+    @AppStorage private var unhideDisplayRaw: String
     @AppStorage("walletBalanceUnit") private var balanceUnitRaw: String = WalletBalanceUnit.sats.rawValue
+
+    private static let unhideKeyPrefix = "walletBalanceDisplayRestore_"
 
     init(keypair: Keypair, onSelectWallet: @escaping () -> Void) {
         self.keypair = keypair
@@ -479,6 +486,10 @@ private struct SidebarMiniWalletView: View {
         _balanceDisplayRaw = AppStorage(
             wrappedValue: WalletBalanceDisplayMode.sats.rawValue,
             WalletBalanceDisplayMode.storageKey(pubkey: keypair.pubkey)
+        )
+        _unhideDisplayRaw = AppStorage(
+            wrappedValue: WalletBalanceDisplayMode.sats.rawValue,
+            Self.unhideKeyPrefix + keypair.pubkey
         )
     }
 
@@ -582,12 +593,7 @@ private struct SidebarMiniWalletView: View {
 
     private var hideToggleButton: some View {
         Button {
-            // Same hidden ↔ sats semantics as `WalletSettingsView`'s toggle —
-            // un-hiding returns to the sats display; the fiat state is a
-            // dashboard-tap state and isn't restored here.
-            balanceDisplayRaw = (displayMode == .hidden
-                ? WalletBalanceDisplayMode.sats
-                : .hidden).rawValue
+            toggleHidden()
         } label: {
             Image(systemName: displayMode == .hidden ? "eye" : "eye.slash")
                 .font(.system(size: 15))
@@ -597,5 +603,22 @@ private struct SidebarMiniWalletView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(displayMode == .hidden ? "Show balance" : "Hide balance")
+    }
+
+    /// Hidden ↔ previous mode: hiding saves the current display mode and
+    /// un-hiding restores it, so fiat selection made on the dashboard
+    /// survives a drawer hide/unhide cycle. Falls back to sats when the
+    /// saved value is missing or itself hidden — e.g. hiding was reached
+    /// through the dashboard's tap-cycle, which doesn't write the restore
+    /// key.
+    private func toggleHidden() {
+        if displayMode == .hidden {
+            balanceDisplayRaw = (unhideDisplayRaw == WalletBalanceDisplayMode.hidden.rawValue)
+                ? WalletBalanceDisplayMode.sats.rawValue
+                : unhideDisplayRaw
+        } else {
+            unhideDisplayRaw = balanceDisplayRaw
+            balanceDisplayRaw = WalletBalanceDisplayMode.hidden.rawValue
+        }
     }
 }
