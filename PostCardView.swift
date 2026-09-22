@@ -668,7 +668,8 @@ struct PostCardView: View {
                 if let topZapper = effectiveZappers.max(by: { $0.sats < $1.sats }) {
                     TopZapperPill(
                         zapper: topZapper,
-                        profile: profiles[topZapper.pubkey] ?? ProfileRepository.shared.get(topZapper.pubkey)
+                        profile: profiles[topZapper.pubkey] ?? ProfileRepository.shared.get(topZapper.pubkey),
+                        profiles: profiles
                     ) {
                         onProfileTap?(topZapper.pubkey)
                     }
@@ -1055,7 +1056,8 @@ struct PostCardView: View {
             if let topZapper = effectiveZappers.max(by: { $0.sats < $1.sats }) {
                 TopZapperPill(
                     zapper: topZapper,
-                    profile: profiles[topZapper.pubkey] ?? ProfileRepository.shared.get(topZapper.pubkey)
+                    profile: profiles[topZapper.pubkey] ?? ProfileRepository.shared.get(topZapper.pubkey),
+                    profiles: profiles
                 ) {
                     onProfileTap?(topZapper.pubkey)
                 }
@@ -2297,6 +2299,10 @@ private struct TapToExpand: ViewModifier {
 struct TopZapperPill: View {
     let zapper: Zapper
     let profile: ProfileData?
+    /// Cached profiles for npub → name resolution inside the zap message —
+    /// some clients embed "From: nostr:npub1…" as the message text, and the
+    /// pill would otherwise render raw bech32.
+    let profiles: [String: ProfileData]
     let onTap: () -> Void
 
     var body: some View {
@@ -2313,7 +2319,10 @@ struct TopZapperPill: View {
                 // The pill is one line, so an image comment shows as an
                 // `[image]` marker rather than a truncated URL. The image
                 // itself renders in the details panel's zap row.
-                let message = ContentParser.compactImageMarkers(zapper.message)
+                let message = Nip57.resolvingNpubUsernames(
+                    in: ContentParser.compactImageMarkers(zapper.message),
+                    profiles: profiles
+                )
                 if !message.isEmpty {
                     Text(message)
                         .font(.caption2)
@@ -2635,7 +2644,7 @@ private struct NoteDetailsPanel: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 let baseLabel = comment.text.isEmpty
                                     ? (zapProfile?.displayString ?? short(group.pubkey))
-                                    : comment.text
+                                    : Nip57.resolvingNpubUsernames(in: comment.text, profiles: profiles)
                                 let label = group.count > 1
                                     ? "\(baseLabel) (×\(group.count))"
                                     : baseLabel

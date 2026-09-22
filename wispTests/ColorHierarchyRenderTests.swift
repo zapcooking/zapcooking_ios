@@ -77,7 +77,7 @@ struct ColorHierarchyRenderTests {
         let zap = try Self.argb(palette.zap)
         let pill = TopZapperPill(
             zapper: Zapper(pubkey: String(repeating: "1", count: 64), sats: 77, message: "Gratitude from Zap Cooking"),
-            profile: nil, onTap: {}
+            profile: nil, profiles: [:], onTap: {}
         )
         let withMessage = try #require(Self.render(
             pill.padding(16).background(palette.background)
@@ -85,7 +85,7 @@ struct ColorHierarchyRenderTests {
             name: "zap-pill-dark"
         ))
         let amountOnly = try #require(Self.render(
-            TopZapperPill(zapper: Zapper(pubkey: String(repeating: "1", count: 64), sats: 77, message: ""), profile: nil, onTap: {})
+            TopZapperPill(zapper: Zapper(pubkey: String(repeating: "1", count: 64), sats: 77, message: ""), profile: nil, profiles: [:], onTap: {})
                 .padding(16).background(palette.background)
                 .environment(AppSettings.shared).environment(\.colorScheme, .dark),
             name: "zap-pill-dark-no-message"
@@ -174,7 +174,7 @@ struct ColorHierarchyRenderTests {
                 }
                 TopZapperPill(
                     zapper: Zapper(pubkey: String(repeating: "1", count: 64), sats: 77, message: "Gratitude from Zap Cooking"),
-                    profile: nil, onTap: {}
+                    profile: nil, profiles: [:], onTap: {}
                 )
             }
         }
