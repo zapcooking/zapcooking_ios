@@ -5,11 +5,13 @@ import Testing
 import UIKit
 @testable import wisp
 
-/// The thread's "No replies yet" dead end after the last Wisp illustration
-/// left it: the built app carries no Wisp imageset, the empty state draws
-/// Cheffy in the neutral expression, and — the ZcLogo lesson from C-J —
-/// every part of Cheffy stays readable on every theme's light and dark
-/// ground. Measured from rendered pixels, not assumed.
+/// The thread's "No replies yet" dead end since the Cheffy mascot left it:
+/// the empty state draws the brand mark (`ZcLogo` — pan ring and Zap bolt)
+/// in one quiet grey, and — the lesson from C-J that removed the logo in
+/// the first place — that grey has no light/dark variant to strand on a
+/// same-coloured ground: it stays faintly readable on every theme's light
+/// and dark ground without ever shouting. Measured from rendered pixels,
+/// not assumed.
 ///
 /// To also write PNGs of the empty state (default theme light and dark, plus
 /// the softest light ground) put the target directory in the git-ignored
@@ -28,10 +30,9 @@ struct EmptyStateGroundTests {
         #expect(UIImage(named: "ZcLogo", in: Bundle.main, with: nil) != nil)
     }
 
-    // MARK: - The empty state is Cheffy, neutral
+    // MARK: - The empty state is the brand mark, one quiet grey
 
-    @Test func noRepliesEmptyState_drawsNeutralCheffy_onLightAndDarkGround() throws {
-        #expect(NoRepliesEmptyState.expression == .neutral)
+    @Test func noRepliesEmptyState_drawsZcMarkOneQuietGrey_onLightAndDarkGround() throws {
         #expect(NoRepliesEmptyState.iconSize == 64)
 
         let saved = ResolvedThemeProxy.current
@@ -49,13 +50,40 @@ struct EmptyStateGroundTests {
                     .environment(\.colorScheme, c.isDark ? .dark : .light),
                 scale: 2, name: c.name
             ))
-            // The hat is the theme primary; the eyes/brow/mouth are Cheffy's
-            // fixed ink. Both must land on the canvas — at 2× a 64 pt hat is
-            // roughly 4 000 px, the ink features a few hundred.
-            let hat = raster.count(near: try Self.rgb(ResolvedThemeProxy.current.primary), tolerance: 8)
-            let ink = raster.count(near: (0x3A, 0x24, 0x15), tolerance: 8)
-            #expect(hat >= 1_200, "\(c.name) hat px \(hat)")
-            #expect(ink >= 80, "\(c.name) ink px \(ink)")
+            let ground = raster.rgb(4, 4)
+            // The mark's one grey, blended over this ground: the tint is
+            // neutral 0.5 white at half opacity, so the blend is ground/2 +
+            // 64 per channel. Ring, bolt and handle must all be exactly
+            // this — no variant whites, no brand yellow, no theme primary.
+            let tint = (64 + ground.0 / 2, 64 + ground.1 / 2, 64 + ground.2 / 2)
+            let mark = raster.count(near: tint, tolerance: 8)
+            #expect(mark >= 900, "\(c.name): mark px \(mark)")
+
+            // The mark lands where the layout puts it: the 64 pt icon is
+            // centred in the 320 pt row under 32 pt of vertical padding.
+            // In the 456-unit ZcLogo space the ring band's top sits at the
+            // icon's top edge, the bolt fills the lens centre, and the
+            // handle runs to the bottom right — at 2× these are these
+            // pixels.
+            let samples = [
+                ("ring", raster.rgb(310, 69)),
+                ("bolt", raster.rgb(321, 115)),
+                ("handle", raster.rgb(360, 169)),
+            ]
+            for (label, sample) in samples {
+                #expect(Self.delta(sample, tint) <= 10, "\(c.name) \(label) \(sample)")
+            }
+
+            // Quiet on purpose: the grey reads on the ground but stays far
+            // from it — low contrast both ways.
+            let contrast = Self.delta(tint, ground)
+            #expect(contrast >= 15, "\(c.name): mark-vs-ground \(contrast)")
+            #expect(contrast <= 140, "\(c.name): mark-vs-ground \(contrast)")
+
+            // Nothing shouts: no theme-primary pixels and no brand-yellow
+            // pixels anywhere in the empty state.
+            #expect(raster.count(near: try Self.rgb(ResolvedThemeProxy.current.primary), tolerance: 8) <= 100, "\(c.name): primary px")
+            #expect(raster.count(near: (0xFF, 0xC8, 0x3A), tolerance: 12) == 0, "\(c.name): brand yellow px")
         }
     }
 

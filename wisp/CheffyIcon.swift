@@ -142,34 +142,51 @@ nonisolated enum CheffyIconGeometry {
     }
 }
 
-/// Minimal SVG path-data parser — the absolute `M L C Q Z` subset the
-/// Cheffy artwork uses (Android gets this from Compose's `PathParser`;
-/// SwiftUI has no equivalent). Anything outside that subset is a
-/// programmer error in the constant above, so it is skipped rather than
-/// thrown. Unit-tested in `CheffyTests`.
+/// Minimal SVG path-data parser — the absolute `M L H V C Q Z` subset the
+/// Cheffy artwork and the Zc mark use (Android gets this from Compose's
+/// `PathParser`; SwiftUI has no equivalent). Anything outside that subset
+/// is a programmer error in the constant above, so it is skipped rather
+/// than thrown. Unit-tested in `CheffyTests`.
 nonisolated enum SvgPath {
     static func parse(_ d: String) -> Path {
         var path = Path()
         var command: Character = "M"
         var numbers: [CGFloat] = []
         var index = d.startIndex
+        var current = CGPoint.zero
+        var hasCurrent = false
+
+        func line(_ p: CGPoint) {
+            if hasCurrent { path.addLine(to: p) } else { path.move(to: p) }
+            current = p
+            hasCurrent = true
+        }
 
         func flush() {
             switch command {
             case "M":
-                if numbers.count >= 2 { path.move(to: CGPoint(x: numbers[0], y: numbers[1])) }
-                // Subsequent coordinate pairs after M are implicit L.
-                var i = 2
-                while i + 1 < numbers.count {
-                    path.addLine(to: CGPoint(x: numbers[i], y: numbers[i + 1]))
-                    i += 2
+                if numbers.count >= 2 {
+                    let p = CGPoint(x: numbers[0], y: numbers[1])
+                    path.move(to: p)
+                    current = p
+                    hasCurrent = true
+                    // Subsequent coordinate pairs after M are implicit L.
+                    var i = 2
+                    while i + 1 < numbers.count {
+                        line(CGPoint(x: numbers[i], y: numbers[i + 1]))
+                        i += 2
+                    }
                 }
             case "L":
                 var i = 0
                 while i + 1 < numbers.count {
-                    path.addLine(to: CGPoint(x: numbers[i], y: numbers[i + 1]))
+                    line(CGPoint(x: numbers[i], y: numbers[i + 1]))
                     i += 2
                 }
+            case "H":
+                for x in numbers { line(CGPoint(x: x, y: current.y)) }
+            case "V":
+                for y in numbers { line(CGPoint(x: current.x, y: y)) }
             case "C":
                 var i = 0
                 while i + 5 < numbers.count {
@@ -178,6 +195,7 @@ nonisolated enum SvgPath {
                         control1: CGPoint(x: numbers[i], y: numbers[i + 1]),
                         control2: CGPoint(x: numbers[i + 2], y: numbers[i + 3])
                     )
+                    current = CGPoint(x: numbers[i + 4], y: numbers[i + 5])
                     i += 6
                 }
             case "Q":
@@ -187,6 +205,7 @@ nonisolated enum SvgPath {
                         to: CGPoint(x: numbers[i + 2], y: numbers[i + 3]),
                         control: CGPoint(x: numbers[i], y: numbers[i + 1])
                     )
+                    current = CGPoint(x: numbers[i + 2], y: numbers[i + 3])
                     i += 4
                 }
             case "Z", "z":
