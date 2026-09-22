@@ -15,6 +15,10 @@ final class WalletStore {
     private(set) var balanceMsats: Int64?
     private(set) var isConnected: Bool = false
     private(set) var lastStatus: String?
+    /// Non-nil when the configured NWC wallet failed a liveness probe — the
+    /// string was revoked or the wallet went unresponsive. WalletView
+    /// surfaces it as an alert; `disconnect()` clears it.
+    private(set) var nwcConnectionProblem: String?
     private(set) var transactions: [WalletTransaction] = []
 
     /// Backup search/publish progress for the Spark relay-backup flow.
@@ -175,6 +179,15 @@ final class WalletStore {
         return NwcConnection.parse(uri)
     }
 
+    /// The raw `nostr+walletconnect://…` URI backing the active NWC wallet,
+    /// as stored in the keychain. This is the NWC counterpart of
+    /// `sparkMnemonic` — it carries the client secret, so it's only read on
+    /// demand by the connection-string export screen. Nil for Spark wallets.
+    var nwcConnectionUri: String? {
+        guard mode == .nwc else { return nil }
+        return WalletKeychain.loadNwcUri(for: keypair.pubkey)
+    }
+
     /// Try to bring up whatever wallet the user previously configured. Safe to call repeatedly.
     /// On a re-call after wallet is already wired up, just refresh balance + transactions
     /// in the background so the user sees fresh data on tab open.
@@ -297,10 +310,23 @@ final class WalletStore {
         WalletMode.save(newMode, for: keypair.pubkey)
         await newWallet.connect()
         isConnected = newWallet.isConnected
+        // Same liveness proof as `connectNwc`, on the launch-reconnect path.
+        // Unlike the connect flow, the session stays wired so the dashboard
+        // keeps rendering cached values — the alert tells the user why
+        // nothing is refreshing, within a few seconds instead of the silent
+        // 30 s-per-request hang. The doomed refreshes are skipped entirely.
+        var nwcProblem: String? = nil
+        if newWallet.isConnected, newMode == .nwc, let nwc = newWallet as? NwcWallet {
+            nwcProblem = await nwcLivenessProblem(nwc)
+            nwcConnectionProblem = nwcProblem
+            if let nwcProblem {
+                lastStatus = nwcProblem
+            }
+        }
         // Fire-and-forget the balance/transactions refresh — the dashboard already
         // renders the cached values from `WalletCache` instantly, and live updates
         // arrive via the wallet's balanceUpdates stream when the SDK syncs.
-        if newWallet.isConnected {
+        if newWallet.isConnected && nwcProblem == nil {
             Task { _ = await self.fetchBalance() }
             Task { await self.refreshTransactions() }
             Task { await self.refreshLightningAddress() }
@@ -327,6 +353,19 @@ final class WalletStore {
         await nwc.connect()
         isConnected = nwc.isConnected
         if isConnected {
+            // Prove the wallet actually answers before declaring victory:
+            // connect() only opens the relay subscription, so a revoked or
+            // offline wallet would otherwise "connect" and every RPC would
+            // then hang for the full 30 s timeout in silence.
+            if let problem = await nwcLivenessProblem(nwc) {
+                // The URI stays saved — an offline wallet may come back —
+                // but the session doesn't count as connected.
+                disconnect()
+                isConnected = false
+                nwcConnectionProblem = problem
+                lastStatus = problem
+                return false
+            }
             Task { _ = await self.fetchBalance() }
             Task { await self.refreshTransactions() }
             Task { await self.refreshNwcNodeAlias() }
@@ -379,6 +418,27 @@ final class WalletStore {
         wallet?.disconnect()
         wallet = nil
         isConnected = false
+        nwcConnectionProblem = nil
+    }
+
+    /// Dismiss the NWC liveness alert.
+    func clearNwcConnectionProblem() {
+        nwcConnectionProblem = nil
+    }
+
+    /// Probe a freshly connected NWC wallet and translate a failed probe
+    /// into user-facing copy. The probe carries its own few-second timeout
+    /// instead of the default 30 s request timeout, so a revoked or dead
+    /// wallet surfaces now instead of hanging in silence.
+    private func nwcLivenessProblem(_ nwc: NwcWallet) async -> String? {
+        switch await nwc.probeLiveness(timeout: 7) {
+        case .alive:
+            return nil
+        case .refused:
+            return "Your wallet refused this connection — it may have been revoked. Reconnect with a fresh connection string from your wallet app."
+        case .unresponsive:
+            return "Your wallet didn't respond within a few seconds. It may be offline, or the connection was revoked — check your wallet app and try again."
+        }
     }
 
     private func wireUp(_ wallet: Wallet) {

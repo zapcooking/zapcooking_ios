@@ -8,6 +8,7 @@ enum WalletRoute: Hashable {
     case settings
     case transactions
     case recoveryPhrase
+    case nwcConnectionString
 }
 
 // MARK: - Main wallet view
@@ -54,11 +55,23 @@ struct WalletView: View {
             }
         }
         .background(Color.wispBackground)
+        .alert(
+            "Wallet not responding",
+            isPresented: Binding(
+                get: { store.nwcConnectionProblem != nil },
+                set: { if !$0 { store.clearNwcConnectionProblem() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { store.clearNwcConnectionProblem() }
+        } message: {
+            Text(store.nwcConnectionProblem ?? "")
+        }
         .navigationDestination(for: WalletRoute.self) { route in
             switch route {
             case .settings:   WalletSettingsView(store: store)
             case .transactions: TransactionHistoryView(store: store)
             case .recoveryPhrase: RecoveryPhraseView(store: store)
+            case .nwcConnectionString: NwcConnectionStringView(store: store)
             }
         }
         .task { await store.startIfConfigured() }
