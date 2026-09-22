@@ -183,19 +183,40 @@ struct QuotedNoteView: View {
     @State private var profile: ProfileData?
     @State private var contentExpanded = false
     @State private var attempt: Int = 0
+    /// Natural (pre-cap) height of the text portion, measured so the collapse
+    /// fade is drawn only when the cap actually cut text off.
+    @State private var textPortionIntrinsicHeight: CGFloat = 0
 
     /// Mirror PostCardView's long-post threshold so a quoted long note collapses
     /// to the same height with a "Show more" toggle instead of pushing the
     /// surrounding card off-screen.
     private static let longPostCharThreshold = 600
     private static let longPostTextCollapsedHeight: CGFloat = 280
-    /// Visible height of trailing media when collapsed. Rendered as its own
-    /// portion (see `renderMode: .mediaPortion` below) with its own height
-    /// budget so a long caption above it can't eat into the gallery's peek —
-    /// previously text and media shared one combined cap, and a caption
-    /// alone could consume nearly all of it, leaving almost nothing of the
-    /// gallery visible. Matches PostCardView's `mediaPeekHeight`.
-    private static let mediaPeekHeight: CGFloat = 80
+    /// Fraction of the quoted card's own content width that collapsed media
+    /// may occupy.
+    ///
+    /// PostCardView's flat 80pt peek is sized for a different job: there the
+    /// reader already has the post's text in front of them and the strip only
+    /// has to signal "media continues below the toggle". An embedded card has
+    /// no such body to lean on — for a short-text quote the image *is* the
+    /// context — and 80pt of a ~337pt-wide photo is a ~48pt sliver once the
+    /// 32pt bottom fade is drawn over it, which reads as no image at all.
+    ///
+    /// Keyed to width rather than a flat point value so the peek tracks the
+    /// card it sits in (`NotificationRowView`'s wider indent leaves a
+    /// narrower card, so a proportionally shorter slice of the same photo).
+    /// At 0.8 landscape photos clear the cap outright and a square or
+    /// portrait one keeps its top ~80% — most of the shot, with the fade
+    /// below still signalling that the rest is one tap away.
+    private static let mediaPeekWidthFraction: CGFloat = 0.8
+
+    /// Height of the collapsed media peek for a card whose content is
+    /// `width` points wide. `CollapsedMediaPeek` passes the width proposed
+    /// to this card, so a split view or resized window caps against the
+    /// card rather than the physical screen.
+    static func mediaPeekHeight(forContentWidth width: CGFloat) -> CGFloat {
+        max(1, width) * mediaPeekWidthFraction
+    }
 
     /// One silent redundancy retry on initial miss — broadens the relay set
     /// without making the user tap. Beyond that the missing card becomes a
@@ -258,6 +279,45 @@ struct QuotedNoteView: View {
         let eventId: String
         let relayHints: [String]
         let author: String?
+    }
+
+    /// Reports the text portion's natural height out from under the collapsed
+    /// `.frame(maxHeight:)` cap. The background GeometryReader sits before the
+    /// frame in the modifier chain, so it measures what the text *wants* to
+    /// be, not what the cap left visible.
+    private struct TextPortionHeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
+
+    /// Caps collapsed quote media to a fraction of the width proposed to the
+    /// card. The proposal is the card's layout width (split view, resized
+    /// window), which `UIScreen.main.bounds` is not.
+    private struct CollapsedMediaPeek: Layout {
+        var collapsed: Bool
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard let subview = subviews.first else {
+                return CGSize(width: proposal.width ?? 0, height: 0)
+            }
+            let ideal = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+            let width = proposal.width ?? ideal.width
+            let height = collapsed
+                ? min(ideal.height, QuotedNoteView.mediaPeekHeight(forContentWidth: width))
+                : ideal.height
+            return CGSize(width: width, height: height)
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            guard let subview = subviews.first else { return }
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: bounds.width, height: nil)
+            )
+        }
     }
 
     private var loadingCard: some View {
@@ -479,13 +539,28 @@ struct QuotedNoteView: View {
                         // stamp-sized preview. The cap then clips the
                         // bottom rather than scaling the image.
                         .fixedSize(horizontal: false, vertical: true)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: TextPortionHeightKey.self,
+                                    value: geo.size.height
+                                )
+                            }
+                        )
                         .frame(
                             maxHeight: collapsed ? Self.longPostTextCollapsedHeight : .infinity,
                             alignment: .top
                         )
                         .clipped()
                         .overlay(alignment: .bottom) {
-                            if collapsed {
+                            // The fade means "text continues below the cap",
+                            // so only draw it when the cap actually cut
+                            // something. A quote whose text fits whole was
+                            // getting its only line dimmed under the fade,
+                            // which read as a truncated preview of text
+                            // that wasn't there.
+                            if collapsed,
+                               textPortionIntrinsicHeight > Self.longPostTextCollapsedHeight + 0.5 {
                                 LinearGradient(
                                     colors: [Color.wispBackground.opacity(0), Color.wispBackground],
                                     startPoint: .top,
@@ -509,28 +584,27 @@ struct QuotedNoteView: View {
                         }
                         // Media portion: everything from the first
                         // block/media group onward. Always rendered, even
-                        // when collapsed — peeked to `mediaPeekHeight` so
-                        // the user can see media (e.g. a gallery) exists
-                        // below, instead of the caption's cap swallowing it
-                        // entirely. Expands to natural size on toggle.
-                        RichContentView(
-                            content: event.content,
-                            tags: event.tags,
-                            profiles: profiles,
-                            authorPubkey: event.pubkey,
-                            onProfileTap: onProfileTap,
-                            onNoteTap: onNoteTap,
-                            onHashtagTap: onHashtagTap,
-                            showLinkPreviews: false,
-                            nested: true,
-                            nestedHorizontalInset: nestedHorizontalInset,
-                            renderMode: .mediaPortion
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(
-                            maxHeight: collapsed ? Self.mediaPeekHeight : .infinity,
-                            alignment: .top
-                        )
+                        // when collapsed — peeked to a fraction of this
+                        // card's proposed width so the user can see media
+                        // (e.g. a gallery) exists below, instead of the
+                        // caption's cap swallowing it entirely. Expands to
+                        // natural size on toggle.
+                        CollapsedMediaPeek(collapsed: collapsed) {
+                            RichContentView(
+                                content: event.content,
+                                tags: event.tags,
+                                profiles: profiles,
+                                authorPubkey: event.pubkey,
+                                onProfileTap: onProfileTap,
+                                onNoteTap: onNoteTap,
+                                onHashtagTap: onHashtagTap,
+                                showLinkPreviews: false,
+                                nested: true,
+                                nestedHorizontalInset: nestedHorizontalInset,
+                                renderMode: .mediaPortion
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
                         .clipped()
                         .overlay(alignment: .bottom) {
                             if collapsed {
@@ -544,6 +618,7 @@ struct QuotedNoteView: View {
                             }
                         }
                     }
+                    .onPreferenceChange(TextPortionHeightKey.self) { textPortionIntrinsicHeight = $0 }
                 }
             }
             .padding(12)
