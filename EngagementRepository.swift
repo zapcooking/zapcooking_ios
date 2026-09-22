@@ -453,7 +453,12 @@ final class EngagementRepository {
         // only pull the delta since last time. Any cold id, or a forced resync,
         // disables `since` for the whole REQ (a single REQ carries one `since`).
         let since = Self.sinceFloor(forTargets: eventIds, cursor: engagementCursor, forceFull: forceFull)
-        let filter = NostrFilter(kinds: [1, 6, 7, 9735], eTags: eventIds, limit: 500, since: since)
+        // 1111 rides along with kind-1: a NIP-22 comment on one of these
+        // events is a reply, and the thread already renders it. Asking only
+        // for kind-1 is what made a card read "5 replies" under a thread
+        // showing 13.
+        let filter = NostrFilter(kinds: [1, Nip22.kindComment, 6, 7, 9735],
+                                 eTags: eventIds, limit: 500, since: since)
         let sub = RelayPool.subscribe(relays: [relay], filter: filter, id: subId)
         liveSubs.append(sub)
         Signposts.feed.emitEvent("engagement.req.opened", "active: \(self.liveSubs.count)/\(self.maxConcurrentSubs) ids: \(eventIds.count)")
@@ -643,7 +648,12 @@ final class EngagementRepository {
         var current = b.counts
         current.seenRelays.insert(relayUrl)
         switch event.kind {
-        case 1:
+        case 1, Nip22.kindComment:
+            // Counted once per event id. `seenEngagementIds` upstream of this
+            // is what stops a client that publishes both a kind-1 reply and a
+            // kind-1111 comment for the same action from incrementing twice —
+            // they are separate events, so this is dedup by delivery, not by
+            // intent, and two genuinely distinct replies still count as two.
             current.replies += 1
         case 6:
             current.reposts += 1

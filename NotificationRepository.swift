@@ -175,6 +175,7 @@ final class NotificationRepository {
         var item: FlatNotificationItem?
         switch event.kind {
         case 1:    item = classifyKind1(event)
+        case Nip22.kindComment: item = classifyComment(event)
         case 6:    item = classifyRepost(event)
         case 7:    item = classifyReaction(event)
         case 9735: item = classifyZap(event, isFromDmRelay: isFromDmRelay)
@@ -435,6 +436,57 @@ final class NotificationRepository {
         if changed {
             summary = computeSummary24h()
         }
+    }
+
+    /// A NIP-22 comment aimed at me.
+    ///
+    /// Comments reach me three ways, in descending specificity:
+    ///
+    /// 1. the lowercase `e` names one of my events — someone answered that
+    ///    event directly, and `k` says whether it was a note or a comment;
+    /// 2. the uppercase `E` names one of my events — a comment somewhere
+    ///    under my root, the mixed-thread case Sidecar captured where a
+    ///    kind-1 thread continues in kind-1111;
+    /// 3. neither, but the uppercase `P` names me — my root, quoted by id I
+    ///    do not hold locally. Kept because the `P` tag is the author
+    ///    attribution the spec requires, so it is the last honest signal that
+    ///    this was aimed at me.
+    ///
+    /// All three land as `.reply`, not a new kind: a comment *is* a reply for
+    /// filtering, counting and effects. Only `parentKind` differs, and only
+    /// the caption reads it.
+    private func classifyComment(_ event: NostrEvent) -> FlatNotificationItem? {
+        let parentId = Nip22.parentEventId(of: event)
+        let rootId = Nip22.rootEventId(of: event)
+        let parentKind = Nip22.parentKind(of: event)
+
+        let target: String?
+        if let parentId, selfEventIds.contains(parentId) {
+            target = parentId
+        } else if let rootId, selfEventIds.contains(rootId) {
+            // Under my root but answering someone else — show what they
+            // actually replied to, as `classifyKind1` does.
+            target = parentId ?? rootId
+        } else if Nip22.rootAuthor(of: event) == activePubkey
+                    || Nip22.parentAuthor(of: event) == activePubkey {
+            target = parentId ?? rootId
+        } else {
+            return nil
+        }
+        guard let referenced = target else { return nil }
+
+        let parentTag = event.tags.first { $0.first == "e" && $0.count >= 2 && $0[1] == referenced }
+        let hint = (parentTag?.count ?? 0) >= 3 ? [parentTag![2]] : []
+        return FlatNotificationItem(
+            id: event.id,
+            kind: .reply,
+            actorPubkey: event.pubkey,
+            referencedEventId: referenced,
+            timestamp: event.createdAt,
+            relayHints: hint,
+            replyTargetIsMine: selfEventIds.contains(referenced),
+            parentKind: parentKind
+        )
     }
 
     private func classifyKind1(_ event: NostrEvent) -> FlatNotificationItem? {

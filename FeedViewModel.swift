@@ -192,6 +192,9 @@ final class FeedViewModel {
     /// Kinds queried from a single relay or relay set, matching the Android client.
     /// 1068 = NIP-88 poll, 6969 = NIP-69 zap poll, 30023 = long-form. Polls render as
     /// `PollSection` in `PostCardView`; long-form falls through to the text path.
+    // No 1111 here on purpose — see `isFeedRenderable`. Fetching comments we
+    // will not render only spends bandwidth; the counts come from
+    // `EngagementRepository`'s own REQ, which does ask for them.
     static let relayFeedKinds = [1, 6, 1068, 6969, 30023, 20, 21, 22]
 
     /// True for events that should appear as top-level rows in the feed list.

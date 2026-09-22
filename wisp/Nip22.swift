@@ -77,6 +77,69 @@ nonisolated enum Nip22 {
         return ExternalRef(value: iTag[1], kind: kind, hint: hint)
     }
 
+    // MARK: - Event-rooted comments
+
+    // A comment can be scoped to a nostr event instead of an external
+    // identifier, and in the wild that root is very often a plain kind-1
+    // note: a thread starts in NIP-10 and a participant's client switches to
+    // comments partway down, carrying `E` = the kind-1 root with `K` = "1".
+    // Sidecar captured exactly that shape off public relays
+    // (dmnyc/sidecar#326). Only the external (`I`) side was read here before,
+    // so those comments were invisible to counting and notifications.
+
+    /// The event this comment is rooted on (uppercase `E`), or nil when the
+    /// root is external or addressable.
+    static func rootEventId(of event: NostrEvent) -> String? {
+        tagValue(event, "E")
+    }
+
+    /// The kind of the root the comment is scoped to (uppercase `K`). A
+    /// string on the wire, because an external root names a NIP-73 type
+    /// (`web`, `podcast:item:guid`) rather than a number.
+    static func rootKindRaw(of event: NostrEvent) -> String? {
+        tagValue(event, "K")
+    }
+
+    /// Author of the root event (uppercase `P`).
+    static func rootAuthor(of event: NostrEvent) -> String? {
+        tagValue(event, "P")
+    }
+
+    /// The comment's immediate parent event (lowercase `e`). Equals the root
+    /// for a top-level comment; points at another comment further down.
+    static func parentEventId(of event: NostrEvent) -> String? {
+        tagValue(event, "e")
+    }
+
+    /// The immediate parent's kind (lowercase `k`).
+    ///
+    /// This is the tag that decides whether someone answered a note or a
+    /// comment, which is the distinction Sidecar labels and the reason this
+    /// is carried onto the notification row rather than discarded.
+    static func parentKindRaw(of event: NostrEvent) -> String? {
+        tagValue(event, "k")
+    }
+
+    /// The immediate parent's kind as an integer, or nil when the parent is
+    /// an external identifier (`k` = "web" and friends).
+    static func parentKind(of event: NostrEvent) -> Int? {
+        parentKindRaw(of: event).flatMap(Int.init)
+    }
+
+    /// Author of the immediate parent (lowercase `p`).
+    static func parentAuthor(of event: NostrEvent) -> String? {
+        tagValue(event, "p")
+    }
+
+    /// First value of the first tag with this exact name. Case matters — `E`
+    /// and `e` mean different things in this NIP, so this deliberately does
+    /// not fold case.
+    private static func tagValue(_ event: NostrEvent, _ name: String) -> String? {
+        guard let tag = event.tags.first(where: { $0.count >= 2 && $0[0] == name }),
+              !tag[1].isEmpty else { return nil }
+        return tag[1]
+    }
+
     /// Build the tag set for a kind-1111 reply to `parent`, carrying its root
     /// scope forward unchanged and pointing the lowercase tags at `parent`.
     ///

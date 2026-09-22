@@ -316,8 +316,12 @@ actor EventStore {
         var seenIds = Set<String>()
         for target in targetIds {
             do {
+                // Comments count too, so the seed matches what the live
+                // subscription will report — otherwise the card's count
+                // jumps the moment the REQ lands.
                 let query = try box.query {
-                    EventEntity.kind == 1 && EventEntity.tags.contains(target)
+                    (EventEntity.kind == 1 || EventEntity.kind == Nip22.kindComment)
+                        && EventEntity.tags.contains(target)
                 }.build()
                 let candidates = try query.find(offset: 0, limit: 5000)
                 for entity in candidates {
@@ -325,12 +329,23 @@ actor EventStore {
                     // A quote targeting a tracked note is not a reply.
                     let isQuote = event.tags.contains { $0.count >= 2 && $0[0] == "q" && targetIds.contains($0[1]) }
                     if isQuote { continue }
-                    let eTargets = event.tags.compactMap { tag -> String? in
-                        guard tag.count >= 2, tag[0] == "e" else { return nil }
-                        if tag.count >= 4, tag[3] == "mention" { return nil }
-                        return tag[1]
+                    // A comment names its parent in the lowercase `e`; a
+                    // kind-1 reply names it in the last non-mention `e`.
+                    // NIP-10 marker order does not apply to comments, so
+                    // taking `.last` on one would pick whichever tag the
+                    // publisher happened to write last.
+                    let eTargets: [String]
+                    if event.kind == Nip22.kindComment {
+                        eTargets = [Nip22.parentEventId(of: event), Nip22.rootEventId(of: event)]
+                            .compactMap { $0 }
+                    } else {
+                        eTargets = event.tags.compactMap { tag -> String? in
+                            guard tag.count >= 2, tag[0] == "e" else { return nil }
+                            if tag.count >= 4, tag[3] == "mention" { return nil }
+                            return tag[1]
+                        }
                     }
-                    guard let primary = eTargets.last,
+                    guard let primary = eTargets.first(where: { targetIds.contains($0) }) ?? eTargets.last,
                           primary != event.id,
                           targetIds.contains(primary) else { continue }
                     counts[primary, default: 0] += 1
