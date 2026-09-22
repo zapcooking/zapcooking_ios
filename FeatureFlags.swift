@@ -64,6 +64,14 @@ enum FeatureFlags {
     /// reachable.
     static let noteReviewEnabled: Bool = true
 
+    /// Alt-text AI generation — member-gated `POST /api/zappy/ask-photo`
+    /// with `purpose: "alt"` behind NIP-98, filling the composer's alt-text
+    /// editor with a draft description. Operational kill switch, not a
+    /// compliance one: the gate itself is server-side and renders
+    /// message-only (§4.3). When `false`, the "Generate with AI" action
+    /// disappears from the editor and manual entry remains.
+    static let altTextAiEnabled: Bool = true
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the

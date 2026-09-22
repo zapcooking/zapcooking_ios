@@ -402,6 +402,12 @@ struct RecipeDetailView: View {
                     },
                     failure: { EmptyView() }
                 )
+                // Alt-text handoff: the cover's description rides the event's
+                // imeta `alt` slot, matched by exact URL against the `image`
+                // tag. Undescribed covers keep the default VoiceOver reading.
+                .modifier(AltAccessibilityLabel(
+                    label: ContentParser.imetaAltByUrl(event.tags)[cover]
+                ))
                 .padding(.top, 8)
                 Spacer().frame(height: 16)
             }

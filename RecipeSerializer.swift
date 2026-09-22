@@ -146,7 +146,13 @@ enum RecipeSerializer {
     /// is here but is **not** written by `toTags`: the publisher adds it per the
     /// member's NIP-89 preference, so carrying the original's forward would both
     /// duplicate it and override a preference since turned off.
-    private static let ownedTagNames: Set<String> = ["d", "title", "summary", "image", "published_at", "client"]
+    ///
+    /// `imeta` is the same shape as `client`: the publisher appends it (the
+    /// alt-text handoff, one tag per described image) after serialization, so an
+    /// edit must drop the original's imetas and let the publisher write fresh
+    /// ones — otherwise stale descriptions would survive images they no longer
+    /// describe.
+    private static let ownedTagNames: Set<String> = ["d", "title", "summary", "image", "published_at", "client", "imeta"]
 
     /// True when a `#t` value is one `toTags` generates — the root itself or any
     /// `<root>-…` value (the per-recipe self-tag and the category tags).
