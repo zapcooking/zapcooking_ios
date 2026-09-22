@@ -5,8 +5,9 @@ struct SidebarDrawerView: View {
     let keypair: Keypair
     let onClose: () -> Void
     /// Whether the drawer is currently presented. The mini-wallet widget keys
-    /// its balance refresh off this so a wallet the user never opens doesn't
-    /// spin up its relay socket / SDK at app launch.
+    /// its balance refresh off this. Note MainView's startup already prewarms
+    /// a configured wallet (95ff262, near-instant wallet load), so this is a
+    /// freshness pass and a retry path — not the wallet's first startup.
     var isVisible: Bool = false
     private var pubkey: String { keypair.pubkey }
     let onSelectTab: (BottomTab) -> Void
@@ -198,11 +199,12 @@ struct SidebarDrawerView: View {
             await loadStatus()
         }
         .task(id: isVisible) {
-            // Bring the configured wallet up (and refresh its balance) when
-            // the drawer opens, so the widget's figure is live rather than
-            // only as fresh as the last wallet-tab visit. `startIfConfigured`
-            // is idempotent — an already-connected wallet just gets a
-            // balance/transaction refresh.
+            // Refresh the configured wallet's balance when the drawer opens
+            // so the stripe's figure is live, and retry the startup if
+            // MainView's launch-time prewarm failed (e.g. no network at
+            // launch). `startIfConfigured` is idempotent — an
+            // already-connected wallet just gets a balance/transaction
+            // refresh.
             guard isVisible, !keypair.isWatchOnly else { return }
             await walletStore.startIfConfigured()
         }
@@ -489,34 +491,48 @@ private struct SidebarMiniWalletView: View {
     }
 
     var body: some View {
+        // The stripe is a real Button, not an onTapGesture, so VoiceOver
+        // exposes it — especially the "Set up wallet" state — as activatable.
+        // The eye toggle is a sibling, not nested inside the button: a nested
+        // control gets swallowed into the parent button's accessibility
+        // element and stops being individually focusable.
         HStack(spacing: 16) {
-            Image(systemName: "creditcard")
-                .font(.system(size: 20))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
+            Button(action: onSelectWallet) {
+                HStack(spacing: 16) {
+                    Image(systemName: "creditcard")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
 
-            content
+                    content
 
-            Spacer(minLength: 8)
+                    Spacer(minLength: 8)
+
+                    if store.mode == nil {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                // Same leading padding as `DrawerRow` so the icon and label
+                // line up with the rest of the menu; the vertical padding
+                // lives inside the button so its tap target is the full
+                // stripe height. The edge-to-edge background stripe is what
+                // sets the widget apart.
+                .padding(.leading, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if store.mode != nil {
                 hideToggleButton
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
             }
         }
-        // Same leading/trailing padding as `DrawerRow` so the icon and label
-        // line up with the rest of the menu; the edge-to-edge background
-        // stripe is what sets the widget apart.
-        .padding(.leading, 12)
         .padding(.trailing, 16)
-        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.wispSurfaceVariant.opacity(0.5))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onSelectWallet)
     }
 
     @ViewBuilder private var content: some View {
