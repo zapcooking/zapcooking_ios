@@ -88,8 +88,9 @@ struct AltTextEditorTarget: Identifiable {
     let attachmentID: UUID
     /// Recipe-compose images identify by Int, not UUID — carried through so
     /// the save closure can route the text back to the right image. Nil for
-    /// note attachments.
-    var numericImageId: Int?
+    /// note attachments, which is also the default so the note composer can
+    /// omit it.
+    var numericImageId: Int? = nil
     /// Uploaded URL for the preview when local bytes are gone.
     var previewURL: String?
     /// Pre-upload bytes — also what the AI generator sends when present.

@@ -303,6 +303,7 @@ struct FullScreenImageView: View {
                         .padding(.bottom, 24)
                         .allowsHitTesting(false)
                         .opacity(chromeHidden ? 0 : 1)
+                        .accessibilityHidden(chromeHidden)
                 }
 
                 // Transparent gesture-capturing overlay sitting above the
@@ -378,6 +379,7 @@ struct FullScreenImageView: View {
                     }
                     .opacity(chromeHidden ? 0 : 1)
                     .allowsHitTesting(!chromeHidden)
+                    .accessibilityHidden(chromeHidden)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -413,6 +413,10 @@ struct RichContentView: View {
             })
         case .video(let meta):
             InlineVideoView(meta: meta)
+                // Same treatment as inline images: VoiceOver reads the
+                // author's imeta `alt` when one exists, and an undescribed
+                // video keeps the player's default label.
+                .modifier(AltAccessibilityLabel(label: meta.alt))
         case .audio(let meta):
             InlineAudioView(
                 meta: meta,

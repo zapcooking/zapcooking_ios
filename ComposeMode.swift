@@ -39,7 +39,9 @@ struct ComposeAttachment: Identifiable {
     /// Author-supplied accessibility description. Published as the NIP-92
     /// imeta `alt` slot (one imeta tag per described image — undescribed
     /// attachments emit no tag) and round-tripped through drafts.
-    var altText: String?
+    /// Defaults to nil so existing call sites (picker, drafts, tests) keep
+    /// compiling; undescribed attachments simply omit the imeta tag.
+    var altText: String? = nil
 
     var isVideo: Bool { mime.hasPrefix("video/") }
 

@@ -40,7 +40,10 @@ struct MediaGridView: View {
     var onTileTap: ((Int) -> Void)? = nil
     @State private var openIndex: Int?
     @State private var currentItemId: String?
-    @State private var showAltDescription = false
+    /// The description currently shown in the gallery's single ALT sheet.
+    /// One presenter for the whole strip — a per-tile sheet on a shared
+    /// Boolean can present the wrong image's text.
+    @State private var altDescription: String?
 
     struct MediaItem: Hashable, Identifiable {
         let url: String
@@ -88,11 +91,23 @@ struct MediaGridView: View {
     }
 
     var body: some View {
-        if nested {
-            nestedBody
-        } else {
-            feedBody
+        Group {
+            if nested {
+                nestedBody
+            } else {
+                feedBody
+            }
         }
+        .mediaAltDescriptionSheet(alt: altDescription, isPresented: altDescriptionPresented)
+    }
+
+    /// One sheet for every tile. The badge sets `altDescription`; dismissing
+    /// the sheet clears it.
+    private var altDescriptionPresented: Binding<Bool> {
+        Binding(
+            get: { altDescription != nil },
+            set: { if !$0 { altDescription = nil } }
+        )
     }
 
     /// Nested-container layout: ask `GeometryReader` for the actual
@@ -239,7 +254,7 @@ struct MediaGridView: View {
             // one flattened control.
             if let alt = item.alt {
                 Button {
-                    showAltDescription = true
+                    altDescription = alt
                 } label: {
                     AltBadge()
                         .padding(8)
@@ -249,7 +264,6 @@ struct MediaGridView: View {
                 .accessibilityLabel("View image description")
             }
         }
-        .mediaAltDescriptionSheet(alt: item.alt, isPresented: $showAltDescription)
     }
 
     private var indexBadge: some View {
@@ -476,6 +490,7 @@ struct FullScreenMediaPager: View {
                     .padding(.bottom, 24)
                     .allowsHitTesting(!chromeHidden)
                     .opacity(chromeHidden ? 0 : 1)
+                    .accessibilityHidden(chromeHidden)
                     .animation(.easeInOut(duration: 0.15), value: index)
                 }
 
@@ -538,6 +553,7 @@ struct FullScreenMediaPager: View {
         }
         .allowsHitTesting(!chromeHidden)
         .opacity(chromeHidden ? 0 : 1)
+        .accessibilityHidden(chromeHidden)
     }
 
     private func toolbarIcon(_ systemName: String) -> some View {
