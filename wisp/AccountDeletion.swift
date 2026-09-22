@@ -34,7 +34,9 @@ struct AppDataDeviceWipe: DeviceWipe {
 /// with no local key and no backup the identity is gone for good unless the
 /// user exported the nsec first.
 ///
-/// Order is load-bearing. Backups go first — if iCloud refuses, nothing
+/// Order is load-bearing. The deletion request to Zap Cooking comes before
+/// all of this (`DeleteAccountViewModel.confirm`) — it is signed by the key
+/// this removes. Then backups — if iCloud refuses, nothing
 /// local has been touched and the user can retry. The local wipe then
 /// always clears the `active` keychain item: keychain items survive deleting
 /// the app, and `ContentView` logs in from `NostrKey.load()` on launch, so a
@@ -153,12 +155,12 @@ enum AccountDeletion {
 
 // MARK: - Cook+ billing
 
-/// Where a member cancels Cook+, decided before anything is wiped (the web
-/// needs a request signed by this key, which is about to be gone).
+/// What the flow tells a member about Cook+ before deleting. Read before
+/// anything is wiped — the check is signed by the key about to go.
 enum CookPlusCancellation: Equatable {
     /// Not a member, or membership could not be read — no block is shown.
     case none
-    /// Card member: the Stripe billing portal is where cancellation happens.
+    /// Card member: the deletion request stops the renewal server-side.
     case card
     /// Lightning member: one paid term, nothing renews.
     case lightning
@@ -178,35 +180,65 @@ enum CookPlusCancellation: Equatable {
     }
 }
 
-extension ZapCookingApi {
-    /// `POST /api/stripe/create-portal-session` — NIP-98 signed by the member.
-    /// Returns the Stripe-hosted billing portal URL (cancel, invoices, card).
-    /// The portal shows no pricing, which is why iOS may open it while
-    /// `FeatureFlags.membershipLinkoutEnabled` stays false. 404 means there
-    /// is no Stripe customer for this key.
-    static func createBillingPortalSession(signer: Nip98Signing) async throws -> URL {
-        let body = encodeJSON(PortalSessionRequest(pubkey: signer.pubkeyHex, returnUrl: "\(baseURL.absoluteString)/"))
-        let (status, data) = try await authedPost(
-            signer: signer,
-            path: "api/stripe/create-portal-session",
-            body: body,
-            client: HttpClientFactory.generalClient,
-            isUnauthorized: { response, _ in response.statusCode == 403 }
-        )
-        try throwErrorIfNeeded(status: status.statusCode, body: data)
-        let response = try decode(data, as: PortalSessionResponse.self)
-        guard let url = URL(string: response.url), url.scheme == "https" else {
-            throw ZapCookingApiError.decoding("portal url")
+// MARK: - Deletion request
+
+/// The server's receipt for `POST /api/account/deletion-request`.
+struct DeletionRequestReceipt: Decodable, Equatable {
+    var status: String
+    var billing: Billing
+    var scheduledPostsRemoved: Int?
+
+    /// What the server did about a renewing Cook+ card subscription.
+    enum Billing: String, Decodable {
+        /// Renewal stopped (`cancel_at_period_end`); access runs to period end.
+        case cancelled
+        /// No renewing subscription found.
+        case none
+        /// Stripe refused or billing is not configured.
+        case error, unavailable
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Billing(rawValue: raw) ?? .error
         }
-        return url
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case status, billing
+        case scheduledPostsRemoved = "scheduled_posts_removed"
     }
 }
 
-private struct PortalSessionRequest: Encodable {
-    let pubkey: String
-    let returnUrl: String
+/// Sends the account's deletion request to Zap Cooking. Signed by the
+/// account's own key, so it has to run before the local wipe.
+protocol DeletionRequestSender {
+    func send(keypair: Keypair) async throws -> DeletionRequestReceipt
 }
 
-private struct PortalSessionResponse: Decodable {
-    let url: String
+struct ZapCookingDeletionRequest: DeletionRequestSender {
+    func send(keypair: Keypair) async throws -> DeletionRequestReceipt {
+        try await ZapCookingApi.requestAccountDeletion(signer: LocalNip98Signer(keypair: keypair))
+    }
+}
+
+extension ZapCookingApi {
+    /// `POST /api/account/deletion-request` — NIP-98 only; the signer IS the
+    /// account (no pubkey in the body). The server records the request, stops
+    /// a renewing Stripe subscription (`cancel_at_period_end`), removes
+    /// scheduled posts, and queues membership, credits and Pantry content for
+    /// staff within 30 days. Idempotent. Success is 202.
+    static func requestAccountDeletion(signer: Nip98Signing) async throws -> DeletionRequestReceipt {
+        let (status, data) = try await authedPost(
+            signer: signer,
+            path: "api/account/deletion-request",
+            body: #"{"source":"ios"}"#,
+            client: HttpClientFactory.generalClient,
+            isUnauthorized: { response, _ in response.statusCode == 401 }
+        )
+        try throwErrorIfNeeded(status: status.statusCode, body: data)
+        guard status.statusCode == 202 else {
+            throw ZapCookingApiError.requestFailed(status: status.statusCode, body: nil)
+        }
+        return try decode(data, as: DeletionRequestReceipt.self)
+    }
 }

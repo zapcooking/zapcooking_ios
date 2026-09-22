@@ -14,19 +14,27 @@ struct AccountDeletionTests {
 
     // MARK: - Fakes
 
+    /// Shared call log, to check the order of the three steps.
+    final class Log { var entries: [String] = [] }
+
     /// In-memory stand-in for the iCloud-Keychain backup store (the real
     /// one refuses without a signed-in iCloud account).
     final class FakeBackups: ICloudBackupStore {
         var files: [KeychainBackupService.BackupFile]
         var deleted: [String] = []
         var failDeletes = false
+        var log: Log?
 
-        init(_ files: [KeychainBackupService.BackupFile]) { self.files = files }
+        init(_ files: [KeychainBackupService.BackupFile], log: Log? = nil) {
+            self.files = files
+            self.log = log
+        }
 
         func listBackups() async throws -> [KeychainBackupService.BackupFile] { files }
 
         func deleteBackup(backupID: String) async throws {
             if failDeletes { throw KeychainBackupError(kind: .underlying(errSecIO), op: "delete") }
+            log?.entries.append("backup")
             deleted.append(backupID)
             files.removeAll { $0.backupID == backupID }
         }
@@ -34,7 +42,30 @@ struct AccountDeletionTests {
 
     final class RecordingWipe: DeviceWipe {
         var calls = 0
-        func wipeEverything() async { calls += 1 }
+        var log: Log?
+        init(log: Log? = nil) { self.log = log }
+        func wipeEverything() async {
+            log?.entries.append("wipe")
+            calls += 1
+        }
+    }
+
+    final class FakeRequester: DeletionRequestSender {
+        var fail: Bool
+        var calls = 0
+        var log: Log?
+        init(fail: Bool = false, log: Log? = nil) {
+            self.fail = fail
+            self.log = log
+        }
+        func send(keypair: Keypair) async throws -> DeletionRequestReceipt {
+            calls += 1
+            // The request must be signed while the key still exists.
+            #expect(NostrKey.loadAccount(pubkey: keypair.pubkey) != nil)
+            log?.entries.append("request")
+            if fail { throw ZapCookingApiError.requestFailed(status: 500, body: nil) }
+            return DeletionRequestReceipt(status: "pending", billing: .cancelled, scheduledPostsRemoved: 0)
+        }
     }
 
     // MARK: - Helpers
@@ -218,6 +249,78 @@ struct AccountDeletionTests {
         #expect(!FileManager.default.fileExists(atPath: db.path))
         #expect(AccountDeletion.match(files: store.files, key32: key, pubkeyHex: doomed.pubkey) == .noneForThisAccount)
         #expect(AccountDeletion.match(files: store.files, key32: key, pubkeyHex: keeper.pubkey) != .noneForThisAccount)
+    }
+
+    // MARK: - Deletion request (view model)
+
+    @Test func request_goesFirst_thenBackups_thenWipe() async throws {
+        let priorAccounts = NostrKey.accounts()
+        let priorActive = NostrKey.load()
+        defer { restore(accounts: priorAccounts, active: priorActive) }
+
+        let key = try BackupCrypto.deriveBackupKey(appleUserID: Self.appleUserID, pin: Self.pin)
+        let kp = try newKeypair()
+        seed(kp)
+        UserDefaults.standard.set([kp.pubkey], forKey: "wisp_accounts")
+        let log = Log()
+        let store = FakeBackups([try backup(of: kp, key: key)], log: log)
+        let requester = FakeRequester(log: log)
+        let wipe = RecordingWipe(log: log)
+        let model = DeleteAccountViewModel(keypair: kp, backups: store, requester: requester, deviceWipe: wipe)
+
+        await model.checkBackups()
+        #expect(model.step == .needsApple(count: 1))
+        model.forgotPin()
+        model.removeAllBackups()
+        #expect(model.step == .confirmTyped)
+        await model.confirm()
+
+        #expect(log.entries == ["request", "backup", "wipe"])
+        #expect(model.step == .done)
+        #expect(model.receipt?.billing == .cancelled)
+        #expect(model.handedOffTo == nil)
+        #expect(!nostrKeychainAccounts().contains("active"))
+        AccountDeletion.sweepDefaults(pubkey: kp.pubkey)
+    }
+
+    @Test func failedRequest_deletesNothing_untilTheUserChooses() async throws {
+        let priorAccounts = NostrKey.accounts()
+        let priorActive = NostrKey.load()
+        defer { restore(accounts: priorAccounts, active: priorActive) }
+
+        let kp = try newKeypair()
+        seed(kp)
+        UserDefaults.standard.set([kp.pubkey], forKey: "wisp_accounts")
+        let requester = FakeRequester(fail: true)
+        let wipe = RecordingWipe()
+        let model = DeleteAccountViewModel(keypair: kp, backups: FakeBackups([]), requester: requester, deviceWipe: wipe)
+
+        await model.checkBackups()
+        #expect(model.step == .confirmTyped)
+        await model.confirm()
+        #expect(model.step == .requestFailed)
+        #expect(wipe.calls == 0)
+        #expect(NostrKey.loadAccount(pubkey: kp.pubkey) != nil)
+
+        await model.confirm()                 // Try again — still failing
+        #expect(requester.calls == 2)
+        #expect(model.step == .requestFailed)
+
+        await model.deleteWithoutRequest()
+        #expect(model.step == .done)
+        #expect(model.requestSkipped)
+        #expect(model.receipt == nil)
+        #expect(wipe.calls == 1)
+        #expect(nostrKeychainAccounts().allSatisfy { $0 != "active" && !$0.contains(kp.pubkey) })
+        AccountDeletion.sweepDefaults(pubkey: kp.pubkey)
+    }
+
+    @Test func receipt_decodesTheServerShape() throws {
+        let json = #"{"status":"pending","requested_at":1790000000,"billing":"none","scheduled_posts_removed":2}"#
+        let r = try JSONDecoder().decode(DeletionRequestReceipt.self, from: Data(json.utf8))
+        #expect(r == DeletionRequestReceipt(status: "pending", billing: .none, scheduledPostsRemoved: 2))
+        let odd = #"{"status":"pending","billing":"something-new"}"#
+        #expect(try JSONDecoder().decode(DeletionRequestReceipt.self, from: Data(odd.utf8)).billing == .error)
     }
 
     // MARK: - Cook+

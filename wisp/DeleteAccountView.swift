@@ -10,7 +10,10 @@ import UIKit
 ///      decrypt restore does, and the hard confirmation for backed-up
 ///      accounts. A forgotten PIN can only remove every backup here.
 ///   3. Everything else confirms by typing DELETE.
-///   4. `AccountDeletion.delete`.
+///   4. The deletion request to Zap Cooking (NIP-98, signed by this key, so
+///      before the wipe). A failure never traps the user: retry, or delete
+///      from this device anyway with honest copy about what isn't queued.
+///   5. `AccountDeletion.delete` — backups, then the local wipe.
 @Observable
 @MainActor
 final class DeleteAccountViewModel {
@@ -28,8 +31,13 @@ final class DeleteAccountViewModel {
         /// No backup to find (or the user chose to remove all of them) —
         /// typed confirmation.
         case confirmTyped
+        case requesting
+        /// The server didn't take the deletion request.
+        case requestFailed
         case deleting
         case failed(String)
+        /// Deleted; the result screen waits for Done before the app moves on.
+        case done
     }
 
     static let confirmationWord = "DELETE"
@@ -37,8 +45,12 @@ final class DeleteAccountViewModel {
     let keypair: Keypair
     private(set) var step: Step = .explain
     private(set) var cookPlus: CookPlusCancellation = .none
-    private(set) var portalError: String?
-    private(set) var openingPortal = false
+    /// The server's receipt, once the deletion request is accepted.
+    private(set) var receipt: DeletionRequestReceipt?
+    /// The user chose to delete from this device without a request.
+    private(set) var requestSkipped = false
+    /// After `.done`: the account the app switches to, nil for logout.
+    private(set) var handedOffTo: Keypair?
 
     /// What the typed confirmation will delete from iCloud, and why — shown
     /// on the confirmation screen so the user sees what they are agreeing to.
@@ -58,13 +70,22 @@ final class DeleteAccountViewModel {
     }
 
     private let backups: ICloudBackupStore
+    private let requester: DeletionRequestSender
+    private let deviceWipe: DeviceWipe
     private let signInManager = AppleSignInManager()
     private var files: [KeychainBackupService.BackupFile] = []
     private var appleUserID: String?
 
-    init(keypair: Keypair, backups: ICloudBackupStore? = nil) {
+    init(
+        keypair: Keypair,
+        backups: ICloudBackupStore? = nil,
+        requester: DeletionRequestSender? = nil,
+        deviceWipe: DeviceWipe? = nil
+    ) {
         self.keypair = keypair
         self.backups = backups ?? KeychainBackupService()
+        self.requester = requester ?? ZapCookingDeletionRequest()
+        self.deviceWipe = deviceWipe ?? AppDataDeviceWipe()
     }
 
     // MARK: Cook+
@@ -77,41 +98,29 @@ final class DeleteAccountViewModel {
         cookPlus = CookPlusCancellation(status: status)
     }
 
-    func billingPortalURL() async -> URL? {
-        openingPortal = true
-        portalError = nil
-        defer { openingPortal = false }
-        do {
-            return try await ZapCookingApi.createBillingPortalSession(
-                signer: LocalNip98Signer(keypair: keypair)
-            )
-        } catch {
-            portalError = "Couldn\u{2019}t open the billing portal. You can cancel at zap.cooking/membership before deleting."
-            return nil
-        }
-    }
-
     // MARK: Backups
 
     func beginBackupCheck() {
+        Task { @MainActor in await checkBackups() }
+    }
+
+    func checkBackups() async {
         step = .checkingICloud
-        Task { @MainActor in
-            do {
-                files = try await backups.listBackups()
-                if files.isEmpty {
-                    confirmTyped(ids: [], note: .noBackups)
-                } else {
-                    step = .needsApple(count: files.count)
-                }
-            } catch let e as KeychainBackupError {
-                if case .iCloudUnavailable = e.kind {
-                    step = .iCloudUnavailable
-                } else {
-                    step = .failed("iCloud Keychain couldn\u{2019}t be read. Try again.")
-                }
-            } catch {
-                step = .failed(error.localizedDescription)
+        do {
+            files = try await backups.listBackups()
+            if files.isEmpty {
+                confirmTyped(ids: [], note: .noBackups)
+            } else {
+                step = .needsApple(count: files.count)
             }
+        } catch let e as KeychainBackupError {
+            if case .iCloudUnavailable = e.kind {
+                step = .iCloudUnavailable
+            } else {
+                step = .failed("iCloud Keychain couldn\u{2019}t be read. Try again.")
+            }
+        } catch {
+            step = .failed(error.localizedDescription)
         }
     }
 
@@ -181,31 +190,43 @@ final class DeleteAccountViewModel {
 
     // MARK: Delete
 
-    /// Returns the account the app should switch to, or nil after a full
-    /// wipe (the caller logs out). Nil also on failure, with `step` set.
-    func delete() async -> DeletionOutcome {
+    /// Confirmed: send the deletion request (while the key exists), then
+    /// delete. A request that fails stops at `.requestFailed`.
+    func confirm() async {
+        if !keypair.isWatchOnly && receipt == nil && !requestSkipped {
+            step = .requesting
+            do {
+                receipt = try await requester.send(keypair: keypair)
+            } catch {
+                step = .requestFailed
+                return
+            }
+        }
+        await finishDeletion()
+    }
+
+    /// From `.requestFailed`: delete from this device without the request.
+    func deleteWithoutRequest() async {
+        requestSkipped = true
+        await finishDeletion()
+    }
+
+    private func finishDeletion() async {
         step = .deleting
         let pubkey = keypair.pubkey
         let next = NostrKey.accounts().first { $0 != pubkey }
         do {
-            let handedOff = try await AccountDeletion.delete(
+            handedOffTo = try await AccountDeletion.delete(
                 pubkey: pubkey,
                 backupIDs: pendingBackupIDs,
                 handOffTo: next,
                 backups: backups,
-                deviceWipe: AppDataDeviceWipe()
+                deviceWipe: deviceWipe
             )
-            return handedOff.map(DeletionOutcome.switched) ?? .loggedOut
+            step = .done
         } catch {
-            step = .failed("The iCloud backup couldn\u{2019}t be removed, so nothing was deleted. Check that iCloud is signed in and try again.")
-            return .failed
+            step = .failed("The iCloud backup couldn\u{2019}t be removed, so nothing on this device was deleted. Check that iCloud is signed in and try again.")
         }
-    }
-
-    enum DeletionOutcome {
-        case switched(Keypair)
-        case loggedOut
-        case failed
     }
 }
 
@@ -215,7 +236,6 @@ struct DeleteAccountView: View {
     let onDeleted: (Keypair?) -> Void
 
     @Environment(\.theme) private var theme
-    @Environment(\.openURL) private var openURL
     @State private var model: DeleteAccountViewModel
     @State private var showKeys = false
     @State private var showRecoveryPhrase = false
@@ -227,6 +247,18 @@ struct DeleteAccountView: View {
         self.walletStore = walletStore
         self.onDeleted = onDeleted
         _model = State(initialValue: DeleteAccountViewModel(keypair: keypair))
+    }
+
+    /// Mid-request, mid-wipe, or wiped: no way back out but the buttons.
+    private var isLocked: Bool {
+        switch model.step {
+        case .requesting, .deleting, .done: return true
+        default: return false
+        }
+    }
+
+    private var npub: String {
+        Hex.decode(keypair.pubkey).flatMap { Nip19.npubEncode(pubkey: Array($0)) } ?? keypair.pubkey
     }
 
     /// The Spark seed is real money; offered only when this account has one.
@@ -244,7 +276,8 @@ struct DeleteAccountView: View {
         .background(theme.palette.background.ignoresSafeArea())
         .navigationTitle("Delete Account")
         .navigationBarTitleDisplayMode(.inline)
-        .interactiveDismissDisabled(model.step == .deleting)
+        .interactiveDismissDisabled(isLocked)
+        .navigationBarBackButtonHidden(isLocked)
         .task { await model.loadMembership() }
         .sheet(isPresented: $showKeys) {
             NavigationStack { KeysSettingsView(keypair: keypair) }
@@ -279,10 +312,16 @@ struct DeleteAccountView: View {
             confirmMatchedStep(count: count)
         case .confirmTyped:
             confirmTypedStep
+        case .requesting:
+            progress("Sending your deletion request\u{2026}")
+        case .requestFailed:
+            requestFailedStep
         case .deleting:
             progress("Deleting\u{2026}")
         case .failed(let message):
             failedStep(message)
+        case .done:
+            doneStep
         }
     }
 
@@ -294,6 +333,9 @@ struct DeleteAccountView: View {
             bullet("Your private key on this device.")
             bullet("This account\u{2019}s iCloud Keychain backup, so Continue with Apple can no longer restore it.")
             bullet("This account\u{2019}s settings, cached posts and messages, and wallet keys on this device.")
+            if !keypair.isWatchOnly {
+                bullet("Records Zap Cooking holds for this account \u{2014} Cook+ membership, AI credits, scheduled posts, and content on Pantry, our relay. We send a deletion request: scheduled posts go right away, the rest within 30 days. Payment records we\u{2019}re required by law to keep are kept.")
+            }
             Text("After this, no one \u{2014} including Zap Cooking \u{2014} can recover this account. The only way back is a copy of your private key (nsec) that you save before you delete.")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(theme.palette.onSurface)
@@ -327,34 +369,9 @@ struct DeleteAccountView: View {
             EmptyView()
         case .card:
             section(title: "Cook+ is separate") {
-                Text("Your Cook+ membership is billed separately. Deleting your account doesn\u{2019}t cancel it. Cancel it now \u{2014} once your key is gone you can\u{2019}t sign in to manage it.")
+                Text("Your Cook+ membership is billed separately. Deleting asks Zap Cooking to stop its renewal \u{2014} you keep access until the current period ends. The last screen tells you whether the renewal was stopped.")
                     .font(.system(size: 14))
                     .foregroundStyle(theme.palette.onSurface)
-                Button {
-                    Task {
-                        if let url = await model.billingPortalURL() { openURL(url) }
-                    }
-                } label: {
-                    HStack {
-                        Text("Open billing portal")
-                        Spacer()
-                        if model.openingPortal {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.up.right.square")
-                        }
-                    }
-                    .font(.system(size: 15, weight: .medium))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.wispPrimary)
-                .disabled(model.openingPortal)
-                if let error = model.portalError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
             }
         case .lightning:
             section(title: "Cook+ is separate") {
@@ -364,7 +381,7 @@ struct DeleteAccountView: View {
             }
         case .other:
             section(title: "Cook+ is separate") {
-                Text("Your Cook+ membership is managed separately and isn\u{2019}t cancelled by deleting your account. Manage it at zap.cooking/membership before you delete \u{2014} once your key is gone you can\u{2019}t sign in there.")
+                Text("Your Cook+ membership is managed separately. Your deletion request covers the membership record, but if it renews, manage it at zap.cooking/membership before you delete \u{2014} once your key is gone you can\u{2019}t sign in there.")
                     .font(.system(size: 14))
                     .foregroundStyle(theme.palette.onSurface)
             }
@@ -527,13 +544,7 @@ struct DeleteAccountView: View {
 
     private func deleteButton(enabled: Bool) -> some View {
         Button {
-            Task {
-                switch await model.delete() {
-                case .switched(let next): onDeleted(next)
-                case .loggedOut: onDeleted(nil)
-                case .failed: break
-                }
-            }
+            Task { await model.confirm() }
         } label: {
             Text("Delete account permanently").frame(maxWidth: .infinity)
         }
@@ -542,6 +553,73 @@ struct DeleteAccountView: View {
         .controlSize(.large)
         .disabled(!enabled)
         .accessibilityIdentifier("delete-account-confirm")
+    }
+
+    @ViewBuilder
+    private var requestFailedStep: some View {
+        section(title: "Request not sent") {
+            Text("Zap Cooking didn\u{2019}t receive your deletion request. Nothing has been deleted yet.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(theme.palette.onSurface)
+            Text("You can try again, or delete from this device anyway. If you do, records Zap Cooking holds for this account (Cook+ membership, AI credits, content on Pantry) aren\u{2019}t queued for removal \u{2014} to ask later, email support@zap.cooking with this account\u{2019}s npub:")
+                .font(.system(size: 14))
+                .foregroundStyle(theme.palette.onSurface)
+            Text(npub)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(theme.palette.onSurfaceVariant)
+        }
+        primaryButton("Try again") { Task { await model.confirm() } }
+        Button("Delete from this device anyway") { Task { await model.deleteWithoutRequest() } }
+            .font(.system(size: 14))
+            .foregroundStyle(.red)
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("delete-account-without-request")
+        exportSection
+    }
+
+    @ViewBuilder
+    private var doneStep: some View {
+        section(title: "Account deleted") {
+            Text(model.pendingBackupIDs.isEmpty
+                 ? "Your key and this account\u{2019}s data are gone from this device."
+                 : "Your key, its iCloud backup, and this account\u{2019}s data are gone from this device.")
+                .font(.system(size: 14))
+                .foregroundStyle(theme.palette.onSurface)
+            if let receipt = model.receipt {
+                Text("Zap Cooking has your deletion request. Records we hold for this account are removed within 30 days.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(theme.palette.onSurface)
+                if let line = billingLine(receipt.billing) {
+                    Text(line)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.palette.onSurface)
+                }
+            } else if model.requestSkipped {
+                Text("Zap Cooking didn\u{2019}t receive a deletion request, so records we hold for this account aren\u{2019}t queued for removal. To ask, email support@zap.cooking with this npub:")
+                    .font(.system(size: 14))
+                    .foregroundStyle(theme.palette.onSurface)
+                Text(npub)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .foregroundStyle(theme.palette.onSurfaceVariant)
+            }
+            Text("Anything already published to public relays stays there.")
+                .font(.system(size: 14))
+                .foregroundStyle(theme.palette.onSurfaceVariant)
+        }
+        primaryButton("Done") { onDeleted(model.handedOffTo) }
+            .accessibilityIdentifier("delete-account-done")
+    }
+
+    /// The Cook+ result line. Silent for non-members unless the server
+    /// actually stopped a renewal.
+    private func billingLine(_ billing: DeletionRequestReceipt.Billing) -> String? {
+        if billing == .cancelled {
+            return "Your Cook+ renewal is stopped. You keep access until the current period ends."
+        }
+        guard model.cookPlus == .card else { return nil }
+        return "Your Cook+ renewal couldn\u{2019}t be stopped automatically. It\u{2019}s part of your deletion request for Zap Cooking staff to handle \u{2014} if you\u{2019}re charged again, contact support@zap.cooking."
     }
 
     @ViewBuilder
