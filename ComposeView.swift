@@ -45,6 +45,11 @@ struct ComposeView: View {
     }
     @State private var reorder: ReorderState?
     @State private var cellX: [Int: CGFloat] = [:]
+    /// Liveness flag driven by the gesture itself. `@GestureState` resets
+    /// to its initial value when the gesture ends *or is cancelled* —
+    /// plain `.onEnded` never fires on cancellation (a splice can
+    /// invalidate the gesture mid-drag), which left lifted cells stuck.
+    @GestureState private var reorderGestureLive = false
     /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
     /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
@@ -828,7 +833,7 @@ struct ComposeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
-                    attachmentThumb(attachment, index: index, size: 64)
+                    attachmentThumb(attachment, index: index, size: 84)
                         .onGeometryChange(for: CGFloat.self) { proxy in
                             proxy.frame(in: .named("attachStrip")).minX
                         } action: { minX in
@@ -844,6 +849,12 @@ struct ComposeView: View {
         }
         .coordinateSpace(name: "attachStrip")
         .transaction { $0.animation = nil }
+        // The @GestureState flag resets on end AND cancellation; a reset
+        // with a still-lifted slot means the gesture died without
+        // .onEnded — put the lifted cell back.
+        .onChange(of: reorderGestureLive) { _, live in
+            if !live { reorder = nil }
+        }
     }
 
     /// One paste-attach offer, matching Android's row: a full-width
@@ -1020,13 +1031,13 @@ struct ComposeView: View {
             viewModel.removeMedia(id: attachment.id)
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
+                .frame(width: 24, height: 24)
                 .background(.black.opacity(0.6), in: Circle())
         }
         .buttonStyle(.plain)
-        .padding(3)
+        .padding(4)
         .accessibilityLabel("Remove attachment")
     }
 
@@ -1040,6 +1051,9 @@ struct ComposeView: View {
     private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
         LongPressGesture(minimumDuration: 0.4)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .updating($reorderGestureLive) { _, live, _ in
+                live = true
+            }
             .onChanged { value in
                 switch value {
                 case .first:
@@ -1049,7 +1063,7 @@ struct ComposeView: View {
                 case .second(true, let drag?):
                     guard var state = reorder else { return }
                     state.offsetX = drag.translation.width
-                    let half: CGFloat = 32
+                    let half: CGFloat = 42
                     let ordered = state.snapshot.sorted { $0.value < $1.value }
                     var guardCounter = ordered.count
                     while guardCounter > 0 {
