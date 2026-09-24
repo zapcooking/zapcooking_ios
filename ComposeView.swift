@@ -1050,7 +1050,7 @@ struct ComposeView: View {
     /// re-reading live positions mid-drag races the splice by a frame.
     private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
         LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("attachStrip")))
             .updating($reorderGestureLive) { _, live, _ in
                 live = true
             }
