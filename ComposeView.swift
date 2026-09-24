@@ -783,8 +783,8 @@ struct ComposeView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
-                            attachmentThumb(attachment, index: index, size: 140)
+                        ForEach(viewModel.attachments) { attachment in
+                            attachmentThumb(attachment, size: 140)
                         }
                         Button {
                             presentPhotoPicker(max: 8)
@@ -808,25 +808,25 @@ struct ComposeView: View {
         }
     }
 
-    /// Wrapping, left-aligned grid of 64pt cells (Android's FlowRow
-    /// strip), between the editor and the actions row.
+    /// A single horizontally scrolling row of 64pt cells between the
+    /// editor and the actions row. One axis on purpose: drag reordering
+    /// reads along the row, and the visible capacity (~5 cells) gently
+    /// caps how much media one post carries.
     ///
     /// Keyed by attachment id — required for the live drag-shuffle: the
     /// dragged cell's view must survive the reorder or iOS cancels the
     /// drag session. Reorder snaps (no inherited animation); the shuffle
     /// feedback is the cells snapping into new slots under the finger.
     private var attachmentsRow: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 64), spacing: 8)],
-            alignment: .leading,
-            spacing: 8
-        ) {
-            ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
-                attachmentThumb(attachment, index: index, size: 64)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.attachments) { attachment in
+                    attachmentThumb(attachment, size: 64)
+                }
             }
+            .padding(.horizontal, 12)
         }
         .transaction { $0.animation = nil }
-        .padding(.horizontal, 12)
     }
 
     /// One paste-attach offer, matching Android's row: a full-width
@@ -876,7 +876,7 @@ struct ComposeView: View {
     /// the remove ✕ top-trailing. Reordering is drag-only (long-press and
     /// drag, live-shuffling the cells); VoiceOver reaches the same moves
     /// through named accessibility actions.
-    private func attachmentThumb(_ attachment: ComposeAttachment, index: Int, size: CGFloat) -> some View {
+    private func attachmentThumb(_ attachment: ComposeAttachment, size: CGFloat) -> some View {
         return reorderable(
             ZStack {
                 // The media layer is hard-framed and clipped BEFORE the
