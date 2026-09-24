@@ -38,10 +38,6 @@ struct ComposeView: View {
     /// Cleared by dropExited (and performDrop), so a cancelled drag can't
     /// leave it stuck.
     @State private var hoverTargetId: UUID?
-    /// Each cell's vertical position inside the strip's coordinate space —
-    /// the row table that keeps reordering horizontal (wrapping grid:
-    /// cells in different rows must not swap).
-    @State private var rowByAttachment: [UUID: CGFloat] = [:]
     /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
     /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
@@ -827,14 +823,8 @@ struct ComposeView: View {
         ) {
             ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
                 attachmentThumb(attachment, index: index, size: 64)
-                    .onGeometryChange(for: CGFloat.self) { proxy in
-                        proxy.frame(in: .named("attachStrip")).minY
-                    } action: { minY in
-                        rowByAttachment[attachment.id] = minY
-                    }
             }
         }
-        .coordinateSpace(name: "attachStrip")
         .transaction { $0.animation = nil }
         .padding(.horizontal, 12)
     }
@@ -1054,8 +1044,7 @@ struct ComposeView: View {
                         viewModel: viewModel,
                         targetId: attachment.id,
                         draggingId: $draggingId,
-                        hoverTargetId: $hoverTargetId,
-                        rowByAttachment: $rowByAttachment
+                        hoverTargetId: $hoverTargetId
                     )
                 )
         } else {
@@ -1439,27 +1428,15 @@ private struct AttachmentDropDelegate: DropDelegate {
     let targetId: UUID
     @Binding var draggingId: UUID?
     @Binding var hoverTargetId: UUID?
-    @Binding var rowByAttachment: [UUID: CGFloat]
-
-    /// Reordering is horizontal-only: the grid wraps, and a cell hovered
-    /// from a different row must not swap. Same row = vertical positions
-    /// within half a cell's pitch of each other.
-    private var isSameRowAsDragged: Bool {
-        guard let draggingId,
-              let draggedY = rowByAttachment[draggingId],
-              let targetY = rowByAttachment[targetId] else { return false }
-        return abs(draggedY - targetY) < 32
-    }
 
     func dropEntered(info: DropInfo) {
-        guard isSameRowAsDragged else { return }
         hoverTargetId = targetId
         guard let draggingId, draggingId != targetId else { return }
         viewModel.moveMedia(id: draggingId, before: targetId)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        isSameRowAsDragged ? DropProposal(operation: .move) : DropProposal(operation: .forbidden)
+        DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
