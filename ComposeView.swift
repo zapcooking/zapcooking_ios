@@ -32,11 +32,19 @@ struct ComposeView: View {
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
     @State private var showTagPicker = false
-    /// Live horizontal reorder: the dragged slot's id and its current
-    /// index. `reorderIndex` steps as the finger crosses cell boundaries
-    /// (one pitch = 64pt cell + 8pt spacing), splicing as it goes.
-    @State private var reorderingId: UUID?
-    @State private var reorderIndex: Int = 0
+    /// Live drag reorder, ported from #268's `AttachmentThumbStrip`: at
+    /// lift, each slot's layout x is snapshotted; the dragged cell is
+    /// offset by the finger's translation (it follows the hand, 1.06
+    /// scaled, z-lifted) and crossing the midpoint between cell centers
+    /// splices the slot there, rebasing the offset so the lifted cell
+    /// never jumps. Positions are never re-read mid-drag.
+    private struct ReorderState {
+        var snapshot: [Int: CGFloat]
+        var index: Int
+        var offsetX: CGFloat
+    }
+    @State private var reorder: ReorderState?
+    @State private var cellX: [Int: CGFloat] = [:]
     /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
     /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
@@ -821,13 +829,21 @@ struct ComposeView: View {
             HStack(spacing: 8) {
                 ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
                     attachmentThumb(attachment, index: index, size: 64)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .named("attachStrip")).minX
+                        } action: { minX in
+                            cellX[index] = minX
+                        }
+                        .offset(x: reorder?.index == index ? reorder?.offsetX ?? 0 : 0)
+                        .scaleEffect(reorder?.index == index ? 1.06 : 1)
+                        .zIndex(reorder?.index == index ? 1 : 0)
+                        .gesture(reorderDragGesture(attachment: attachment, index: index))
                 }
             }
             .padding(.horizontal, 12)
         }
-        // The reorder shuffle is the feedback — a quick glide so a splice
-        // reads as a swap rather than a teleport.
-        .animation(.easeOut(duration: 0.18), value: viewModel.attachments.map { $0.id })
+        .coordinateSpace(name: "attachStrip")
+        .transaction { $0.animation = nil }
     }
 
     /// One paste-attach offer, matching Android's row: a full-width
@@ -878,8 +894,7 @@ struct ComposeView: View {
     /// drag, live-shuffling the cells); VoiceOver reaches the same moves
     /// through named accessibility actions.
     private func attachmentThumb(_ attachment: ComposeAttachment, index: Int, size: CGFloat) -> some View {
-        return reorderable(
-            ZStack {
+        return ZStack {
                 // The media layer is hard-framed and clipped BEFORE the
                 // ZStack sees it: `scaledToFill` lets a non-square image
                 // grow the ZStack's layout union (a 16:9 source in an
@@ -908,7 +923,7 @@ struct ComposeView: View {
                 // shows neither chip nor video badge, just the thumbnail. Pinned to
                 // the cell's top-leading corner: the Spacers stretch the container
                 // so the chip escapes the ZStack's center alignment.
-                if attachment.mime.hasPrefix("image/") {
+                if !attachment.isVideo {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
                             altChip(attachment)
@@ -924,26 +939,14 @@ struct ComposeView: View {
             .overlay(alignment: .topTrailing) {
                 removeButton(attachment)
             }
-            .overlay(
-                // Landing-slot highlight while a drag hovers this cell.
-                // Keyed to the hovered target (dropExited clears it) rather
-                // than the dragged cell — a cancelled drag never calls
-                // performDrop, and a dragged-cell flag would stick forever.
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.wispPrimary, lineWidth: 2)
-                    .opacity(reorderingId == attachment.id ? 1 : 0)
-            )
-            // Drag-only reorder (the visible steppers are gone), but
-            // VoiceOver keeps reachable moves.
+            // Drag-only reorder (the gesture lives on the cell in
+            // `attachmentsRow`); VoiceOver keeps reachable moves.
             .accessibilityAction(named: "Move earlier") {
                 viewModel.moveMedia(id: attachment.id, earlier: true)
             }
             .accessibilityAction(named: "Move later") {
                 viewModel.moveMedia(id: attachment.id, earlier: false)
-            },
-            attachment: attachment,
-            index: index
-        )
+            }
     }
 
     /// The image render ladder shared by the strip and the alt editor's
@@ -1027,58 +1030,62 @@ struct ComposeView: View {
         .accessibilityLabel("Remove attachment")
     }
 
-    /// Drag-only reorder, enabled only when there is more than one
-    /// attachment: hold a cell for 0.25s, then move — the slot steps one
-    /// cell per pitch of horizontal travel, splicing live. A custom
-    /// sequenced gesture (short hold → drag) rather than the system
-    /// `onDrag` session: the lift is 3-4× faster, only horizontal
-    /// translation is honored (vertical movement can't fight the
-    /// composer's scroll), and a plain swipe still scrolls the row because
-    /// the touch only becomes a reorder once the hold completes.
-    @ViewBuilder
-    private func reorderable<Content: View>(_ content: Content, attachment: ComposeAttachment, index: Int) -> some View {
-        if viewModel.attachments.count > 1 {
-            content
-                .scaleEffect(reorderingId == attachment.id ? 1.1 : 1.0)
-                .animation(.easeOut(duration: 0.12), value: reorderingId == attachment.id)
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.25)
-                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-                        .onChanged { value in
-                            switch value {
-                            case .first:
-                                if reorderingId == nil {
-                                    reorderingId = attachment.id
-                                    reorderIndex = index
-                                    Haptics.shared.pulse()
-                                }
-                            case .second(true, let drag?):
-                                if reorderingId == nil {
-                                    reorderingId = attachment.id
-                                    reorderIndex = index
-                                    Haptics.shared.pulse()
-                                }
-                                let pitch: CGFloat = 72
-                                let target = min(
-                                    max(reorderIndex + Int((drag.translation.width / pitch).rounded()), 0),
-                                    viewModel.attachments.count - 1
-                                )
-                                if target != reorderIndex {
-                                    viewModel.moveMedia(from: reorderIndex, to: target)
-                                    reorderIndex = target
-                                }
-                            default:
-                                break
+    /// The reorder gesture (#268): hold ~0.4s (Compose's long-press
+    /// timeout), then the cell follows the finger. Only horizontal
+    /// translation is honored — vertical movement belongs to the
+    /// composer's scroll — and a plain swipe (no hold) still scrolls the
+    /// row because the touch only becomes a reorder once the hold
+    /// completes. All swap math runs against the lift-time snapshot:
+    /// re-reading live positions mid-drag races the splice by a frame.
+    private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.4)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                switch value {
+                case .first:
+                    guard reorder == nil, cellX[index] != nil else { return }
+                    reorder = ReorderState(snapshot: cellX, index: index, offsetX: 0)
+                    Haptics.shared.pulse()
+                case .second(true, let drag?):
+                    guard var state = reorder else { return }
+                    state.offsetX = drag.translation.width
+                    let half: CGFloat = 32
+                    let ordered = state.snapshot.sorted { $0.value < $1.value }
+                    var guardCounter = ordered.count
+                    while guardCounter > 0 {
+                        guardCounter -= 1
+                        guard let fromX = state.snapshot[state.index],
+                              let pos = ordered.firstIndex(where: { $0.key == state.index }) else { break }
+                        // half converts the midpoint between left edges to
+                        // a midpoint between centers.
+                        let centerX = fromX + state.offsetX + half
+                        var swapped = false
+                        if pos < ordered.count - 1 {
+                            let next = ordered[pos + 1]
+                            if centerX > (fromX + next.value) / 2 + half {
+                                viewModel.moveMedia(from: state.index, to: next.key)
+                                state.offsetX -= next.value - fromX
+                                state.index = next.key
+                                swapped = true
                             }
                         }
-                        .onEnded { _ in
-                            reorderingId = nil
-                            reorderIndex = 0
+                        if !swapped, pos > 0 {
+                            let prev = ordered[pos - 1]
+                            if centerX < (fromX + prev.value) / 2 + half {
+                                viewModel.moveMedia(from: state.index, to: prev.key)
+                                state.offsetX -= prev.value - fromX
+                                state.index = prev.key
+                                swapped = true
+                            }
                         }
-                )
-        } else {
-            content
-        }
+                        if !swapped { break }
+                    }
+                    reorder = state
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in reorder = nil }
     }
 
     private var scheduleBanner: some View {
