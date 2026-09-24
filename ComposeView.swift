@@ -32,12 +32,11 @@ struct ComposeView: View {
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
     @State private var showTagPicker = false
-    /// Attachment currently being dragged (live reorder).
-    @State private var draggingId: UUID?
-    /// Cell the drag is currently hovering — the landing-slot highlight.
-    /// Cleared by dropExited (and performDrop), so a cancelled drag can't
-    /// leave it stuck.
-    @State private var hoverTargetId: UUID?
+    /// Live horizontal reorder: the dragged slot's id and its current
+    /// index. `reorderIndex` steps as the finger crosses cell boundaries
+    /// (one pitch = 64pt cell + 8pt spacing), splicing as it goes.
+    @State private var reorderingId: UUID?
+    @State private var reorderIndex: Int = 0
     /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
     /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
@@ -784,7 +783,7 @@ struct ComposeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(viewModel.attachments) { attachment in
-                            attachmentThumb(attachment, size: 140)
+                            attachmentThumb(attachment, index: 0, size: 140)
                         }
                         Button {
                             presentPhotoPicker(max: 8)
@@ -820,8 +819,8 @@ struct ComposeView: View {
     private var attachmentsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(viewModel.attachments) { attachment in
-                    attachmentThumb(attachment, size: 64)
+                ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
+                    attachmentThumb(attachment, index: index, size: 64)
                 }
             }
             .padding(.horizontal, 12)
@@ -876,7 +875,7 @@ struct ComposeView: View {
     /// the remove ✕ top-trailing. Reordering is drag-only (long-press and
     /// drag, live-shuffling the cells); VoiceOver reaches the same moves
     /// through named accessibility actions.
-    private func attachmentThumb(_ attachment: ComposeAttachment, size: CGFloat) -> some View {
+    private func attachmentThumb(_ attachment: ComposeAttachment, index: Int, size: CGFloat) -> some View {
         return reorderable(
             ZStack {
                 // The media layer is hard-framed and clipped BEFORE the
@@ -930,7 +929,7 @@ struct ComposeView: View {
                 // performDrop, and a dragged-cell flag would stick forever.
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(Color.wispPrimary, lineWidth: 2)
-                    .opacity(hoverTargetId == attachment.id ? 1 : 0)
+                    .opacity(reorderingId == attachment.id ? 1 : 0)
             )
             // Drag-only reorder (the visible steppers are gone), but
             // VoiceOver keeps reachable moves.
@@ -940,7 +939,8 @@ struct ComposeView: View {
             .accessibilityAction(named: "Move later") {
                 viewModel.moveMedia(id: attachment.id, earlier: false)
             },
-            attachment: attachment
+            attachment: attachment,
+            index: index
         )
     }
 
@@ -1026,26 +1026,49 @@ struct ComposeView: View {
     }
 
     /// Drag-only reorder, enabled only when there is more than one
-    /// attachment. Long-press a cell and drag: `dropEntered` splices the
-    /// dragged slot to the hovered slot *while the drag is in flight*, so
-    /// the cells live-shuffle under the finger (home-screen style) and the
-    /// drop itself needs no further move.
+    /// attachment: hold a cell for 0.25s, then move — the slot steps one
+    /// cell per pitch of horizontal travel, splicing live. A custom
+    /// sequenced gesture (short hold → drag) rather than the system
+    /// `onDrag` session: the lift is 3-4× faster, only horizontal
+    /// translation is honored (vertical movement can't fight the
+    /// composer's scroll), and a plain swipe still scrolls the row because
+    /// the touch only becomes a reorder once the hold completes.
     @ViewBuilder
-    private func reorderable<Content: View>(_ content: Content, attachment: ComposeAttachment) -> some View {
+    private func reorderable<Content: View>(_ content: Content, attachment: ComposeAttachment, index: Int) -> some View {
         if viewModel.attachments.count > 1 {
             content
-                .onDrag {
-                    draggingId = attachment.id
-                    return NSItemProvider(object: attachment.id.uuidString as NSString)
-                }
-                .onDrop(
-                    of: [UTType.text],
-                    delegate: AttachmentDropDelegate(
-                        viewModel: viewModel,
-                        targetId: attachment.id,
-                        draggingId: $draggingId,
-                        hoverTargetId: $hoverTargetId
-                    )
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                        .onChanged { value in
+                            switch value {
+                            case .first:
+                                if reorderingId == nil {
+                                    reorderingId = attachment.id
+                                    reorderIndex = index
+                                }
+                            case .second(true, let drag?):
+                                if reorderingId == nil {
+                                    reorderingId = attachment.id
+                                    reorderIndex = index
+                                }
+                                let pitch: CGFloat = 72
+                                let target = min(
+                                    max(reorderIndex + Int((drag.translation.width / pitch).rounded()), 0),
+                                    viewModel.attachments.count - 1
+                                )
+                                if target != reorderIndex {
+                                    viewModel.moveMedia(from: reorderIndex, to: target)
+                                    reorderIndex = target
+                                }
+                            default:
+                                break
+                            }
+                        }
+                        .onEnded { _ in
+                            reorderingId = nil
+                            reorderIndex = 0
+                        }
                 )
         } else {
             content
@@ -1416,38 +1439,6 @@ struct ComposeView: View {
         return tags
     }
 
-}
-
-/// Drop delegate for one thumbnail cell in the live drag-shuffle: the
-/// moment the dragged cell hovers this one, the dragged slot splices to
-/// this slot's index (`moveMedia` swap semantics — dragged takes the
-/// target's place, neighbors shift). `performDrop` just ends the session;
-/// the reorder already happened.
-private struct AttachmentDropDelegate: DropDelegate {
-    let viewModel: ComposeViewModel
-    let targetId: UUID
-    @Binding var draggingId: UUID?
-    @Binding var hoverTargetId: UUID?
-
-    func dropEntered(info: DropInfo) {
-        hoverTargetId = targetId
-        guard let draggingId, draggingId != targetId else { return }
-        viewModel.moveMedia(id: draggingId, before: targetId)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        if hoverTargetId == targetId { hoverTargetId = nil }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggingId = nil
-        hoverTargetId = nil
-        return true
-    }
 }
 
 /// The video slot's thumbnail is the video's own frame (sidecar #368).
