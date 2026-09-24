@@ -825,7 +825,9 @@ struct ComposeView: View {
             }
             .padding(.horizontal, 12)
         }
-        .transaction { $0.animation = nil }
+        // The reorder shuffle is the feedback — a quick glide so a splice
+        // reads as a swap rather than a teleport.
+        .animation(.easeOut(duration: 0.18), value: viewModel.attachments.map { $0.id })
     }
 
     /// One paste-attach offer, matching Android's row: a full-width
@@ -1037,6 +1039,8 @@ struct ComposeView: View {
     private func reorderable<Content: View>(_ content: Content, attachment: ComposeAttachment, index: Int) -> some View {
         if viewModel.attachments.count > 1 {
             content
+                .scaleEffect(reorderingId == attachment.id ? 1.1 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: reorderingId == attachment.id)
                 .gesture(
                     LongPressGesture(minimumDuration: 0.25)
                         .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
@@ -1046,11 +1050,13 @@ struct ComposeView: View {
                                 if reorderingId == nil {
                                     reorderingId = attachment.id
                                     reorderIndex = index
+                                    Haptics.shared.pulse()
                                 }
                             case .second(true, let drag?):
                                 if reorderingId == nil {
                                     reorderingId = attachment.id
                                     reorderIndex = index
+                                    Haptics.shared.pulse()
                                 }
                                 let pitch: CGFloat = 72
                                 let target = min(
