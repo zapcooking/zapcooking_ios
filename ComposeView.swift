@@ -32,24 +32,26 @@ struct ComposeView: View {
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
     @State private var showTagPicker = false
-    /// Live drag reorder, ported from #268's `AttachmentThumbStrip`: at
-    /// lift, each slot's layout x is snapshotted; the dragged cell is
-    /// offset by the finger's translation (it follows the hand, 1.06
-    /// scaled, z-lifted) and crossing the midpoint between cell centers
-    /// splices the slot there, rebasing the offset so the lifted cell
-    /// never jumps. Positions are never re-read mid-drag.
+    /// Live drag reorder, ported from Android's `AttachmentThumbStrip`
+    /// (zap_cooking_android PR 268): at lift, each slot's layout x is
+    /// snapshotted; the dragged cell follows the finger (1.06 scaled,
+    /// z-lifted) and crossing the midpoint between cell centers splices
+    /// the slot there, rebasing the offset so the lifted cell never
+    /// jumps. Positions are never re-read mid-drag.
     private struct ReorderState {
+        /// The lifted slot. A second finger holding another cell must not
+        /// drive this one's offset.
+        var id: UUID
         var snapshot: [Int: CGFloat]
+        /// Where the finger holds the cell, from its left edge. The cell's
+        /// left edge rides at `finger - grabX`, whatever slot it has
+        /// spliced into since the lift.
+        var grabX: CGFloat
         var index: Int
         var offsetX: CGFloat
     }
     @State private var reorder: ReorderState?
     @State private var cellX: [Int: CGFloat] = [:]
-    /// Liveness flag driven by the gesture itself. `@GestureState` resets
-    /// to its initial value when the gesture ends *or is cancelled* —
-    /// plain `.onEnded` never fires on cancellation (a splice can
-    /// invalidate the gesture mid-drag), which left lifted cells stuck.
-    @GestureState private var reorderGestureLive = false
     /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
     /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
@@ -126,6 +128,10 @@ struct ComposeView: View {
                         }
                         .padding(.top, 12)
                     }
+                    // A lifted thumbnail owns the touch: neither the composer
+                    // nor the attachment strip (it inherits this) may start a
+                    // scroll pan under a reorder drag and cancel it.
+                    .scrollDisabled(reorder != nil)
                     .onChange(of: viewModel.countdownSeconds) { oldValue, newValue in
                         // When the undo countdown starts, bring the post
                         // preview into view (top-aligned) so the user can
@@ -233,6 +239,8 @@ struct ComposeView: View {
             // Block swipe-dismiss while an upload is in flight so the draft
             // autosave on disappear catches the finished URLs.
             || viewModel.uploadProgress != nil
+            // A reorder drag with a downward component is not a dismiss.
+            || reorder != nil
         )
     }
 
@@ -820,14 +828,14 @@ struct ComposeView: View {
         }
     }
 
-    /// A single horizontally scrolling row of 64pt cells between the
+    /// A single horizontally scrolling row of 84pt cells between the
     /// editor and the actions row. One axis on purpose: drag reordering
-    /// reads along the row, and the visible capacity (~5 cells) gently
+    /// reads along the row, and the visible capacity (~4 cells) gently
     /// caps how much media one post carries.
     ///
     /// Keyed by attachment id — required for the live drag-shuffle: the
-    /// dragged cell's view must survive the reorder or iOS cancels the
-    /// drag session. Reorder snaps (no inherited animation); the shuffle
+    /// dragged cell's view must survive the reorder or its long press is
+    /// torn down mid-drag. Reorder snaps (no inherited animation); the shuffle
     /// feedback is the cells snapping into new slots under the finger.
     private var attachmentsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -837,23 +845,39 @@ struct ComposeView: View {
                         .onGeometryChange(for: CGFloat.self) { proxy in
                             proxy.frame(in: .global).minX
                         } action: { minX in
-                            cellX[index] = minX
+                            // Rest positions only: mid-drag, this frame
+                            // carries the lifted cell's offset and scale,
+                            // which is not a slot position.
+                            if reorder == nil { cellX[index] = minX }
                         }
                         .offset(x: reorder?.index == index ? reorder?.offsetX ?? 0 : 0)
                         .scaleEffect(reorder?.index == index ? 1.06 : 1)
                         .zIndex(reorder?.index == index ? 1 : 0)
-                        .gesture(reorderDragGesture(attachment: attachment, index: index))
+                        .gesture(reorderGesture(attachment: attachment, index: index))
+                        // Position-based, so a UI test can press "the first
+                        // cell" and read what landed there.
+                        .accessibilityIdentifier("attachment-cell-\(index)")
                 }
             }
             .padding(.horizontal, 12)
         }
-        .transaction { $0.animation = nil }
-        // The @GestureState flag resets on end AND cancellation; a reset
-        // with a still-lifted slot means the gesture died without
-        // .onEnded — put the lifted cell back.
-        .onChange(of: reorderGestureLive) { _, live in
-            if !live { reorder = nil }
+        // A row that fits has nowhere to scroll, so it must not rubber-band
+        // either: with the default bounce, a few points of wobble while
+        // holding a thumbnail dragged the whole row instead.
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        #if DEBUG
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
+            ReorderTrace.shared.noteScroll(x)
         }
+        #endif
+        .transaction { $0.animation = nil }
+        // A lift disables scrolling and swipe-dismiss, so it must never
+        // outlive its cell: if the lifted slot or the whole strip goes away
+        // mid-drag, the recognizer may never report the end.
+        .onChange(of: viewModel.attachments.map(\.id)) { _, ids in
+            if let id = reorder?.id, !ids.contains(id) { reorder = nil }
+        }
+        .onDisappear { reorder = nil }
     }
 
     /// One paste-attach offer, matching Android's row: a full-width
@@ -925,7 +949,9 @@ struct ComposeView: View {
 
                 if attachment.url == nil {
                     Color.black.opacity(0.4)
+                        .allowsHitTesting(false)
                     ProgressView().tint(.white)
+                        .allowsHitTesting(false)
                 }
 
                 // "+ ALT" until a description is saved, "✓ ALT" on the accent once
@@ -936,7 +962,7 @@ struct ComposeView: View {
                 if !attachment.isVideo {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            altChip(attachment)
+                            altChip(attachment, index: index)
                             Spacer(minLength: 0)
                         }
                         Spacer(minLength: 0)
@@ -946,8 +972,12 @@ struct ComposeView: View {
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            // The whole cell is the reorder handle, whatever draws the
+            // media: GIFs render in a UIKit view that takes no touches, and
+            // without a shape of its own the cell had nothing left to hit.
+            .contentShape(RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .topTrailing) {
-                removeButton(attachment)
+                removeButton(attachment, index: index)
             }
             // Drag-only reorder (the gesture lives on the cell in
             // `attachmentsRow`); VoiceOver keeps reachable moves.
@@ -971,6 +1001,11 @@ struct ComposeView: View {
             // per-frame decoder so the thumbnail plays before publish.
             // The simple `UIImage(data:)` path freezes on frame 0.
             AnimatedImageRenderer(payload: payload, contentMode: .scaleAspectFill)
+                // A GIF draws in a UIKit `UIImageView`. Left hit-testable,
+                // the touch lands on that view and the cell's long press
+                // never sees it, while the strip's scroll pan still does:
+                // holding a GIF thumbnail dragged the whole row instead.
+                .allowsHitTesting(false)
         } else if let bytes = attachment.localBytes, let img = UIImage(data: bytes) {
             Image(uiImage: img)
                 .resizable()
@@ -986,6 +1021,7 @@ struct ComposeView: View {
                 placeholder: { Color.wispSurfaceVariant },
                 failure: { Color.wispSurfaceVariant }
             )
+            .allowsHitTesting(false) // UIKit-drawn, as above
         } else if attachment.isVideo, let url = attachment.url, let imageURL = URL(string: url) {
             // Videos: the thumbnail is the video's own frame (sidecar #368) —
             // a downloaded .mp4 can't be decoded by UIImage, so the generic
@@ -999,8 +1035,8 @@ struct ComposeView: View {
     }
 
     /// "+ ALT" / "✓ ALT" — black translucent until described, accent once
-    /// saved (Android `AltChip`). Sized for the 64pt cells.
-    private func altChip(_ attachment: ComposeAttachment) -> some View {
+    /// saved (Android `AltChip`). Sized for the 84pt cells.
+    private func altChip(_ attachment: ComposeAttachment, index: Int) -> some View {
         let saved = attachment.trimmedAltText != nil
         return Button {
             altEditorTarget = AltTextEditorTarget(
@@ -1019,13 +1055,18 @@ struct ComposeView: View {
                     saved ? AnyShapeStyle(Color.wispPrimary) : AnyShapeStyle(.black.opacity(0.6)),
                     in: RoundedRectangle(cornerRadius: 5)
                 )
+                // The whole cell is the reorder handle. A Button claims its
+                // touch ahead of any gesture attached to it, so the hold
+                // rides inside the label; a tap still reaches the Button
+                // once the hold fails on release.
+                .gesture(reorderGesture(attachment: attachment, index: index))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(saved ? "Edit alt text" : "Add alt text")
     }
 
     /// Remove = splice(i, 1), no text to clean up.
-    private func removeButton(_ attachment: ComposeAttachment) -> some View {
+    private func removeButton(_ attachment: ComposeAttachment, index: Int) -> some View {
         Button {
             viewModel.removeMedia(id: attachment.id)
         } label: {
@@ -1034,50 +1075,74 @@ struct ComposeView: View {
                 .foregroundStyle(.white)
                 .frame(width: 24, height: 24)
                 .background(.black.opacity(0.6), in: Circle())
+                // See `altChip`: the hold rides inside the label.
+                .gesture(reorderGesture(attachment: attachment, index: index))
         }
         .buttonStyle(.plain)
         .padding(4)
         .accessibilityLabel("Remove attachment")
     }
 
-    /// The reorder gesture (#268): hold ~0.4s (Compose's long-press
-    /// timeout), then the cell follows the finger. Only horizontal
-    /// translation is honored — vertical movement belongs to the
-    /// composer's scroll — and a plain swipe (no hold) still scrolls the
-    /// row because the touch only becomes a reorder once the hold
-    /// completes. All swap math runs against the lift-time snapshot:
-    /// re-reading live positions mid-drag races the splice by a frame.
-    private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-            .updating($reorderGestureLive) { _, live, _ in
-                live = true
+    /// The reorder gesture, Android's strip mechanics (zap_cooking_android
+    /// PR 268): hold ~0.4s (Compose's long-press timeout), the cell lifts,
+    /// then it follows the finger. Only horizontal travel counts; vertical
+    /// movement belongs to the composer's scroll. All swap math runs
+    /// against the lift-time snapshot: re-reading live positions mid-drag
+    /// races the splice by a frame.
+    private func reorderGesture(attachment: ComposeAttachment, index: Int) -> ReorderPressGesture {
+        ReorderPressGesture(minimumDuration: 0.4) { fingerX in
+            guard reorder == nil, let x = cellX[index] else { return }
+            // `cellX` is keyed by position and keeps a removed cell's x;
+            // only live slots may be spliced onto.
+            let count = viewModel.attachments.count
+            reorder = ReorderState(
+                id: attachment.id,
+                snapshot: cellX.filter { $0.key < count },
+                grabX: fingerX - x,
+                index: index,
+                offsetX: 0
+            )
+            #if DEBUG
+            ReorderTrace.shared.note("lift i=\(index)")
+            ReorderTrace.shared.endDrag()
+            #endif
+            Haptics.shared.pulse()
+        } changed: { fingerX in
+            guard var state = reorder, state.id == attachment.id,
+                  let slotX = state.snapshot[state.index] else { return }
+            // The offset is measured from the slot the cell occupies now.
+            // Taking the finger's travel since the lift raw threw away each
+            // splice's rebase: one step past a midline re-crossed the next
+            // one on the following frame, and any drag cascaded to the end
+            // of the row.
+            var target = (index: state.index, offsetX: fingerX - state.grabX - slotX)
+            #if DEBUG
+            ReorderTrace.shared.noteDrag(fingerX)
+            #endif
+            for _ in 0..<state.snapshot.count {
+                let step = AttachmentModel.reorderStep(
+                    snapshot: state.snapshot, from: target.index,
+                    offsetX: target.offsetX, half: 42
+                )
+                if step.index == target.index { break }
+                target = step
             }
-            .onChanged { value in
-                switch value {
-                case .first:
-                    guard reorder == nil, cellX[index] != nil else { return }
-                    reorder = ReorderState(snapshot: cellX, index: index, offsetX: 0)
-                    Haptics.shared.pulse()
-                case .second(true, let drag?):
-                    guard var state = reorder else { return }
-                    state.offsetX = drag.translation.width
-                    let half: CGFloat = 42
-                    let (newIndex, newOffsetX) = AttachmentModel.reorderStep(
-                        snapshot: state.snapshot, from: state.index,
-                        offsetX: state.offsetX, half: half
-                    )
-                    if newIndex != state.index {
-                        viewModel.moveMedia(from: state.index, to: newIndex)
-                        state.index = newIndex
-                    }
-                    state.offsetX = newOffsetX
-                    reorder = state
-                default:
-                    break
-                }
+            if target.index != state.index {
+                #if DEBUG
+                ReorderTrace.shared.note("move \(state.index)>\(target.index)")
+                #endif
+                viewModel.moveMedia(from: state.index, to: target.index)
+                state.index = target.index
             }
-            .onEnded { _ in reorder = nil }
+            state.offsetX = target.offsetX
+            reorder = state
+        } ended: { cancelled in
+            guard reorder?.id == attachment.id else { return }
+            #if DEBUG
+            ReorderTrace.shared.note(cancelled ? "cancel" : "drop")
+            #endif
+            reorder = nil
+        }
     }
 
     private var scheduleBanner: some View {
@@ -1444,6 +1509,66 @@ struct ComposeView: View {
         return tags
     }
 
+}
+
+/// A long press that keeps reporting the finger once it begins:
+/// `UILongPressGestureRecognizer`, attached through SwiftUI.
+///
+/// UIKit's recognizer rather than SwiftUI's `LongPressGesture` sequenced
+/// before a `DragGesture`: that sequence claimed every touch the moment it
+/// landed, so the attachment strip's scroll view never got to pan, and
+/// swiping on a thumbnail could not scroll the row, attached exclusively or
+/// simultaneously. UIKit's long press stays pending through the hold, so a
+/// swipe fails it and scrolls; once it begins, no pan (the strip's, the
+/// composer's, the sheet's) can start. That is the arbitration
+/// UICollectionView's own reordering relies on. It also reports
+/// cancellation, which SwiftUI's `.onEnded` never did.
+private struct ReorderPressGesture: UIGestureRecognizerRepresentable {
+    var minimumDuration: TimeInterval
+    /// The finger's global x when the hold completes.
+    var began: (CGFloat) -> Void
+    var changed: (CGFloat) -> Void
+    /// `true` when the touch was cancelled rather than lifted.
+    var ended: (Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = minimumDuration
+        // A held finger (or a simulator cursor) wanders; UIKit's default
+        // 10pt allowance failed the hold on ordinary wobble.
+        recognizer.allowableMovement = 16
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let x = context.converter.location(in: .global).x
+        switch recognizer.state {
+        case .began: began(x)
+        case .changed: changed(x)
+        case .ended: ended(false)
+        case .cancelled, .failed: ended(true)
+        default: break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// Every pan on the touch's path (the strip's scroll, the
+        /// composer's, the sheet's dismiss) waits for the hold to fail.
+        /// Left to race, a pan recognizes on its own few points of
+        /// hysteresis, well inside the hold's allowance, and moved the row
+        /// out from under a thumbnail being grabbed.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            otherGestureRecognizer is UIPanGestureRecognizer
+        }
+    }
 }
 
 /// The video slot's thumbnail is the video's own frame (sidecar #368).
