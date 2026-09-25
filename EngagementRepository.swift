@@ -590,10 +590,11 @@ final class EngagementRepository {
 
         // Block at source: a blocked author's reply / quote / repost / reaction
         // must not bump engagement counts or appear in the reactor / quoter /
-        // reposter drawers. Zaps (9735) are checked separately in the kind
+        // reposter drawers. A kind-1111 comment counts as a reply, so it is
+        // gated the same way. Zaps (9735) are checked separately in the kind
         // switch below against the *resolved* sender, since `event.pubkey` on a
         // zap receipt is the LNURL server, not the zapper.
-        if event.kind == 1 || event.kind == 6 || event.kind == 7,
+        if event.kind == 1 || event.kind == Nip22.kindComment || event.kind == 6 || event.kind == 7,
            SafetyFilter.shared.snapshot.blockedPubkeys.contains(event.pubkey) {
             return
         }
@@ -632,11 +633,18 @@ final class EngagementRepository {
         }
 
         // Aggregate against the most-specific (last) e-tag, ignoring `mention` markers — same
-        // rule as ThreadViewModel.ingestEngagement.
-        let targets = event.tags.compactMap { tag -> String? in
-            guard tag.count >= 2, tag[0] == "e" else { return nil }
-            if tag.count >= 4, tag[3] == "mention" { return nil }
-            return tag[1]
+        // rule as ThreadViewModel.ingestEngagement. A NIP-22 comment names its
+        // immediate parent in the lowercase `e` (the root sits in `E`), so it
+        // lands on the event it answered, exactly like a kind-1 reply.
+        let targets: [String]
+        if event.kind == Nip22.kindComment {
+            targets = Nip22.parentEventId(of: event).map { [$0] } ?? []
+        } else {
+            targets = event.tags.compactMap { tag -> String? in
+                guard tag.count >= 2, tag[0] == "e" else { return nil }
+                if tag.count >= 4, tag[3] == "mention" { return nil }
+                return tag[1]
+            }
         }
         guard let primary = targets.last, (acceptUntracked || queriedIds.contains(primary)) else { return }
         // Advance the per-target high-water mark for every engagement event we

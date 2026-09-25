@@ -109,7 +109,9 @@ final class NotificationRepository {
         guard let event = note.userInfo?["event"] as? NostrEvent else { return }
         guard !activePubkey.isEmpty, event.pubkey == activePubkey else { return }
         switch event.kind {
-        case 1, Nip88.kindPoll, Nip69.kindZapPoll:
+        case 1, Nip22.kindComment, Nip88.kindPoll, Nip69.kindZapPoll:
+            // A comment I just published is an own event too: without it a
+            // reply to that comment misclassifies until the next refresh.
             if selfEventIds.insert(event.id).inserted {
                 persistSelfEventIds()
             }
@@ -452,6 +454,13 @@ final class NotificationRepository {
     ///    attribution the spec requires, so it is the last honest signal that
     ///    this was aimed at me.
     ///
+    /// Addressable scope (`A`/`a`, e.g. a comment on my kind-30023 recipe) is
+    /// handled only through an event id. NIP-22 has the lowercase side carry
+    /// an `e` next to the `a`, so a spec-shaped comment on my recipe reaches
+    /// case 3 with that `e` as its target. A comment that names the recipe
+    /// only by coordinate is dropped on purpose: a row opens its target by
+    /// event id, and a coordinate has none until the recipe is fetched.
+    ///
     /// All three land as `.reply`, not a new kind: a comment *is* a reply for
     /// filtering, counting and effects. Only `parentKind` differs, and only
     /// the caption reads it.
@@ -473,6 +482,7 @@ final class NotificationRepository {
         } else {
             return nil
         }
+        // Nil only for a coordinate-only (`A`/`a`) comment — see above.
         guard let referenced = target else { return nil }
 
         let parentTag = event.tags.first { $0.first == "e" && $0.count >= 2 && $0[1] == referenced }
