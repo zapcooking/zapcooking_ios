@@ -326,7 +326,7 @@ final class ComposeViewModel {
                 durationSec: d["duration"] as? Int,
                 sha256Hex: d["sha256"] as? String,
                 localBytes: nil,
-                altText: d["alt"] as? String
+                altText: d["alt"] as? String,
             )
         }
         let restoredMentions: [InsertedMention] = (payload["mentions"] as? [[String: String]] ?? []).compactMap { d in
@@ -334,7 +334,16 @@ final class ComposeViewModel {
             return InsertedMention(displayName: dn, pubkey: pk)
         }
         guard !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !restored.isEmpty else { return }
-        content = saved
+        // An autosave written before attachments became slots can carry a
+        // URL in the text as well as in the array; publishing would append
+        // it a second time. Only a boundary occurrence (the URL alone on
+        // its line) counts as machine-written — a URL inside a sentence is
+        // authored prose and survives. The untouched restore stays
+        // verbatim (indentation, trailing newlines and all); only a strip
+        // that removed lines earns the trailing-blank cleanup.
+        let restoredUrls = restored.compactMap(\.url)
+        let stripped = AttachmentModel.stripBoundaryAttachmentLines(content: saved, urls: restoredUrls)
+        content = stripped == saved ? saved : Self.trimTrailingBlankLines(stripped)
         attachments = restored
         mentions = restoredMentions
         explicit = payload["explicit"] as? Bool ?? false
@@ -469,6 +478,10 @@ final class ComposeViewModel {
         } else {
             content = new
         }
+        // A "Keep it as text" refusal expires when its line does: a URL
+        // with no live candidate line clears its refusal, so pasting it
+        // afresh later asks again.
+        dismissedOfferUrls.formIntersection(Set(AttachmentModel.attachableUrlCandidates(content)))
         // Rehydrate `nostr:nprofile1...` / `nostr:npub1...` pastes into the
         // `@displayName + mentions[]` form so they render as pills. Cheap
         // guard avoids the regex on every keystroke; only runs when a paste
@@ -483,6 +496,7 @@ final class ComposeViewModel {
     /// caret). For simplicity v1 appends at end if cursor unknown.
     func append(_ text: String) {
         content += text
+        dismissedOfferUrls.formIntersection(Set(AttachmentModel.attachableUrlCandidates(content)))
         recomputeHashtags()
     }
 
@@ -686,7 +700,7 @@ final class ComposeViewModel {
                 if let idx = attachments.firstIndex(where: { $0.id == pendingId }) {
                     // The ALT chip is live while an upload runs, so whatever
                     // the user saved in that window must survive the
-                    // placeholder → uploaded replacement.
+                    // placeholder → uploaded replacement (#137).
                     let savedAlt = attachments[idx].altText
                     attachments[idx] = ComposeAttachment(
                         id: pendingId,
@@ -695,7 +709,12 @@ final class ComposeViewModel {
                         dim: prepared.2,
                         durationSec: pendingDuration,
                         sha256Hex: result.sha256Hex,
-                        localBytes: nil,
+                        // Keep the video's poster frame after upload: the
+                        // remote .mp4 can't be decoded as a still, so these
+                        // bytes are the thumbnail for the rest of the
+                        // session (sidecar #368). Images clear their bytes —
+                        // the URL renders those.
+                        localBytes: picked.isVideo ? thumbBytes : nil,
                         altText: savedAlt
                     )
                 }
@@ -716,24 +735,204 @@ final class ComposeViewModel {
         attachments.removeAll { $0.id == id }
     }
 
-    /// Set (or clear) the accessibility description on one attachment. A
-    /// blank-after-trim string clears — clearing the alt removes the imeta
-    /// `alt` slot at publish time, per the handoff contract.
+    /// Reordering is an array splice, not a text transformation. Both
+    /// reorder mechanisms — drag & drop on the thumbnails and the arrow
+    /// steppers — land here against the same array. The description editor
+    /// never needs flushing first: it edits by attachment id, not by
+    /// index, so the splice can't move what it's writing to.
+    func moveMedia(from source: Int, to destination: Int) {
+        guard attachments.indices.contains(source),
+              attachments.indices.contains(destination),
+              source != destination else { return }
+        let moved = attachments.remove(at: source)
+        attachments.insert(moved, at: destination)
+    }
+
+    /// Resolve drag (by id) and steppers (by index) onto the same splice.
+    func moveMedia(id: UUID, before targetId: UUID) {
+        guard id != targetId,
+              let source = attachments.firstIndex(where: { $0.id == id }),
+              let target = attachments.firstIndex(where: { $0.id == targetId }) else { return }
+        moveMedia(from: source, to: target)
+    }
+
+    func moveMedia(id: UUID, earlier: Bool) {
+        guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
+        let destination = index + (earlier ? -1 : 1)
+        guard attachments.indices.contains(destination) else { return }
+        moveMedia(from: index, to: destination)
+    }
+
+    /// Alt text hangs off the same slot as the URL, so it follows its
+    /// image through a reorder for free. Stored raw; normalized (clamped,
+    /// line breaks flattened) at the tag builders in `AttachmentModel`.
     func setAltText(_ text: String, for id: UUID) {
-        guard let i = attachments.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        attachments[i].altText = trimmed.isEmpty ? nil : trimmed
+        attachments[index].altText = trimmed.isEmpty ? nil : trimmed
         // The view's autosave triggers key off URL changes only; an alt-only
         // edit would otherwise never reach the bucket until some other state
         // changed or the sheet flushed on dismiss.
         scheduleLocalAutosave()
     }
 
+    // MARK: - Paste-attach offers
+
+    /// Offers derive live from the editor text, so consuming (or editing
+    /// away) an occurrence retires its offer by itself.
+    var attachOffers: [String] {
+        AttachmentModel.attachableUrlCandidates(content).filter { !dismissedOfferUrls.contains($0) }
+    }
+
+    /// The quiet refusal: hides this URL's offer until its line goes away
+    /// (see the pruning in `updateContent`).
+    func dismissAttachOffer(_ url: String) {
+        dismissedOfferUrls.insert(url)
+    }
+
+    /// URLs whose offer the user refused ("Keep it as text"). A refusal is
+    /// not a forever no: pruned on every content change, so a URL with no
+    /// live candidate line clears its refusal and pasting it afresh later
+    /// asks again.
+    var dismissedOfferUrls: Set<String> = []
+
+    /// True when `url` still has a consumable pasted occurrence — the
+    /// double-tap guard behind `attachUrl`.
+    private func hasAttachableOccurrence(_ url: String) -> Bool {
+        AttachmentModel.attachableUrlCandidates(content).contains(url)
+    }
+
+    /// Convert a pasted bare URL into an attachment slot: the pasted
+    /// occurrence leaves the editor text and the URL joins the ordered
+    /// slots. The same URL may occupy more than one slot — pasting a link
+    /// twice puts it in the note twice, exactly as the text era did; imeta
+    /// is deduped per URL at publish. Metadata is fetched in the
+    /// background; the slot publishes fine without it.
+    func attachUrl(_ url: String) {
+        // Only ever converts a pasted occurrence that is still in the text.
+        // The offers row updates a frame behind a fast double-tap; without
+        // this guard the second tap would add a slot with nothing to
+        // consume.
+        guard hasAttachableOccurrence(url) else { return }
+        let id = UUID()
+        attachments.append(ComposeAttachment(
+            id: id,
+            url: url,
+            mime: "",
+            dim: .zero,
+            durationSec: nil,
+            sha256Hex: nil,
+            localBytes: nil
+        ))
+        content = AttachmentModel.removeBareUrlOccurrence(content, url: url)
+        dismissedOfferUrls.remove(url)
+        recomputeHashtags()
+        Task { await fetchRemoteMediaMeta(url: url, slotId: id) }
+    }
+
+    /// Best-effort metadata for a pasted-link slot: HEAD for the
+    /// Content-Type (a video URL must not be downloaded to be identified),
+    /// then a GET for images. The fetched bytes double as the slot's
+    /// thumbnail — the app has them in hand, so the strip never depends on
+    /// a second network hit that a rate-limited host can refuse. A failure
+    /// leaves the slot with unknown metadata — the URL still publishes;
+    /// only imeta richness and the instant thumb are lost.
+    private func fetchRemoteMediaMeta(url: String, slotId: UUID) async {
+        guard let parsed = URL(string: url),
+              let scheme = parsed.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return }
+        var mime = ""
+        if let head = await remoteContentType(parsed) {
+            if head.hasPrefix("video/") {
+                applyRemoteMeta(mime: head, dim: .zero, data: nil, slotId: slotId)
+                return
+            }
+            if head.hasPrefix("image/") { mime = head }
+        }
+        var req = URLRequest(url: parsed)
+        req.timeoutInterval = 15
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            if !mime.isEmpty { applyRemoteMeta(mime: mime, dim: .zero, data: nil, slotId: slotId) }
+            return
+        }
+        if mime.isEmpty {
+            let serverMime = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
+                .split(separator: ";").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+            if serverMime.hasPrefix("image/") || serverMime.hasPrefix("video/") {
+                mime = serverMime
+            } else if let sniffed = sniffImageMime(data) {
+                mime = sniffed
+            } else {
+                mime = Self.mimeFromPathExtension(parsed.pathExtension)
+            }
+        }
+        var dim = CGSize.zero
+        var thumbBytes: Data?
+        if mime.hasPrefix("image/"), data.count <= 20 * 1024 * 1024 {
+            if let image = UIImage(data: data) {
+                dim = image.size
+                thumbBytes = data
+            }
+        }
+        applyRemoteMeta(mime: mime, dim: dim, data: thumbBytes, slotId: slotId)
+    }
+
+    private func remoteContentType(_ url: URL) async -> String? {
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = 10
+        guard let (_, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return nil }
+        let type = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
+            .split(separator: ";").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+        return type.isEmpty ? nil : type
+    }
+
+    /// Internal (not private) so `AttachmentModelTests` can pin the merge
+    /// semantics without a network round-trip: empty mime / zero dim / nil
+    /// data keep what the slot already had, so a partial fetch can't erase
+    /// known fields.
+    func applyRemoteMeta(mime: String, dim: CGSize, data: Data?, slotId: UUID) {
+        guard let index = attachments.firstIndex(where: { $0.id == slotId }) else { return }
+        let slot = attachments[index]
+        // The slot may have been reordered, described, or duplicated in the
+        // meantime — rewrite in place by id and nothing else moves.
+        attachments[index] = ComposeAttachment(
+            id: slot.id,
+            url: slot.url,
+            mime: mime.isEmpty ? slot.mime : mime,
+            dim: dim == .zero ? slot.dim : dim,
+            durationSec: slot.durationSec,
+            sha256Hex: slot.sha256Hex,
+            localBytes: data ?? slot.localBytes,
+            altText: slot.altText,
+        )
+    }
+
+    /// Extension-based mime fallback for servers that send no useful
+    /// Content-Type. Matches the upload pipeline's common formats.
+    nonisolated static func mimeFromPathExtension(_ ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic", "heif": return "image/heic"
+        case "avif": return "image/avif"
+        case "mp4", "m4v": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "webm": return "video/webm"
+        default: return ""
+        }
+    }
+
     /// Handle images from a SwiftUI `.onPasteCommand([UTType.image])` callback.
     /// Each provider is loaded to bytes, compressed, and uploaded to Blossom — same
-    /// pipeline as the photo picker. In non-gallery mode the resulting URL is also
-    /// appended to the post body so it shows up in the live preview alongside the
-    /// attachment thumbnail.
+    /// pipeline as the photo picker; the result lands in an attachment slot and
+    /// the live preview renders it alongside the thumbnail.
     func addPastedImages(_ providers: [NSItemProvider]) async {
         guard !providers.isEmpty else { return }
         uploadProgress = providers.count > 1 ? "Loading \(providers.count) images…" : "Loading…"
@@ -911,7 +1110,7 @@ final class ComposeViewModel {
                     durationSec: nil,
                     sha256Hex: result.sha256Hex,
                     localBytes: nil,
-                    altText: savedAlt
+                    altText: savedAlt,
                 )
             }
         } catch {
@@ -920,9 +1119,11 @@ final class ComposeViewModel {
         }
     }
 
-    /// Re-host a GIF picked from Giphy on the user's Blossom servers, then
-    /// append the resulting URL to the post body. Falls back to the original
-    /// Giphy URL if the rehost fails so the user always gets a working link.
+    /// Re-host a GIF picked from Giphy on the user's Blossom servers and
+    /// add it as an attachment slot — the URL never touches the editor
+    /// text, exactly like picker-uploaded media. Falls back to the
+    /// original Giphy URL if the rehost fails so the user always gets a
+    /// working link.
     func attachGifFromGiphy(_ giphyURL: String) async {
         uploadProgress = "Uploading GIF…"
         defer { uploadProgress = nil }
@@ -931,9 +1132,16 @@ final class ComposeViewModel {
             keypair: signingKeypair,
             servers: blossomServers
         )
-        if !content.isEmpty, !content.hasSuffix("\n") { content += "\n" }
-        content += outcome.url
-        content += "\n"
+        let id = UUID()
+        attachments.append(ComposeAttachment(
+            id: id,
+            url: outcome.url,
+            mime: "image/gif",
+            dim: .zero,
+            durationSec: nil,
+            sha256Hex: nil,
+            localBytes: nil
+        ))
         if !outcome.didRehost {
             lastError = "Couldn't re-host GIF on your Blossom server — using the Giphy link instead."
         }
@@ -1041,9 +1249,15 @@ final class ComposeViewModel {
         }
         let imetaAttachments = Self.parseImetaAttachments(tags: draft.tags)
         if !imetaAttachments.isEmpty {
-            // Imeta tags carry full attachment metadata (mime, dim, hash), so the
-            // round-trip is exact; the body stays as the user typed it.
-            content = draft.content
+            // Imeta tags carry full attachment metadata (mime, dim, hash,
+            // alt), so the round-trip is exact. Some clients (and this
+            // app's own pre-slot drafts) also splice the URLs into the
+            // body — strip those boundary occurrences or publishing
+            // appends them a second time. URLs a person wrote inside a
+            // sentence survive; an untouched body stays verbatim.
+            let imetaUrls = imetaAttachments.compactMap(\.url)
+            let stripped = AttachmentModel.stripBoundaryAttachmentLines(content: draft.content, urls: imetaUrls)
+            content = stripped == draft.content ? draft.content : Self.trimTrailingBlankLines(stripped)
             attachments = imetaAttachments
         } else {
             // Legacy drafts (saved before the imeta round-trip landed, or by other
@@ -1131,23 +1345,13 @@ final class ComposeViewModel {
         let innerKind = determineKind()
         var innerTags: [[String]] = buildBaseTags(kind: innerKind, materializedContent: materialized)
         // Strip `client` and the publish-time `imeta`; we rebuild `imeta` below from the
-        // composer's `attachments` so reopening the draft restores the thumbnail row.
+        // composer's `attachments` so reopening the draft restores the thumbnail row —
+        // descriptions included, because `alt` hangs off the same slot.
         innerTags = innerTags.filter { tag in
             guard let key = tag.first else { return false }
             return key != "client" && key != "imeta"
         }
-        for attachment in uploaded {
-            guard let url = attachment.url else { continue }
-            var imeta: [String] = ["imeta", "url \(url)"]
-            imeta.append("m \(attachment.mime)")
-            if attachment.dim != .zero {
-                imeta.append("dim \(Int(attachment.dim.width))x\(Int(attachment.dim.height))")
-            }
-            if let hash = attachment.sha256Hex { imeta.append("x \(hash)") }
-            if let d = attachment.durationSec { imeta.append("duration \(d)") }
-            if let alt = attachment.trimmedAltText { imeta.append("alt \(alt)") }
-            innerTags.append(imeta)
-        }
+        innerTags.append(contentsOf: AttachmentModel.draftImetaTags(for: uploaded))
 
         let now = NostrClock.now()
         let innerJSON = Nip37.serializeInner(
@@ -1292,9 +1496,9 @@ final class ComposeViewModel {
 
         // Private-reply branch: skip the public kind-1 pipeline entirely. We
         // also skip PoW (gift wraps don't benefit from spam mining the same
-        // way), scheduling (no scheduler relay accepts kind-1059 wraps), and
-        // attachment URL splicing (the rumor body == typed content, with any
-        // URLs already inline via the composer).
+        // way), scheduling (no scheduler relay accepts kind-1059 wraps). The
+        // rumor body goes through `composeNoteContent` like every other
+        // publish path, so attachments ride the same slots.
         if case .reply(let parent, let root) = mode, isPrivate {
             await runPrivateReplyPipeline(parent: parent, root: root)
             return
@@ -1393,7 +1597,7 @@ final class ComposeViewModel {
     /// via the `.nostrEventPublished` broadcast the publisher emits.
     private func runPrivateReplyPipeline(parent: NostrEvent, root: NostrEvent?) async {
         let materialized = Self.trimTrailingBlankLines(materializeMentions(content))
-        let body = appendQuoteUri(to: appendAttachmentUrls(to: materialized))
+        let body = appendQuoteUri(to: AttachmentModel.composeNoteContent(text: materialized, media: attachments))
 
         // Build the rumor's extra tag set: mentions, pubkey refs from inline
         // nostr URIs, hashtags, and the client tag. NIP-10 e/p tags are added
@@ -1479,16 +1683,18 @@ final class ComposeViewModel {
         return Nip68.kindPicture
     }
 
-    /// For regular notes the body is the materialized content with attachment URLs
-    /// spliced onto the end (in `attachments` order). For gallery events the body
-    /// is just the caption — upload URLs ride in `imeta` tags instead.
+    /// For regular notes the body is `AttachmentModel.composeNoteContent` —
+    /// the prose, a blank line, then one attachment URL per line in
+    /// `attachments` order (the single authoritative ordering). For gallery
+    /// events the body is just the caption — upload URLs ride in `imeta`
+    /// tags instead.
     private func bodyForPublish(kind: Int, materialized: String) -> String {
         let trimmed = Self.trimTrailingBlankLines(materialized)
         switch kind {
         case Nip68.kindPicture, Nip71.kindVideoHorizontal, Nip71.kindVideoVertical:
             return trimmed
         default:
-            return appendQuoteUri(to: appendAttachmentUrls(to: trimmed))
+            return appendQuoteUri(to: AttachmentModel.composeNoteContent(text: trimmed, media: attachments))
         }
     }
 
@@ -1510,42 +1716,16 @@ final class ComposeViewModel {
         return out
     }
 
-    private func appendAttachmentUrls(to body: String) -> String {
-        appendUrls(to: body, urls: attachments.compactMap { $0.url })
-    }
-
-    /// One `imeta` tag per **described** attachment — the alt-text contract.
-    /// Undescribed attachments emit nothing (no empty metadata), and `url`
-    /// stays the first slot with `alt` last, matching what Amethyst/Quartz
-    /// write. Only meaningful for notes whose URLs ride in `content`; gallery
-    /// kinds build their imeta through `Nip68` / `Nip71` instead.
+    /// #137's described-only builder, now a thin wrapper over the shared
+    /// `AttachmentModel` module (which adds the per-URL dedupe and the
+    /// grapheme-cluster cap on top of the same tag shape).
     static func imetaTagsForDescribedAttachments(_ attachments: [ComposeAttachment]) -> [[String]] {
-        attachments.compactMap { attachment in
-            guard let url = attachment.url, let alt = attachment.trimmedAltText else { return nil }
-            var imeta: [String] = ["imeta", "url \(url)"]
-            imeta.append("m \(attachment.mime)")
-            if attachment.dim != .zero {
-                imeta.append("dim \(Int(attachment.dim.width))x\(Int(attachment.dim.height))")
-            }
-            if let hash = attachment.sha256Hex { imeta.append("x \(hash)") }
-            imeta.append("alt \(alt)")
-            return imeta
-        }
+        AttachmentModel.imetaTags(for: attachments)
     }
 
-    private func appendUrls(to body: String, urls: [String]) -> String {
-        guard !urls.isEmpty else { return body }
-        var out = body
-        for url in urls {
-            if !out.isEmpty, !out.hasSuffix("\n") { out += "\n" }
-            out += url
-        }
-        return out
-    }
-
-    /// Parse `imeta` tags from a draft into `ComposeAttachment` entries. Mirror of the
-    /// imeta builder in `saveDraft`: each tag's `url`, `m`, `dim`, `x`, `duration`,
-    /// `alt` sub-entries become attachment fields.
+    /// Parse `imeta` tags from a draft into `ComposeAttachment` entries. Mirror of
+    /// `AttachmentModel.draftImetaTags`: each tag's `url`, `alt`, `m`, `dim`, `x`,
+    /// `duration` sub-entries become attachment fields.
     static func parseImetaAttachments(tags: [[String]]) -> [ComposeAttachment] {
         tags.compactMap { tag in
             guard tag.first == "imeta", tag.count > 1 else { return nil }
@@ -1558,6 +1738,10 @@ final class ComposeViewModel {
             for entry in tag.dropFirst() {
                 if let value = entry.split(separator: " ", maxSplits: 1).last.map(String.init) {
                     if entry.hasPrefix("url ") { url = value }
+                    else if entry.hasPrefix("alt ") {
+                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        alt = trimmed.isEmpty ? nil : trimmed
+                    }
                     else if entry.hasPrefix("m ") { mime = value }
                     else if entry.hasPrefix("dim ") {
                         let parts = value.split(separator: "x")
@@ -1567,10 +1751,6 @@ final class ComposeViewModel {
                     }
                     else if entry.hasPrefix("x ") { hash = value }
                     else if entry.hasPrefix("duration ") { durationSec = Int(value) }
-                    else if entry.hasPrefix("alt ") {
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        alt = trimmed.isEmpty ? nil : trimmed
-                    }
                 }
             }
             guard let url else { return nil }
@@ -1582,15 +1762,16 @@ final class ComposeViewModel {
                 durationSec: durationSec,
                 sha256Hex: hash,
                 localBytes: nil,
-                altText: alt
+                altText: alt,
             )
         }
     }
 
-    /// Inverse of `appendUrls` for legacy drafts whose attachments were spliced into
-    /// the body as trailing URLs. Drafts written by the current code path use imeta
-    /// tags instead, but this fallback keeps older drafts (and any cross-client
-    /// drafts that put media URLs at the end of the body) loading correctly.
+    /// Inverse of `AttachmentModel.composeNoteContent` for legacy drafts whose
+    /// attachments were spliced into the body as trailing URLs. Drafts written
+    /// by the current code path use imeta tags instead, but this fallback keeps
+    /// older drafts (and any cross-client drafts that put media URLs at the end
+    /// of the body) loading correctly.
     static func splitDraftBody(_ source: String) -> (body: String, attachments: [ComposeAttachment]) {
         let imageExts: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "svg"]
         let videoExts: Set<String> = ["mp4", "mov", "webm", "m3u8"]
@@ -1821,9 +2002,6 @@ final class ComposeViewModel {
                     relayUrls: pollRelays
                 ))
             }
-            // Poll bodies splice attachment URLs like text notes, so described
-            // attachments carry their imeta `alt` the same way.
-            tags.append(contentsOf: Self.imetaTagsForDescribedAttachments(attachments))
             if explicit { tags.append(["content-warning", ""]) }
             tags.append(contentsOf: EmojiShortcode.emojiTags(in: materializedContent))
             if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
@@ -1837,7 +2015,7 @@ final class ComposeViewModel {
                 let imeta: [Nip68.ImetaEntry] = attachments.compactMap { a in
                     guard let url = a.url else { return nil }
                     let dim = a.dim != .zero ? "\(Int(a.dim.width))x\(Int(a.dim.height))" : nil
-                    return Nip68.ImetaEntry(url: url, mimeType: a.mime, dim: dim, hash: a.sha256Hex, alt: a.trimmedAltText)
+                    return Nip68.ImetaEntry(url: url, mimeType: a.mime, dim: dim, hash: a.sha256Hex, alt: AttachmentModel.altOrNil(a.altText ?? ""))
                 }
                 let extra = Nip68.buildPictureTags(
                     title: nil,
@@ -1850,7 +2028,7 @@ final class ComposeViewModel {
                 let videos: [Nip71.VideoMeta] = attachments.compactMap { a in
                     guard let url = a.url else { return nil }
                     let dim = a.dim != .zero ? "\(Int(a.dim.width))x\(Int(a.dim.height))" : nil
-                    return Nip71.VideoMeta(url: url, mimeType: a.mime, dim: dim, duration: a.durationSec, hash: a.sha256Hex, alt: a.trimmedAltText)
+                    return Nip71.VideoMeta(url: url, mimeType: a.mime, dim: dim, duration: a.durationSec, hash: a.sha256Hex, alt: AttachmentModel.altOrNil(a.altText ?? ""))
                 }
                 let extra = Nip71.buildVideoTags(
                     title: nil,
@@ -1863,12 +2041,11 @@ final class ComposeViewModel {
                 break
             }
         } else {
-            // Text notes / NIP-22 comments splice their attachment URLs into
-            // the body. Described attachments (and only those) also carry an
-            // `imeta` tag whose `url` matches the spliced URL exactly, so the
-            // alt text rides NIP-92 to every client. Never emit imeta for an
-            // undescribed attachment here: a tag-less URL stays a plain URL.
-            tags.append(contentsOf: Self.imetaTagsForDescribedAttachments(attachments))
+            // Text notes: one imeta tag per DESCRIBED attachment, in draft
+            // order. Undescribed media contributes nothing at all — a note
+            // carrying `alt ""` for every image looks described, which is
+            // worse than a note carrying nothing.
+            tags.append(contentsOf: AttachmentModel.imetaTags(for: attachments))
             if explicit {
                 tags.append(["content-warning", ""])
             }
