@@ -34,13 +34,14 @@ struct ComposeAttachment: Identifiable {
     let durationSec: Int?
     let sha256Hex: String?
     /// Local copy of the bytes — kept around until upload completes so we can render
-    /// a thumbnail. Cleared once `url` is set.
+    /// a thumbnail. Cleared once `url` is set (video slots keep their poster
+    /// frame: the remote .mp4 can't decode as a still).
     var localBytes: Data?
     /// Author-supplied accessibility description. Published as the NIP-92
     /// imeta `alt` slot (one imeta tag per described image — undescribed
-    /// attachments emit no tag) and round-tripped through drafts.
-    /// Defaults to nil so existing call sites (picker, drafts, tests) keep
-    /// compiling; undescribed attachments simply omit the imeta tag.
+    /// attachments emit no tag, never an empty one) and round-tripped
+    /// through drafts. Because the description hangs off the same slot as
+    /// the URL, it follows its image through a reorder for free.
     var altText: String? = nil
 
     var isVideo: Bool { mime.hasPrefix("video/") }
