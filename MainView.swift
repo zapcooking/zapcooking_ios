@@ -525,7 +525,18 @@ struct MainView: View {
         }
         .sheet(isPresented: $showAbout) {
             NavigationStack {
-                AboutView()
+                AboutView(account: AboutView.Account(
+                    keypair: keypair,
+                    walletStore: walletStore,
+                    onDeleted: { next in
+                        showAbout = false
+                        if let next {
+                            onSwitchAccount(next)
+                        } else {
+                            onLogout()
+                        }
+                    }
+                ))
             }
         }
         .sheet(isPresented: $showMediaServers) {
