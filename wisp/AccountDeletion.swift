@@ -83,7 +83,11 @@ enum AccountDeletion {
     /// account, whose keypair is returned. Without it, the whole device is
     /// wiped (`AppDataWipe`) and nil is returned — the caller logs out.
     ///
-    /// Throws before any local change if a backup delete fails.
+    /// Throws before any local change if a backup delete fails, and throws
+    /// `HandOffUnavailable` — before anything is deleted — if `handOffTo`
+    /// names an account whose keypair is gone. A failed hand-off must never
+    /// fall through to the whole-device wipe: that would erase every other
+    /// saved account to delete one.
     @discardableResult
     static func delete(
         pubkey: String,
@@ -92,11 +96,18 @@ enum AccountDeletion {
         backups: ICloudBackupStore,
         deviceWipe: DeviceWipe
     ) async throws -> Keypair? {
+        if let next, NostrKey.loadAccount(pubkey: next) == nil {
+            throw HandOffUnavailable(pubkey: next)
+        }
+
         for id in backupIDs {
             try await backups.deleteBackup(backupID: id)
         }
 
-        if let next, let nextKeypair = NostrKey.switchAccount(pubkey: next) {
+        if let next {
+            guard let nextKeypair = NostrKey.switchAccount(pubkey: next) else {
+                throw HandOffUnavailable(pubkey: next)
+            }
             await clearAccount(pubkey: pubkey)
             return nextKeypair
         }
@@ -105,6 +116,12 @@ enum AccountDeletion {
         NostrKey.delete()
         await deviceWipe.wipeEverything()
         return nil
+    }
+
+    /// The account named to take over after a targeted delete has no
+    /// keypair in the keychain (a stale `wisp_accounts` entry).
+    struct HandOffUnavailable: Error, Equatable {
+        let pubkey: String
     }
 
     // MARK: - Local pieces

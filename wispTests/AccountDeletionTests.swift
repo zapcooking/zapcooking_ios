@@ -251,6 +251,36 @@ struct AccountDeletionTests {
         #expect(AccountDeletion.match(files: store.files, key32: key, pubkeyHex: keeper.pubkey) != .noneForThisAccount)
     }
 
+    @Test func staleHandOff_deletesNothing_andNeverWipesTheDevice() async throws {
+        let priorAccounts = NostrKey.accounts()
+        let priorActive = NostrKey.load()
+        let doomed = try newKeypair(), ghost = try newKeypair()
+        defer {
+            AccountDeletion.clearKeychain(pubkey: doomed.pubkey)
+            AccountDeletion.sweepDefaults(pubkey: doomed.pubkey)
+            NostrKey.delete()
+            restore(accounts: priorAccounts, active: priorActive)
+        }
+
+        seed(doomed)
+        // Listed in `wisp_accounts` but with no keychain item behind it.
+        NostrKey.registerInAccountList(ghost.pubkey)
+        let key = try BackupCrypto.deriveBackupKey(appleUserID: Self.appleUserID, pin: Self.pin)
+        let store = FakeBackups([try backup(of: doomed, key: key)])
+        let wipe = RecordingWipe()
+
+        await #expect(throws: AccountDeletion.HandOffUnavailable(pubkey: ghost.pubkey)) {
+            try await AccountDeletion.delete(
+                pubkey: doomed.pubkey, backupIDs: store.files.map(\.backupID), handOffTo: ghost.pubkey,
+                backups: store, deviceWipe: wipe
+            )
+        }
+        #expect(wipe.calls == 0)
+        #expect(store.deleted.isEmpty)
+        #expect(NostrKey.loadAccount(pubkey: doomed.pubkey) != nil)
+        #expect(NostrKey.load()?.pubkey == doomed.pubkey)
+    }
+
     // MARK: - Deletion request (view model)
 
     @Test func request_goesFirst_thenBackups_thenWipe() async throws {

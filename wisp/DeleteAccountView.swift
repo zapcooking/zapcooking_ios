@@ -214,7 +214,11 @@ final class DeleteAccountViewModel {
     private func finishDeletion() async {
         step = .deleting
         let pubkey = keypair.pubkey
-        let next = NostrKey.accounts().first { $0 != pubkey }
+        // Only an account that can actually be loaded: a stale list entry
+        // would otherwise make `delete` refuse the hand-off.
+        let next = NostrKey.accounts().first {
+            $0 != pubkey && NostrKey.loadAccount(pubkey: $0) != nil
+        }
         do {
             handedOffTo = try await AccountDeletion.delete(
                 pubkey: pubkey,
@@ -224,6 +228,8 @@ final class DeleteAccountViewModel {
                 deviceWipe: deviceWipe
             )
             step = .done
+        } catch is AccountDeletion.HandOffUnavailable {
+            step = .failed("Another account on this device couldn\u{2019}t be opened, so nothing was deleted. Try again.")
         } catch {
             step = .failed("The iCloud backup couldn\u{2019}t be removed, so nothing on this device was deleted. Check that iCloud is signed in and try again.")
         }
