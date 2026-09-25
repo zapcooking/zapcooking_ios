@@ -835,7 +835,7 @@ struct ComposeView: View {
                 ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
                     attachmentThumb(attachment, index: index, size: 84)
                         .onGeometryChange(for: CGFloat.self) { proxy in
-                            proxy.frame(in: .named("attachStrip")).minX
+                            proxy.frame(in: .global).minX
                         } action: { minX in
                             cellX[index] = minX
                         }
@@ -847,7 +847,6 @@ struct ComposeView: View {
             }
             .padding(.horizontal, 12)
         }
-        .coordinateSpace(name: "attachStrip")
         .transaction { $0.animation = nil }
         // The @GestureState flag resets on end AND cancellation; a reset
         // with a still-lifted slot means the gesture died without
@@ -1050,7 +1049,7 @@ struct ComposeView: View {
     /// re-reading live positions mid-drag races the splice by a frame.
     private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
         LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("attachStrip")))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .updating($reorderGestureLive) { _, live, _ in
                 live = true
             }
@@ -1064,36 +1063,15 @@ struct ComposeView: View {
                     guard var state = reorder else { return }
                     state.offsetX = drag.translation.width
                     let half: CGFloat = 42
-                    let ordered = state.snapshot.sorted { $0.value < $1.value }
-                    var guardCounter = ordered.count
-                    while guardCounter > 0 {
-                        guardCounter -= 1
-                        guard let fromX = state.snapshot[state.index],
-                              let pos = ordered.firstIndex(where: { $0.key == state.index }) else { break }
-                        // half converts the midpoint between left edges to
-                        // a midpoint between centers.
-                        let centerX = fromX + state.offsetX + half
-                        var swapped = false
-                        if pos < ordered.count - 1 {
-                            let next = ordered[pos + 1]
-                            if centerX > (fromX + next.value) / 2 + half {
-                                viewModel.moveMedia(from: state.index, to: next.key)
-                                state.offsetX -= next.value - fromX
-                                state.index = next.key
-                                swapped = true
-                            }
-                        }
-                        if !swapped, pos > 0 {
-                            let prev = ordered[pos - 1]
-                            if centerX < (fromX + prev.value) / 2 + half {
-                                viewModel.moveMedia(from: state.index, to: prev.key)
-                                state.offsetX -= prev.value - fromX
-                                state.index = prev.key
-                                swapped = true
-                            }
-                        }
-                        if !swapped { break }
+                    let (newIndex, newOffsetX) = AttachmentModel.reorderStep(
+                        snapshot: state.snapshot, from: state.index,
+                        offsetX: state.offsetX, half: half
+                    )
+                    if newIndex != state.index {
+                        viewModel.moveMedia(from: state.index, to: newIndex)
+                        state.index = newIndex
                     }
+                    state.offsetX = newOffsetX
                     reorder = state
                 default:
                     break

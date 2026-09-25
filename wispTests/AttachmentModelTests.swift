@@ -443,3 +443,47 @@ struct AttachmentModelTests {
         #expect(vm.attachments.count == 1)
     }
 }
+
+// MARK: - Drag reorder step (the #268 midline math)
+
+extension AttachmentModelTests {
+
+    /// Slots laid out at one-row pitch: 0, 92, 184 (84pt cell + 8 gap),
+    /// half = 42. A swap fires exactly when the dragged cell's center
+    /// crosses the midpoint between centers — 46pt of travel.
+    @Test func reorderStep_swapsAtTheMidline_andRebasesTheOffset() {
+        let snapshot = [0: CGFloat(0), 1: CGFloat(92), 2: CGFloat(184)]
+        // Under the midpoint: no move.
+        #expect(AttachmentModel.reorderStep(snapshot: snapshot, from: 0, offsetX: 45, half: 42).index == 0)
+        // Past the midpoint: splice to the neighbor, offset rebased so the
+        // lifted cell stays under the finger.
+        let step = AttachmentModel.reorderStep(snapshot: snapshot, from: 0, offsetX: 47, half: 42)
+        #expect(step.index == 1)
+        #expect(step.offsetX == CGFloat(47 - 92))
+        // Leftward from the last slot.
+        let left = AttachmentModel.reorderStep(snapshot: snapshot, from: 2, offsetX: -47, half: 42)
+        #expect(left.index == 1)
+        #expect(left.offsetX == CGFloat(-47 + 92))
+    }
+
+    @Test func reorderStep_multiCellTravel_loopsToTheFinalSlot() {
+        let snapshot = [0: CGFloat(0), 1: CGFloat(92), 2: CGFloat(184)]
+        // A 200pt fling right from slot 0 crosses both midlines.
+        var state = (index: 0, offsetX: CGFloat(200))
+        for _ in 0..<4 {
+            let step = AttachmentModel.reorderStep(
+                snapshot: snapshot, from: state.index, offsetX: state.offsetX, half: 42
+            )
+            if step.index == state.index { break }
+            state = step
+        }
+        #expect(state.index == 2)
+    }
+
+    @Test func reorderStep_atRest_neverMoves() {
+        let snapshot = [0: CGFloat(0), 1: CGFloat(92), 2: CGFloat(184)]
+        for from in 0...2 {
+            #expect(AttachmentModel.reorderStep(snapshot: snapshot, from: from, offsetX: 0, half: 42).index == from)
+        }
+    }
+}
