@@ -2,7 +2,6 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import Observation
-import AVFoundation
 
 /// Cross-surface channel for the autosaved draft. `ComposeView` writes the
 /// draft here from its autosave-on-dismiss path; `MainView` watches it and
@@ -32,26 +31,6 @@ struct ComposeView: View {
     @State private var showAccountPicker = false
     @State private var showFoodTagConfirm = false
     @State private var showTagPicker = false
-    /// Live drag reorder, ported from #268's `AttachmentThumbStrip`: at
-    /// lift, each slot's layout x is snapshotted; the dragged cell is
-    /// offset by the finger's translation (it follows the hand, 1.06
-    /// scaled, z-lifted) and crossing the midpoint between cell centers
-    /// splices the slot there, rebasing the offset so the lifted cell
-    /// never jumps. Positions are never re-read mid-drag.
-    private struct ReorderState {
-        var snapshot: [Int: CGFloat]
-        var index: Int
-        var offsetX: CGFloat
-    }
-    @State private var reorder: ReorderState?
-    @State private var cellX: [Int: CGFloat] = [:]
-    /// Liveness flag driven by the gesture itself. `@GestureState` resets
-    /// to its initial value when the gesture ends *or is cancelled* —
-    /// plain `.onEnded` never fires on cancellation (a splice can
-    /// invalidate the gesture mid-drag), which left lifted cells stuck.
-    @GestureState private var reorderGestureLive = false
-    /// Attachment whose alt editor (#137's `AltTextEditorView`) is open.
-    /// Targets by id, so a reorder while it's open can't redirect the text.
     @State private var altEditorTarget: AltTextEditorTarget?
 
     /// Draft to load on first appear. Nil for `.new` and `.reply`/`.quote` composers.
@@ -92,23 +71,7 @@ struct ComposeView: View {
         _viewModel = State(initialValue: ComposeViewModel(keypair: keypair, mode: .new))
     }
 
-    /// Test seam for the render tests: compose around an existing view
-    /// model so a snapshot can carry real attachment bytes (the autosave
-    /// format doesn't persist localBytes).
-    init(keypair: Keypair, viewModel: ComposeViewModel) {
-        self.initialDraft = nil
-        self.pendingAttachmentProviders = []
-        _viewModel = State(initialValue: viewModel)
-    }
-
     var body: some View {
-        autosaveHost
-    }
-
-    /// The `NavigationStack` + toolbar shell, split out of `body` — the
-    /// single expression had grown past what the type-checker resolves in
-    /// reasonable time.
-    private var navigationRoot: some View {
         NavigationStack {
             ZStack {
                 Color.wispBackground.ignoresSafeArea()
@@ -119,8 +82,90 @@ struct ComposeView: View {
                     ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            editorSection
-                            belowEditorSection
+                            if viewModel.galleryMode {
+                                galleryArea
+                            }
+
+                            // Avatar + "posting as" label rendered as a slim
+                            // header row above the editor so the editor
+                            // itself can take the full content width.
+                            // Hidden entirely for single-account users —
+                            // nothing to switch to, so the row would just
+                            // be visual noise. Tapping the row (when
+                            // multi-account) opens a sheet picker —
+                            // SwiftUI `Menu` items can't render arbitrary
+                            // images, so a custom picker is the only way
+                            // to show real avatars next to names.
+                            if viewModel.availableSigningAccounts.count > 1 {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    signingAccountHeader
+                                        .padding(.horizontal, 12)
+                                    textEditor
+                                }
+                            } else {
+                                textEditor
+                            }
+
+                            quoteContextHeader
+
+                            if !viewModel.suggestedHashtags.isEmpty {
+                                HashtagSuggestionRow(viewModel: viewModel) {
+                                    // Same hop as the GIF picker: let the
+                                    // keyboard collapse before the sheet
+                                    // presents, or the presentation races it.
+                                    contentFocused = false
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        showTagPicker = true
+                                    }
+                                }
+                            }
+
+                            actionsRow
+
+                            if viewModel.pollEnabled {
+                                PollOptionsEditor(viewModel: viewModel)
+                                    .padding(.horizontal, 12)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            if !viewModel.attachments.isEmpty, !viewModel.galleryMode {
+                                attachmentsRow
+                            }
+
+                            if !viewModel.hashtags.isEmpty {
+                                HashtagChipsView(hashtags: viewModel.hashtags)
+                            }
+
+                            if viewModel.explicit {
+                                nsfwBanner
+                            }
+
+                            if !viewModel.mentionCandidates.isEmpty || viewModel.isMentionSearchingRemote {
+                                mentionPopup
+                            }
+
+                            if !viewModel.emojiCandidates.isEmpty {
+                                emojiPopup
+                            }
+
+                            if shouldShowPreview {
+                                ComposerPreviewCard(
+                                    content: viewModel.previewContent,
+                                    tags: previewTags,
+                                    pollOptions: viewModel.pollEnabled
+                                        ? viewModel.pollOptions.filter { !$0.isEmpty }
+                                        : nil,
+                                    userProfile: ProfileRepository.shared.get(viewModel.signingKeypair.pubkey)
+                                )
+                                .id(previewAnchorID)
+                            }
+
+                            if let error = viewModel.lastError {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .padding(.horizontal, 12)
+                            }
 
                             Color.clear.frame(height: 80)
                         }
@@ -206,14 +251,6 @@ struct ComposeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
         }
-    }
-
-    /// The composer's `.task` → `.onDisappear` modifier chain, split into
-    /// concrete stages (`lifecycleHost` → `sheetHost` → `autosaveHost`)
-    /// rather than one chain on `body` — that single expression had grown
-    /// past what the type-checker resolves in reasonable time.
-    private var lifecycleHost: some View {
-        navigationRoot
         .task {
             if let draft = initialDraft, viewModel.currentDraftId != draft.dTag {
                 viewModel.loadDraft(draft)
@@ -234,10 +271,6 @@ struct ComposeView: View {
             // autosave on disappear catches the finished URLs.
             || viewModel.uploadProgress != nil
         )
-    }
-
-    private var sheetHost: some View {
-        lifecycleHost
         .sheet(isPresented: $showScheduleSheet) {
             ScheduleSheet(
                 initialDate: viewModel.scheduleAt,
@@ -277,10 +310,49 @@ struct ComposeView: View {
                 appendGifUrl(gifUrl)
             }
         )
-    }
-
-    private var autosaveHost: some View {
-        sheetHost
+        // `.alert` rather than `.confirmationDialog` so the cancel-role
+        // "Keep Editing" button renders as an explicit choice. iOS 26
+        // hides the cancel button on confirmation dialogs presented over
+        // sheets, leaving only Save Draft / Discard visible.
+        .alert(
+            "No food tag yet",
+            isPresented: $showFoodTagConfirm
+        ) {
+            // At the cap the tag can't be added (the toggle is a no-op), so
+            // the one-tap fix is not offered; the user has to free a slot.
+            if !viewModel.suggestedTagsAtCap {
+                Button("Add #\(OnlyFoodCompose.defaultTag)") {
+                    if viewModel.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) {
+                        viewModel.publish()
+                    }
+                }
+            }
+            Button("Post anyway") { viewModel.publish() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(OnlyFoodCompose.noFoodTagMessage(count: viewModel.suggestedTagCount))
+        }
+        .alert(
+            "Discard this post?",
+            isPresented: $showCancelConfirm
+        ) {
+            Button("Save Draft") {
+                Task {
+                    await viewModel.saveDraft()
+                    viewModel.cancelPublish()
+                    dismiss()
+                }
+            }
+            Button("Discard", role: .destructive) {
+                viewModel.cancelPublish()
+                viewModel.explicitlyDiscarded = true
+                viewModel.clearLocalAutosave()
+                dismiss()
+            }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("You have unsaved content.")
+        }
         .onChange(of: viewModel.draftSaved) { _, saved in
             if saved { dismiss() }
         }
@@ -338,120 +410,6 @@ struct ComposeView: View {
     }
 
     // MARK: - Sub-areas
-
-    /// Gallery strip (if any), the editor with its account header, the
-    /// quote context, the OnlyFood pills and the actions row. Split out of
-    /// the old single scroll `VStack` — that expression had grown past
-    /// what the type-checker resolves in reasonable time.
-    @ViewBuilder
-    private var editorSection: some View {
-        if viewModel.galleryMode {
-            galleryArea
-        }
-
-        // Avatar + "posting as" label rendered as a slim
-        // header row above the editor so the editor
-        // itself can take the full content width.
-        // Hidden entirely for single-account users —
-        // nothing to switch to, so the row would just
-        // be visual noise. Tapping the row (when
-        // multi-account) opens a sheet picker —
-        // SwiftUI `Menu` items can't render arbitrary
-        // images, so a custom picker is the only way
-        // to show real avatars next to names.
-        if viewModel.availableSigningAccounts.count > 1 {
-            VStack(alignment: .leading, spacing: 2) {
-                signingAccountHeader
-                    .padding(.horizontal, 12)
-                textEditor
-            }
-        } else {
-            textEditor
-        }
-
-        quoteContextHeader
-
-        if !viewModel.suggestedHashtags.isEmpty {
-            HashtagSuggestionRow(viewModel: viewModel) {
-                // Same hop as the GIF picker: let the
-                // keyboard collapse before the sheet
-                // presents, or the presentation races it.
-                contentFocused = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    showTagPicker = true
-                }
-            }
-        }
-
-        // Android order (ComposeScreen): paste-attach offers, then the
-        // attachment strip + drawer, all between the editor and the
-        // actions row.
-        if !viewModel.galleryMode {
-            ForEach(Array(viewModel.attachOffers.enumerated()), id: \.offset) { _, url in
-                attachOfferRow(url)
-            }
-
-            if !viewModel.attachments.isEmpty {
-                attachmentsRow
-                // Attachments that no longer appear in the
-                // editor text need somewhere to be accounted
-                // for. Read-only — reordering belongs to the
-                // thumbnails, not to a second view of the
-                // same array.
-                AttachmentSummaryDrawer(media: viewModel.attachments)
-            }
-        }
-
-        actionsRow
-    }
-
-    /// Everything under the actions row: poll editor, hashtag chips, NSFW
-    /// banner, suggestion popups, the live preview card and the error line.
-    /// (The paste-attach offers and the attachment strip live ABOVE the
-    /// actions row, matching Android's composer order.)
-    @ViewBuilder
-    private var belowEditorSection: some View {
-        if viewModel.pollEnabled {
-            PollOptionsEditor(viewModel: viewModel)
-                .padding(.horizontal, 12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-        }
-
-        if !viewModel.hashtags.isEmpty {
-            HashtagChipsView(hashtags: viewModel.hashtags)
-        }
-
-        if viewModel.explicit {
-            nsfwBanner
-        }
-
-        if !viewModel.mentionCandidates.isEmpty || viewModel.isMentionSearchingRemote {
-            mentionPopup
-        }
-
-        if !viewModel.emojiCandidates.isEmpty {
-            emojiPopup
-        }
-
-        if shouldShowPreview {
-            ComposerPreviewCard(
-                content: viewModel.previewContent,
-                tags: previewTags,
-                pollOptions: viewModel.pollEnabled
-                    ? viewModel.pollOptions.filter { !$0.isEmpty }
-                    : nil,
-                userProfile: ProfileRepository.shared.get(viewModel.signingKeypair.pubkey)
-            )
-            .id(previewAnchorID)
-        }
-
-        if let error = viewModel.lastError {
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .padding(.horizontal, 12)
-        }
-    }
 
     private var isPublishInFlight: Bool {
         viewModel.isPublishing
@@ -796,7 +754,7 @@ struct ComposeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(viewModel.attachments) { attachment in
-                            attachmentThumb(attachment, index: 0, size: 140)
+                            attachmentThumb(attachment, size: 140)
                         }
                         Button {
                             presentPhotoPicker(max: 8)
@@ -820,101 +778,53 @@ struct ComposeView: View {
         }
     }
 
-    /// A single horizontally scrolling row of 64pt cells between the
-    /// editor and the actions row. One axis on purpose: drag reordering
-    /// reads along the row, and the visible capacity (~5 cells) gently
-    /// caps how much media one post carries.
-    ///
-    /// Keyed by attachment id — required for the live drag-shuffle: the
-    /// dragged cell's view must survive the reorder or iOS cancels the
-    /// drag session. Reorder snaps (no inherited animation); the shuffle
-    /// feedback is the cells snapping into new slots under the finger.
     private var attachmentsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(Array(viewModel.attachments.enumerated()), id: \.element.id) { index, attachment in
-                    attachmentThumb(attachment, index: index, size: 84)
-                        .onGeometryChange(for: CGFloat.self) { proxy in
-                            proxy.frame(in: .global).minX
-                        } action: { minX in
-                            cellX[index] = minX
-                        }
-                        .offset(x: reorder?.index == index ? reorder?.offsetX ?? 0 : 0)
-                        .scaleEffect(reorder?.index == index ? 1.06 : 1)
-                        .zIndex(reorder?.index == index ? 1 : 0)
-                        .gesture(reorderDragGesture(attachment: attachment, index: index))
+                ForEach(viewModel.attachments) { attachment in
+                    attachmentThumb(attachment, size: 80)
                 }
             }
             .padding(.horizontal, 12)
         }
-        .transaction { $0.animation = nil }
-        // The @GestureState flag resets on end AND cancellation; a reset
-        // with a still-lifted slot means the gesture died without
-        // .onEnded — put the lifted cell back.
-        .onChange(of: reorderGestureLive) { _, live in
-            if !live { reorder = nil }
-        }
     }
 
-    /// One paste-attach offer, matching Android's row: a full-width
-    /// accent-tinted container between editor and actions — paperclip,
-    /// "Attach this media" (accept consumes the pasted occurrence and adds
-    /// a slot) plus the quiet ✕ refusal ("Keep it as text"), which expires
-    /// when the URL's line does.
-    private func attachOfferRow(_ url: String) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                viewModel.attachUrl(url)
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("Attach this media")
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
+    private func attachmentThumb(_ attachment: ComposeAttachment, size: CGFloat) -> some View {
+        let hasAlt = attachment.trimmedAltText != nil
+        return ZStack(alignment: .topTrailing) {
+            ZStack {
+                if let bytes = attachment.localBytes,
+                   AnimatedImageHint.isLikelyAnimated(url: "", mime: attachment.mime),
+                   let payload = AnimatedImageDecoder.decode(data: bytes, maxPixelSize: size * UIScreen.main.scale) {
+                    // Animated GIF / animated WebP / APNG — render with the
+                    // per-frame decoder so the thumbnail plays before publish.
+                    // The simple `UIImage(data:)` path freezes on frame 0.
+                    AnimatedImageRenderer(payload: payload, contentMode: .scaleAspectFill)
+                } else if let bytes = attachment.localBytes, let img = UIImage(data: bytes) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = attachment.url,
+                          AnimatedImageHint.isLikelyAnimated(url: url, mime: attachment.mime) {
+                    // Post-upload: bytes have been cleared but the attachment
+                    // is animated. Fetch + animate from the Blossom URL.
+                    AnimatedImageView(
+                        url: URL(string: url),
+                        aspect: nil,
+                        contentMode: .fill,
+                        placeholder: { Color.wispSurfaceVariant },
+                        failure: { Color.wispSurfaceVariant }
+                    )
+                } else if let url = attachment.url {
+                    AsyncImage(url: URL(string: url)) { phase in
+                        switch phase {
+                        case .success(let img): img.resizable().scaledToFill()
+                        default: Color.wispSurfaceVariant
+                        }
+                    }
+                } else {
+                    Color.wispSurfaceVariant
                 }
-                .foregroundStyle(Color.wispPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(Color.wispPrimary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Attach this media")
-
-            Button {
-                viewModel.dismissAttachOffer(url)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.wispSurfaceVariant.opacity(0.5), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Keep it as text")
-        }
-        .padding(.horizontal, 12)
-    }
-
-    /// One thumbnail cell, matching Android's `AttachmentThumbStrip`: the
-    /// per-image alt chip pinned to the thumbnail's top-leading corner and
-    /// the remove ✕ top-trailing. Reordering is drag-only (long-press and
-    /// drag, live-shuffling the cells); VoiceOver reaches the same moves
-    /// through named accessibility actions.
-    private func attachmentThumb(_ attachment: ComposeAttachment, index: Int, size: CGFloat) -> some View {
-        return ZStack {
-                // The media layer is hard-framed and clipped BEFORE the
-                // ZStack sees it: `scaledToFill` lets a non-square image
-                // grow the ZStack's layout union (a 16:9 source in an
-                // 80pt cell lays out ~142pt wide), and the centering
-                // that follows pushed the alt chip half out of the
-                // clip — "off screen". Clipped here, the union stays
-                // exactly size×size for every child.
-                thumbImage(attachment, size: size)
-                    .frame(width: size, height: size)
-                    .clipped()
 
                 if attachment.isVideo {
                     Image(systemName: "play.circle.fill")
@@ -927,157 +837,46 @@ struct ComposeView: View {
                     Color.black.opacity(0.4)
                     ProgressView().tint(.white)
                 }
-
-                // "+ ALT" until a description is saved, "✓ ALT" on the accent once
-                // one is. Known-image only — unknown mime (a pasted link mid-fetch)
-                // shows neither chip nor video badge, just the thumbnail. Pinned to
-                // the cell's top-leading corner: the Spacers stretch the container
-                // so the chip escapes the ZStack's center alignment.
-                if !attachment.isVideo {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            altChip(attachment)
-                            Spacer(minLength: 0)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(4)
-                }
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(alignment: .topTrailing) {
-                removeButton(attachment)
-            }
-            // Drag-only reorder (the gesture lives on the cell in
-            // `attachmentsRow`); VoiceOver keeps reachable moves.
-            .accessibilityAction(named: "Move earlier") {
-                viewModel.moveMedia(id: attachment.id, earlier: true)
-            }
-            .accessibilityAction(named: "Move later") {
-                viewModel.moveMedia(id: attachment.id, earlier: false)
-            }
-    }
-
-    /// The image render ladder shared by the strip and the alt editor's
-    /// preview: local bytes first (animated-aware), then the Blossom URL
-    /// with 404-retry, then placeholder.
-    @ViewBuilder
-    private func thumbImage(_ attachment: ComposeAttachment, size: CGFloat) -> some View {
-        if let bytes = attachment.localBytes,
-           AnimatedImageHint.isLikelyAnimated(url: "", mime: attachment.mime),
-           let payload = AnimatedImageDecoder.decode(data: bytes, maxPixelSize: size * UIScreen.main.scale) {
-            // Animated GIF / animated WebP / APNG — render with the
-            // per-frame decoder so the thumbnail plays before publish.
-            // The simple `UIImage(data:)` path freezes on frame 0.
-            AnimatedImageRenderer(payload: payload, contentMode: .scaleAspectFill)
-        } else if let bytes = attachment.localBytes, let img = UIImage(data: bytes) {
-            Image(uiImage: img)
-                .resizable()
-                .scaledToFill()
-        } else if let url = attachment.url,
-                  AnimatedImageHint.isLikelyAnimated(url: url, mime: attachment.mime) {
-            // Post-upload: bytes have been cleared but the attachment
-            // is animated. Fetch + animate from the Blossom URL.
-            AnimatedImageView(
-                url: URL(string: url),
-                aspect: nil,
-                contentMode: .fill,
-                placeholder: { Color.wispSurfaceVariant },
-                failure: { Color.wispSurfaceVariant }
-            )
-        } else if attachment.isVideo, let url = attachment.url, let imageURL = URL(string: url) {
-            // Videos: the thumbnail is the video's own frame (sidecar #368) —
-            // a downloaded .mp4 can't be decoded by UIImage, so the generic
-            // image path must not catch these.
-            VideoPosterFrame(url: imageURL, maxPixel: size * UIScreen.main.scale)
-        } else if let url = attachment.url, let imageURL = URL(string: url) {
-            RetryingMediaThumbnail(url: imageURL)
-        } else {
-            Color.wispSurfaceVariant
-        }
-    }
-
-    /// "+ ALT" / "✓ ALT" — black translucent until described, accent once
-    /// saved (Android `AltChip`). Sized for the 64pt cells.
-    private func altChip(_ attachment: ComposeAttachment) -> some View {
-        let saved = attachment.trimmedAltText != nil
-        return Button {
-            altEditorTarget = AltTextEditorTarget(
+            // "+ ALT" before a description exists, "✓ ALT" in the theme
+            // accent once saved — the composer chip from the alt-text
+            // handoff. Tapping opens the editor; alt never blocks publish.
+            .overlay(alignment: .topLeading) {
+                Button {
+                    altEditorTarget = AltTextEditorTarget(
                         attachmentID: attachment.id,
                         previewURL: attachment.url,
                         localBytes: attachment.localBytes,
                         initialText: attachment.trimmedAltText
                     )
-        } label: {
-            Text(saved ? "✓ ALT" : "+ ALT")
-                .font(.system(size: 9, weight: .semibold).monospaced())
-                .foregroundStyle(saved ? Color.wispOnSurface : .white)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 3)
-                .background(
-                    saved ? AnyShapeStyle(Color.wispPrimary) : AnyShapeStyle(.black.opacity(0.6)),
-                    in: RoundedRectangle(cornerRadius: 5)
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(saved ? "Edit alt text" : "Add alt text")
-    }
-
-    /// Remove = splice(i, 1), no text to clean up.
-    private func removeButton(_ attachment: ComposeAttachment) -> some View {
-        Button {
-            viewModel.removeMedia(id: attachment.id)
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(.black.opacity(0.6), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .padding(4)
-        .accessibilityLabel("Remove attachment")
-    }
-
-    /// The reorder gesture (#268): hold ~0.4s (Compose's long-press
-    /// timeout), then the cell follows the finger. Only horizontal
-    /// translation is honored — vertical movement belongs to the
-    /// composer's scroll — and a plain swipe (no hold) still scrolls the
-    /// row because the touch only becomes a reorder once the hold
-    /// completes. All swap math runs against the lift-time snapshot:
-    /// re-reading live positions mid-drag races the splice by a frame.
-    private func reorderDragGesture(attachment: ComposeAttachment, index: Int) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-            .updating($reorderGestureLive) { _, live, _ in
-                live = true
-            }
-            .onChanged { value in
-                switch value {
-                case .first:
-                    guard reorder == nil, cellX[index] != nil else { return }
-                    reorder = ReorderState(snapshot: cellX, index: index, offsetX: 0)
-                    Haptics.shared.pulse()
-                case .second(true, let drag?):
-                    guard var state = reorder else { return }
-                    state.offsetX = drag.translation.width
-                    let half: CGFloat = 42
-                    let (newIndex, newOffsetX) = AttachmentModel.reorderStep(
-                        snapshot: state.snapshot, from: state.index,
-                        offsetX: state.offsetX, half: half
-                    )
-                    if newIndex != state.index {
-                        viewModel.moveMedia(from: state.index, to: newIndex)
-                        state.index = newIndex
-                    }
-                    state.offsetX = newOffsetX
-                    reorder = state
-                default:
-                    break
+                } label: {
+                    Text(hasAlt ? "✓ ALT" : "+ ALT")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            hasAlt ? Color.wispPrimary : Color.black.opacity(0.6),
+                            in: Capsule()
+                        )
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(hasAlt ? "Edit image description" : "Add image description")
+                .padding(4)
             }
-            .onEnded { _ in reorder = nil }
+
+            Button {
+                viewModel.removeMedia(id: attachment.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.white)
+                    .background(Circle().fill(.black.opacity(0.5)))
+            }
+            .padding(4)
+        }
     }
 
     private var scheduleBanner: some View {
@@ -1285,53 +1084,6 @@ struct ComposeView: View {
             }
             dismiss()
         }
-        // The two composer alerts attach here rather than to the outer
-        // body chain: after the attachment-strip additions that chain grew
-        // past what the type-checker resolves in reasonable time. Alerts
-        // can hang off any view in the hierarchy.
-        // `.alert` rather than `.confirmationDialog` so the cancel-role
-        // "Keep Editing" button renders as an explicit choice. iOS 26
-        // hides the cancel button on confirmation dialogs presented over
-        // sheets, leaving only Save Draft / Discard visible.
-        .alert(
-            "No food tag yet",
-            isPresented: $showFoodTagConfirm
-        ) {
-            // At the cap the tag can't be added (the toggle is a no-op), so
-            // the one-tap fix is not offered; the user has to free a slot.
-            if !viewModel.suggestedTagsAtCap {
-                Button("Add #\(OnlyFoodCompose.defaultTag)") {
-                    if viewModel.toggleSuggestedHashtag(OnlyFoodCompose.defaultTag) {
-                        viewModel.publish()
-                    }
-                }
-            }
-            Button("Post anyway") { viewModel.publish() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(OnlyFoodCompose.noFoodTagMessage(count: viewModel.suggestedTagCount))
-        }
-        .alert(
-            "Discard this post?",
-            isPresented: $showCancelConfirm
-        ) {
-            Button("Save Draft") {
-                Task {
-                    await viewModel.saveDraft()
-                    viewModel.cancelPublish()
-                    dismiss()
-                }
-            }
-            Button("Discard", role: .destructive) {
-                viewModel.cancelPublish()
-                viewModel.explicitlyDiscarded = true
-                viewModel.clearLocalAutosave()
-                dismiss()
-            }
-            Button("Keep Editing", role: .cancel) {}
-        } message: {
-            Text("You have unsaved content.")
-        }
     }
 
     private var publishToastMessage: String {
@@ -1444,132 +1196,4 @@ struct ComposeView: View {
         return tags
     }
 
-}
-
-/// The video slot's thumbnail is the video's own frame (sidecar #368).
-/// `preload=metadata`-style laziness stops at the header and paints
-/// nothing, so we seek a tenth of a second's fraction into the clip —
-/// clamped to half the duration so a very short clip still lands, and
-/// never frame zero, which is usually black — and draw exactly that
-/// frame. Every failure keeps the full placeholder, which still reads
-/// as a working thumbnail; the play badge rides on top regardless.
-private struct VideoPosterFrame: View {
-    let url: URL
-    let maxPixel: CGFloat
-    @State private var poster: UIImage?
-    @State private var attempted = false
-
-    var body: some View {
-        ZStack {
-            Color.wispSurfaceVariant
-            if let poster {
-                Image(uiImage: poster)
-                    .resizable()
-                    .scaledToFill()
-            }
-        }
-        .task(id: url) {
-            guard poster == nil, !attempted else { return }
-            attempted = true
-            poster = await Self.generate(url: url, maxPixel: maxPixel)
-        }
-        // Position-keyed strip: a reorder reuses this view for a different
-        // URL — drop the cached frame and try again for the new one.
-        .onChange(of: url) { _, _ in
-            poster = nil
-            attempted = false
-        }
-    }
-
-    static func generate(url: URL, maxPixel: CGFloat) async -> UIImage? {
-        let asset = AVURLAsset(url: url)
-        guard let duration = try? await asset.load(.duration),
-              duration.seconds.isFinite, duration.seconds > 0 else { return nil }
-        let mid = min(duration.seconds * 0.1, duration.seconds / 2)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
-        guard let result = try? await generator.image(
-            at: CMTime(seconds: mid, preferredTimescale: 600)
-        ) else { return nil }
-        return UIImage(cgImage: result.image)
-    }
-}
-
-/// A just-uploaded URL can 404 for a second or two while the Blossom host
-/// finishes writing it; `AsyncImage` tries exactly once, so the thumbnail
-/// would be blank forever. Retry a couple of times with a cache-busting
-/// query, then fall back to a quiet "Tap to retry" placeholder — the URL
-/// is in the draft either way and will be appended at publish, so the
-/// failure stays legible without reading as a broken note.
-private struct RetryingMediaThumbnail: View {
-    let url: URL
-    @State private var attempt = 0
-    @State private var image: UIImage?
-    @State private var failed = false
-
-    private static let maxAttempts = 3
-
-    var body: some View {
-        ZStack {
-            Color.wispSurfaceVariant
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else if failed {
-                Button {
-                    attempt = 0
-                    failed = false
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: "photo")
-                            .font(.system(size: 15, weight: .medium))
-                        Text("Tap to retry")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .task(id: "\(url.absoluteString)#\(attempt)") {
-            guard image == nil, !failed else { return }
-            var request = URLRequest(url: bustedURL)
-            request.timeoutInterval = 10
-            if let (data, response) = try? await URLSession.shared.data(for: request),
-               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-               let decoded = UIImage(data: data) {
-                image = decoded
-            } else if attempt + 1 < Self.maxAttempts {
-                attempt += 1
-            } else {
-                failed = true
-            }
-        }
-        // The strip keys cells by grid position (Android semantics), so a
-        // reorder reuses this view for a different URL — the cached frame
-        // belongs to the old one and must go.
-        .onChange(of: url) { _, _ in
-            image = nil
-            attempt = 0
-            failed = false
-        }
-    }
-
-    /// First attempt hits the URL as-is (cached is fine); retries bust the
-    /// cache with a throwaway query parameter so the host can't serve us
-    /// the same miss twice.
-    private var bustedURL: URL {
-        guard attempt > 0,
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return url
-        }
-        var items = components.queryItems ?? []
-        items.append(URLQueryItem(name: "zc-retry", value: String(attempt)))
-        components.queryItems = items
-        return components.url ?? url
-    }
 }
