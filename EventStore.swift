@@ -316,8 +316,12 @@ actor EventStore {
         var seenIds = Set<String>()
         for target in targetIds {
             do {
+                // Comments count too, so the seed matches what the live
+                // subscription will report — otherwise the card's count
+                // jumps the moment the REQ lands.
                 let query = try box.query {
-                    EventEntity.kind == 1 && EventEntity.tags.contains(target)
+                    (EventEntity.kind == 1 || EventEntity.kind == Nip22.kindComment)
+                        && EventEntity.tags.contains(target)
                 }.build()
                 let candidates = try query.find(offset: 0, limit: 5000)
                 for entity in candidates {
@@ -325,12 +329,22 @@ actor EventStore {
                     // A quote targeting a tracked note is not a reply.
                     let isQuote = event.tags.contains { $0.count >= 2 && $0[0] == "q" && targetIds.contains($0[1]) }
                     if isQuote { continue }
-                    let eTargets = event.tags.compactMap { tag -> String? in
-                        guard tag.count >= 2, tag[0] == "e" else { return nil }
-                        if tag.count >= 4, tag[3] == "mention" { return nil }
-                        return tag[1]
+                    // Attribute to the immediate parent only, as the live
+                    // `EngagementRepository.ingest` does: a comment names it
+                    // in the lowercase `e`, a kind-1 reply in the last
+                    // non-mention `e`. A comment deep under a tracked root
+                    // (`E` = root) is not a direct reply to it, the same way
+                    // a nested kind-1 reply carrying the root `e` is not.
+                    let parent: String?
+                    if event.kind == Nip22.kindComment {
+                        parent = Nip22.parentEventId(of: event)
+                    } else {
+                        parent = event.tags.last { tag in
+                            guard tag.count >= 2, tag[0] == "e" else { return false }
+                            return !(tag.count >= 4 && tag[3] == "mention")
+                        }?[1]
                     }
-                    guard let primary = eTargets.last,
+                    guard let primary = parent,
                           primary != event.id,
                           targetIds.contains(primary) else { continue }
                     counts[primary, default: 0] += 1
@@ -375,8 +389,9 @@ actor EventStore {
         guard let box = ensureBox() else { return [] }
         do {
             let query = try box.query {
-                (EventEntity.kind == 1 || EventEntity.kind == 6 ||
-                 EventEntity.kind == 7 || EventEntity.kind == 9735) &&
+                (EventEntity.kind == 1 || EventEntity.kind == Nip22.kindComment ||
+                 EventEntity.kind == 6 || EventEntity.kind == 7 ||
+                 EventEntity.kind == 9735) &&
                 EventEntity.tags.contains(pubkey)
             }
             .ordered(by: EventEntity.createdAt, flags: .descending)
@@ -390,8 +405,12 @@ actor EventStore {
                 for tag in event.tags {
                     guard tag.count >= 2 else { continue }
                     switch tag[0] {
-                    case "p" where tag[1] == pubkey: match = true
-                    case "e" where selfEventIds.contains(tag[1]): match = true
+                    // Uppercase `P`/`E` are a NIP-22 comment's root scope:
+                    // a comment deep under my note names me and my note
+                    // only there, which is how `classifyComment` finds it.
+                    case "p" where tag[1] == pubkey, "P" where tag[1] == pubkey: match = true
+                    case "e" where selfEventIds.contains(tag[1]),
+                         "E" where selfEventIds.contains(tag[1]): match = true
                     case "q" where selfEventIds.contains(tag[1]): match = true
                     default: break
                     }

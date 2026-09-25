@@ -409,7 +409,7 @@ final class NotificationsViewModel {
         for r in notifRelays { relays.insert(r) }
         for r in Self.fallbackRelays { relays.insert(r) }
         let filter = NostrFilter(
-            kinds: [1, Nip88.kindPoll, Nip69.kindZapPoll],
+            kinds: [1, Nip22.kindComment, Nip88.kindPoll, Nip69.kindZapPoll],
             authors: [keypair.pubkey],
             limit: 100
         )
@@ -442,7 +442,7 @@ final class NotificationsViewModel {
         // Done AFTER the cap so the cap can't evict private rumors when the
         // user has a large public-event history.
         let localOwn = await EventStore.shared.loadRecentByAuthor(
-            pubkey: keypair.pubkey, kinds: [1], limit: 200
+            pubkey: keypair.pubkey, kinds: [1, Nip22.kindComment], limit: 200
         )
         for e in localOwn where PrivateInteractionStore.shared.contains(e.id) {
             ids.insert(e.id)
@@ -482,7 +482,7 @@ final class NotificationsViewModel {
         ) ?? 0
         let since = cachedNewest > 0 ? max(0, cachedNewest - 60) : (now - 86400)
         let filter = NostrFilter(
-            kinds: [1, 6, 7, 9735],
+            kinds: [1, Nip22.kindComment, 6, 7, 9735],
             authors: nil,
             pTags: [keypair.pubkey],
             limit: 300,
@@ -600,7 +600,7 @@ final class NotificationsViewModel {
         let pubkey = keypair.pubkey
         let selfIds = Array(repo.selfEventIds.prefix(100))
 
-        let f1 = NostrFilter(kinds: [1, 6, 7, 9735], pTags: [pubkey], limit: 300)
+        let f1 = NostrFilter(kinds: [1, Nip22.kindComment, 6, 7, 9735], pTags: [pubkey], limit: 300)
         subNotif = RelayPool.subscribe(relays: notifRelays, filter: f1, id: "notif")
         listenerTasks.append(Task { [weak self] in
             guard let sub = self?.subNotif else { return }
@@ -617,7 +617,7 @@ final class NotificationsViewModel {
         })
 
         if !selfIds.isEmpty {
-            let f2 = NostrFilter(kinds: [1], eTags: selfIds, limit: 200)
+            let f2 = NostrFilter(kinds: [1, Nip22.kindComment], eTags: selfIds, limit: 200)
             subRepliesEtag = RelayPool.subscribe(relays: notifRelays, filter: f2, id: "notif-replies-etag")
             listenerTasks.append(Task { [weak self] in
                 guard let sub = self?.subRepliesEtag else { return }

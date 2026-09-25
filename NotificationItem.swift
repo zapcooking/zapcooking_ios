@@ -45,6 +45,17 @@ struct FlatNotificationItem: Identifiable, Hashable {
     /// to your note" vs "replying in your thread" when the parent is someone
     /// else's reply nested under my note. Defaults `true` (direct-reply wording).
     var replyTargetIsMine: Bool = true
+    /// For `.reply` rows created from a kind-1111 comment: the immediate
+    /// parent's kind, read from the lowercase `k` tag. Nil for kind-1 replies
+    /// and for comments whose parent is an external identifier.
+    ///
+    /// Carried so the caption can say "replying to your comment" rather than
+    /// "replying to your note" — the distinction Sidecar draws
+    /// (dmnyc/sidecar#326), and one you cannot recover later because the
+    /// parent event may not be in the cache. It deliberately does NOT change
+    /// the row's `kind`: a comment is still a reply for filtering, counting
+    /// and sound purposes, only the wording differs.
+    var parentKind: Int? = nil
     /// Option ids chosen by a kind-1018 poll voter (for `.pollVote` items).
     /// On a consolidated poll row this holds the most-recent voter's choice,
     /// used for the collapsed-row hint.
@@ -107,6 +118,19 @@ struct NotificationSummary: Hashable {
 }
 
 /// Set-based filter: each type independently toggleable. Mirrors Android.
+extension FlatNotificationItem {
+    /// Caption under a reply row.
+    ///
+    /// Three cases, because a NIP-22 comment can answer a note or another
+    /// comment and calling both "your note" is wrong: in a mixed thread the
+    /// same person may own the root note and a comment three levels down.
+    /// Sidecar labels these separately for the same reason.
+    var replyCaption: String {
+        guard replyTargetIsMine else { return "replying in your thread" }
+        return parentKind == Nip22.kindComment ? "replying to your comment" : "replying to your note"
+    }
+}
+
 enum NotificationFilter: String, CaseIterable, Hashable {
     case replies
     case reactions

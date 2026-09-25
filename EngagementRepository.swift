@@ -453,7 +453,12 @@ final class EngagementRepository {
         // only pull the delta since last time. Any cold id, or a forced resync,
         // disables `since` for the whole REQ (a single REQ carries one `since`).
         let since = Self.sinceFloor(forTargets: eventIds, cursor: engagementCursor, forceFull: forceFull)
-        let filter = NostrFilter(kinds: [1, 6, 7, 9735], eTags: eventIds, limit: 500, since: since)
+        // 1111 rides along with kind-1: a NIP-22 comment on one of these
+        // events is a reply, and the thread already renders it. Asking only
+        // for kind-1 is what made a card read "5 replies" under a thread
+        // showing 13.
+        let filter = NostrFilter(kinds: [1, Nip22.kindComment, 6, 7, 9735],
+                                 eTags: eventIds, limit: 500, since: since)
         let sub = RelayPool.subscribe(relays: [relay], filter: filter, id: subId)
         liveSubs.append(sub)
         Signposts.feed.emitEvent("engagement.req.opened", "active: \(self.liveSubs.count)/\(self.maxConcurrentSubs) ids: \(eventIds.count)")
@@ -585,10 +590,11 @@ final class EngagementRepository {
 
         // Block at source: a blocked author's reply / quote / repost / reaction
         // must not bump engagement counts or appear in the reactor / quoter /
-        // reposter drawers. Zaps (9735) are checked separately in the kind
+        // reposter drawers. A kind-1111 comment counts as a reply, so it is
+        // gated the same way. Zaps (9735) are checked separately in the kind
         // switch below against the *resolved* sender, since `event.pubkey` on a
         // zap receipt is the LNURL server, not the zapper.
-        if event.kind == 1 || event.kind == 6 || event.kind == 7,
+        if event.kind == 1 || event.kind == Nip22.kindComment || event.kind == 6 || event.kind == 7,
            SafetyFilter.shared.snapshot.blockedPubkeys.contains(event.pubkey) {
             return
         }
@@ -627,11 +633,18 @@ final class EngagementRepository {
         }
 
         // Aggregate against the most-specific (last) e-tag, ignoring `mention` markers — same
-        // rule as ThreadViewModel.ingestEngagement.
-        let targets = event.tags.compactMap { tag -> String? in
-            guard tag.count >= 2, tag[0] == "e" else { return nil }
-            if tag.count >= 4, tag[3] == "mention" { return nil }
-            return tag[1]
+        // rule as ThreadViewModel.ingestEngagement. A NIP-22 comment names its
+        // immediate parent in the lowercase `e` (the root sits in `E`), so it
+        // lands on the event it answered, exactly like a kind-1 reply.
+        let targets: [String]
+        if event.kind == Nip22.kindComment {
+            targets = Nip22.parentEventId(of: event).map { [$0] } ?? []
+        } else {
+            targets = event.tags.compactMap { tag -> String? in
+                guard tag.count >= 2, tag[0] == "e" else { return nil }
+                if tag.count >= 4, tag[3] == "mention" { return nil }
+                return tag[1]
+            }
         }
         guard let primary = targets.last, (acceptUntracked || queriedIds.contains(primary)) else { return }
         // Advance the per-target high-water mark for every engagement event we
@@ -643,7 +656,12 @@ final class EngagementRepository {
         var current = b.counts
         current.seenRelays.insert(relayUrl)
         switch event.kind {
-        case 1:
+        case 1, Nip22.kindComment:
+            // Counted once per event id. `seenEngagementIds` upstream of this
+            // is what stops a client that publishes both a kind-1 reply and a
+            // kind-1111 comment for the same action from incrementing twice —
+            // they are separate events, so this is dedup by delivery, not by
+            // intent, and two genuinely distinct replies still count as two.
             current.replies += 1
         case 6:
             current.reposts += 1
