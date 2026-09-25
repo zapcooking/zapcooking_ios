@@ -283,3 +283,38 @@ struct AttachmentSummaryDrawer: View {
             : "\(count) attachments, added to the end of your post"
     }
 }
+
+extension AttachmentModel {
+
+    /// One step of the drag-reorder midline math (#268's strip): given the
+    /// lift-time snapshot of slot x positions, the dragged slot's current
+    /// index and finger offset, return the slot it now hovers past and the
+    /// rebased offset that keeps the lifted cell glued to the finger.
+    /// Callers splice and repeat while the result keeps changing. `half`
+    /// is half the cell size — it converts the midpoint between slot left
+    /// edges to a midpoint between centers.
+    static func reorderStep(
+        snapshot: [Int: CGFloat],
+        from: Int,
+        offsetX: CGFloat,
+        half: CGFloat
+    ) -> (index: Int, offsetX: CGFloat) {
+        let ordered = snapshot.sorted { $0.value < $1.value }
+        guard let fromX = snapshot[from],
+              let pos = ordered.firstIndex(where: { $0.key == from }) else { return (from, offsetX) }
+        let centerX = fromX + offsetX + half
+        if pos < ordered.count - 1 {
+            let next = ordered[pos + 1]
+            if centerX > (fromX + next.value) / 2 + half {
+                return (next.key, offsetX - (next.value - fromX))
+            }
+        }
+        if pos > 0 {
+            let prev = ordered[pos - 1]
+            if centerX < (fromX + prev.value) / 2 + half {
+                return (prev.key, offsetX - (prev.value - fromX))
+            }
+        }
+        return (from, offsetX)
+    }
+}
