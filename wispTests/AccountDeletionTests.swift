@@ -101,7 +101,7 @@ struct AccountDeletionTests {
     /// Seeds everything a real account leaves under `com.wisp.nostr` and in
     /// UserDefaults.
     private func seed(_ kp: Keypair) {
-        NostrKey.save(kp)
+        NostrKey.save(kp, acceptance: .now())
         WalletKeychain.saveSparkMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", for: kp.pubkey)
         WalletKeychain.saveNwcUri("nostr+walletconnect://x?relay=wss://r&secret=00", for: kp.pubkey)
         for key in ["onboarding_done_", "profile_", "wallet_mode_", "relay_settings_general_", "wisp_settings_quick_zap_enabled_"] {

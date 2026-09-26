@@ -140,7 +140,12 @@ final class SignUpViewModel {
     /// Persisting here would leak abandoned pubkeys into `wisp_accounts`,
     /// surfacing them as phantom accounts in the sidebar. Persistence
     /// happens once on view mount via `registerAccount()`.
-    init(existingKeypair: Keypair? = nil) {
+    /// Given on the entry screen before this wizard (and its key) existed;
+    /// recorded when `registerAccount()` stores the key.
+    let acceptance: TermsAcceptance
+
+    init(existingKeypair: Keypair? = nil, acceptance: TermsAcceptance) {
+        self.acceptance = acceptance
         if let existing = existingKeypair {
             self.keypair = existing
             return
@@ -161,7 +166,7 @@ final class SignUpViewModel {
     /// list. Called from `SignUpFlowView.task`, which runs once per view
     /// identity — i.e. once per signup flow.
     func registerAccount() {
-        NostrKey.save(self.keypair)
+        NostrKey.save(self.keypair, acceptance: acceptance)
     }
 
     // MARK: - Step 1: profile + relay discovery

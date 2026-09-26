@@ -15,9 +15,16 @@ struct SignUpFlowView: View {
     /// already-generated, already-backed-up keypair to the wizard so the
     /// user runs the same profile / follows / hashtags / intro-note flow
     /// as a fresh "Create new account" tap, without minting a second key.
-    init(existingKeypair: Keypair? = nil, onComplete: @escaping (Keypair) -> Void) {
+    init(
+        existingKeypair: Keypair? = nil,
+        acceptance: TermsAcceptance,
+        onComplete: @escaping (Keypair) -> Void
+    ) {
         self.onComplete = onComplete
-        self._viewModel = State(initialValue: SignUpViewModel(existingKeypair: existingKeypair))
+        self._viewModel = State(initialValue: SignUpViewModel(
+            existingKeypair: existingKeypair,
+            acceptance: acceptance
+        ))
     }
 
     var body: some View {

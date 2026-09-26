@@ -3,9 +3,19 @@ import UIKit
 
 /// SwiftUI screen for the "Continue with Apple" flow.
 struct AppleAuthView: View {
-    @State var viewModel = AppleAuthViewModel()
+    @State private var viewModel: AppleAuthViewModel
     var onCancel: () -> Void
     var onDone: (_ isNewAccount: Bool, _ keypair: Keypair) -> Void
+
+    init(
+        acceptance: TermsAcceptance,
+        onCancel: @escaping () -> Void,
+        onDone: @escaping (_ isNewAccount: Bool, _ keypair: Keypair) -> Void
+    ) {
+        self._viewModel = State(initialValue: AppleAuthViewModel(acceptance: acceptance))
+        self.onCancel = onCancel
+        self.onDone = onDone
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {

@@ -13,8 +13,12 @@ struct SplashView: View {
     /// home indicator's safe-area inset stabilises during the initial
     /// presentation, jumping the buttons before the background is in place.
     @State private var actionsVisible = false
-    var onContinueWithNostr: () -> Void = {}
-    var onContinueWithApple: () -> Void = {}
+    /// Set by ticking the terms row. Both buttons stay disabled while nil,
+    /// so every first-run path to a key (Apple new / restore, nsec, npub,
+    /// Create new account) starts with an agreement to hand down.
+    @State private var acceptance: TermsAcceptance?
+    var onContinueWithNostr: (TermsAcceptance) -> Void = { _ in }
+    var onContinueWithApple: (TermsAcceptance) -> Void = { _ in }
 
     var body: some View {
         GeometryReader { geo in
@@ -83,16 +87,31 @@ struct SplashView: View {
                     Spacer()
 
                     VStack(spacing: 10) {
+                        TermsAgreementRow(
+                            acceptance: $acceptance,
+                            textColor: .white.opacity(0.85),
+                            linkColor: .white
+                        )
+                        .padding(.bottom, 4)
+
                         // Continue with Apple is the cloud key-recovery path
                         // (iCloud Keychain + PIN). Gated on
                         // `AppleAuthConfig.isConfigured` (SIWA entitlement
                         // present in this build). If iCloud isn't signed in,
                         // AppleAuthView surfaces a friendly error after tap.
-                        if AppleAuthConfig.isConfigured {
-                            ContinueWithAppleButton(action: onContinueWithApple)
-                        }
+                        Group {
+                            if AppleAuthConfig.isConfigured {
+                                ContinueWithAppleButton {
+                                    if let acceptance { onContinueWithApple(acceptance) }
+                                }
+                            }
 
-                        ContinueWithNostrButton(action: onContinueWithNostr)
+                            ContinueWithNostrButton {
+                                if let acceptance { onContinueWithNostr(acceptance) }
+                            }
+                        }
+                        .disabled(acceptance == nil)
+                        .opacity(acceptance == nil ? 0.45 : 1)
                     }
                 }
                 .padding(.horizontal, 32)
@@ -309,6 +328,8 @@ private struct AnimatedLogo: View {
 /// show/hide + QR trailing icons, "Log In" primary button, divider,
 /// "Create new account" outlined button.
 struct NostrLoginSheet: View {
+    /// Given on the splash; recorded with whichever key this sheet stores.
+    let acceptance: TermsAcceptance
     var onLogin: (Keypair) -> Void
     var onCreateAccount: () -> Void
 
@@ -442,14 +463,14 @@ struct NostrLoginSheet: View {
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if let keypair = NostrKey.parseNsec(trimmed) {
             isLoading = true
-            NostrKey.save(keypair)
+            NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
             return
         }
         if let uriData = Nip19.decodeNostrUri(trimmed),
            case .profileRef(let pubkeyHex, _) = uriData {
             isLoading = true
-            NostrKey.saveWatchOnly(pubkey: pubkeyHex)
+            NostrKey.saveWatchOnly(pubkey: pubkeyHex, acceptance: acceptance)
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
@@ -460,13 +481,13 @@ struct NostrLoginSheet: View {
         showQRScanner = false
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if let keypair = NostrKey.parseNsec(trimmed) {
-            NostrKey.save(keypair)
+            NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
             return
         }
         if let uriData = Nip19.decodeNostrUri(trimmed),
            case .profileRef(let pubkeyHex, _) = uriData {
-            NostrKey.saveWatchOnly(pubkey: pubkeyHex)
+            NostrKey.saveWatchOnly(pubkey: pubkeyHex, acceptance: acceptance)
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
