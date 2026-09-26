@@ -13,10 +13,9 @@ struct SplashView: View {
     /// home indicator's safe-area inset stabilises during the initial
     /// presentation, jumping the buttons before the background is in place.
     @State private var actionsVisible = false
-    /// Set by ticking the terms row. Both buttons stay disabled while nil,
-    /// so every first-run path to a key (Apple new / restore, nsec, npub,
-    /// Create new account) starts with an agreement to hand down.
-    @State private var acceptance: TermsAcceptance?
+    /// Both buttons hand down the agreement given by tapping them (see the
+    /// notice beneath), so every first-run path to a key (Apple new /
+    /// restore, nsec, npub, Create new account) starts with one.
     var onContinueWithNostr: (TermsAcceptance) -> Void = { _ in }
     var onContinueWithApple: (TermsAcceptance) -> Void = { _ in }
 
@@ -87,31 +86,26 @@ struct SplashView: View {
                     Spacer()
 
                     VStack(spacing: 10) {
-                        TermsAgreementRow(
-                            acceptance: $acceptance,
-                            textColor: .white.opacity(0.85),
-                            linkColor: .white
-                        )
-                        .padding(.bottom, 4)
-
                         // Continue with Apple is the cloud key-recovery path
                         // (iCloud Keychain + PIN). Gated on
                         // `AppleAuthConfig.isConfigured` (SIWA entitlement
                         // present in this build). If iCloud isn't signed in,
                         // AppleAuthView surfaces a friendly error after tap.
-                        Group {
-                            if AppleAuthConfig.isConfigured {
-                                ContinueWithAppleButton {
-                                    if let acceptance { onContinueWithApple(acceptance) }
-                                }
-                            }
-
-                            ContinueWithNostrButton {
-                                if let acceptance { onContinueWithNostr(acceptance) }
+                        if AppleAuthConfig.isConfigured {
+                            ContinueWithAppleButton {
+                                onContinueWithApple(.now())
                             }
                         }
-                        .disabled(acceptance == nil)
-                        .opacity(acceptance == nil ? 0.45 : 1)
+
+                        ContinueWithNostrButton {
+                            onContinueWithNostr(.now())
+                        }
+
+                        TermsAgreementNotice(
+                            textColor: .white.opacity(0.85),
+                            linkColor: .white
+                        )
+                        .padding(.top, 6)
                     }
                 }
                 .padding(.horizontal, 32)

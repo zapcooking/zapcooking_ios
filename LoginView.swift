@@ -10,9 +10,11 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showQRScanner = false
     @State private var showSignUp = false
-    /// Set by ticking the terms row. Log In, the QR scanner and Create a new
-    /// account all stay disabled while nil — this screen is the account
-    /// switcher's entry point, so it gates like the splash does.
+    /// The agreement given by tapping the QR scanner or Create a new
+    /// account (Log In takes its own at the tap), held for the flow that
+    /// tap opens. This screen is the account switcher's entry point, so it
+    /// gates like the splash does: the notice sits beneath the actions and
+    /// tapping one is agreeing.
     @State private var acceptance: TermsAcceptance?
 
     var body: some View {
@@ -57,13 +59,13 @@ struct LoginView: View {
                     .buttonStyle(.plain)
 
                     Button {
+                        acceptance = .now()
                         showQRScanner = true
                     } label: {
                         Image(systemName: "qrcode.viewfinder")
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .disabled(acceptance == nil)
                 }
                 .onChange(of: nsecInput) { _, _ in error = nil }
 
@@ -74,8 +76,6 @@ struct LoginView: View {
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
-
-                TermsAgreementRow(acceptance: $acceptance)
 
                 Button {
                     login()
@@ -91,7 +91,7 @@ struct LoginView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.wispPrimary)
                 .controlSize(.large)
-                .disabled(nsecInput.isEmpty || isLoading || acceptance == nil)
+                .disabled(nsecInput.isEmpty || isLoading)
 
                 HStack(spacing: 8) {
                     Rectangle().fill(.tertiary).frame(height: 1)
@@ -101,6 +101,7 @@ struct LoginView: View {
                 .padding(.vertical, 4)
 
                 Button {
+                    acceptance = .now()
                     showSignUp = true
                 } label: {
                     Label("Create a new account", systemImage: "person.badge.plus")
@@ -109,7 +110,9 @@ struct LoginView: View {
                 .buttonStyle(.bordered)
                 .tint(.wispPrimary)
                 .controlSize(.large)
-                .disabled(acceptance == nil)
+
+                TermsAgreementNotice()
+                    .padding(.top, 4)
 
                 Spacer()
             }
@@ -187,7 +190,7 @@ struct LoginView: View {
 
     private func login() {
         error = nil
-        guard let acceptance else { return }
+        let acceptance = TermsAcceptance.now()
         isLoading = true
         // Trim before parsing: an nsec pasted from a password manager can
         // carry a trailing newline, which fails parseNsec on add-account

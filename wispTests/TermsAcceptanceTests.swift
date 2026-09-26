@@ -2,8 +2,11 @@ import Foundation
 import Testing
 @testable import wisp
 
-/// Guideline 1.2 EULA step. The agreement is given on an entry screen
-/// before any key exists; `terms_accepted_<pubkey>` can only be written once
+/// Guideline 1.2 EULA step. There is no checkbox: the agreement is the tap
+/// on an entry screen's action (splash Continue with Apple / Nostr; the
+/// account switcher's Log In, QR scanner, Create a new account), beneath a
+/// "By continuing you agree…" line, and is stamped `.now()` at that tap —
+/// before any key exists. `terms_accepted_<pubkey>` can only be written once
 /// the key does. The property under test is that the gap between the two
 /// never leaves a stored key without an acceptance record — not on a
 /// finished sign-up, and not when the flow is abandoned right after the key
@@ -90,17 +93,19 @@ struct TermsAcceptanceTests {
         }
     }
 
-    /// "Create new account": the wizard stores its freshly minted key on
-    /// mount (`SignUpFlowView.task` → `registerAccount()`), before the
-    /// profile step. Abandoning right there — the app killed, the user never
-    /// taps Continue — is the widest the gap can be. The key is in the
+    /// "Create new account": the tap hands `.now()` to the wizard, which
+    /// stores its freshly minted key on mount (`SignUpFlowView.task` →
+    /// `registerAccount()`), before the profile step. Abandoning right there
+    /// — the app killed, the user never taps Continue — is the widest the
+    /// gap can be. The key is in the
     /// Keychain and the account list, onboarding is not done (so the next
     /// launch resumes it as a saved account), and the record is there.
     @Test func signUpAbandonedAfterKeyStored_stillHasRecord() {
         isolated { cleanup in
             var pubkey = ""
+            let tapped = TermsAcceptance.now()   // the Create a new account tap
             do {
-                let vm = SignUpViewModel(acceptance: acceptance)
+                let vm = SignUpViewModel(acceptance: tapped)
                 pubkey = vm.keypair.pubkey
                 cleanup.append(pubkey)
                 #expect(NostrKey.loadAccount(pubkey: pubkey) == nil)
@@ -112,7 +117,11 @@ struct TermsAcceptanceTests {
             #expect(NostrKey.loadAccount(pubkey: pubkey) != nil)
             #expect(NostrKey.accounts().contains(pubkey))
             #expect(!NostrKey.isOnboardingComplete(pubkey: pubkey))
-            #expect(TermsAcceptance.load(pubkey: pubkey) == acceptance)
+            // `.now()` has sub-second precision; the record stores seconds
+            // since 1970 as a Double, so compare the instant within a ms.
+            let record = TermsAcceptance.load(pubkey: pubkey)
+            #expect(record?.version == TermsAcceptance.currentVersion)
+            #expect(abs((record?.acceptedAt ?? .distantPast).timeIntervalSince(tapped.acceptedAt)) < 0.001)
         }
     }
 

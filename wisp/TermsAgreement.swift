@@ -4,9 +4,11 @@ import SwiftUI
 /// "require that users agree to terms (EULA) … no tolerance for
 /// objectionable content or abusive users").
 ///
-/// The agreement is given on an entry screen (splash, or the account
-/// switcher's `LoginView`) before any key exists, then carried down every
-/// sign-up and log-in path to `NostrKey.save`, which takes it as a required
+/// The agreement is given by tapping an action on an entry screen (splash,
+/// or the account switcher's `LoginView`), beneath a line saying that
+/// continuing is agreeing. It exists before any key does, and is then
+/// carried down every sign-up and log-in path to `NostrKey.save`, which
+/// takes it as a required
 /// argument and records it for the pubkey before the key is written. That
 /// is what makes "a key with no acceptance record" unreachable: there is no
 /// way to save a key without handing over an acceptance, and the record
@@ -23,7 +25,7 @@ nonisolated struct TermsAcceptance: Equatable, Sendable {
     let version: String
     let acceptedAt: Date
 
-    /// The acceptance given by ticking the box right now.
+    /// The acceptance given by tapping an entry action right now.
     static func now() -> TermsAcceptance {
         TermsAcceptance(version: currentVersion, acceptedAt: Date())
     }
@@ -47,46 +49,29 @@ nonisolated struct TermsAcceptance: Equatable, Sendable {
     }
 }
 
-/// Checkbox + one sentence, shared by the splash and the account
-/// switcher's `LoginView`. Ticking sets `acceptance` to `.now()`; unticking
-/// clears it. Callers disable every path to a key while it is nil.
-struct TermsAgreementRow: View {
-    @Binding var acceptance: TermsAcceptance?
+/// The line beneath the entry buttons on the splash and the account
+/// switcher's `LoginView`. There is no checkbox: tapping the action is the
+/// agreement, so each button hands `.now()` to its flow at the moment of the
+/// tap. Terms and Privacy are links, opened in the system browser as About's
+/// are.
+struct TermsAgreementNotice: View {
     /// Text colour. The splash paints its own dark ground whatever the
     /// app's appearance, so it passes white; `LoginView` follows the theme.
     var textColor: Color = .wispOnSurfaceVariant
     var linkColor: Color = .wispPrimary
 
-    private var isOn: Bool { acceptance != nil }
-
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                acceptance = isOn ? nil : .now()
-            } label: {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 22))
-                    .foregroundStyle(isOn ? linkColor : textColor)
-                    .frame(width: 44, height: 44, alignment: .topLeading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Agree to the Terms of Service")
-            .accessibilityValue(isOn ? "Checked" : "Unchecked")
-            .accessibilityAddTraits(.isToggle)
-            .accessibilityIdentifier("terms-agree-checkbox")
-
-            Text(sentence)
-                .font(.footnote)
-                .foregroundStyle(textColor)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Text(sentence)
+            .font(.footnote)
+            .foregroundStyle(textColor)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("terms-agreement-notice")
     }
 
     private var sentence: AttributedString {
-        var text = AttributedString("I agree to the ")
+        var text = AttributedString("By continuing you agree to our ")
         text += link(PolicyLinks.termsOfService)
         text += AttributedString(" and ")
         text += link(PolicyLinks.privacyPolicy)
