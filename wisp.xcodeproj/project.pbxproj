@@ -285,6 +285,7 @@
 		4CFFCC010000000000000408 /* MentionSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC000000000000000408 /* MentionSearch.swift */; };
 		4CFFCC010000000000000409 /* EmojiRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC000000000000000409 /* EmojiRepository.swift */; };
 		4CFFCC01000000000000040A /* ComposeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040A /* ComposeMode.swift */; };
+		4CFFDD010000000000000401 /* AttachmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFDD000000000000000401 /* AttachmentModel.swift */; };
 		4CFFCC01000000000000040B /* ComposeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040B /* ComposeViewModel.swift */; };
 		4CFFCC01000000000000040C /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040C /* ComposeView.swift */; };
 		4CFFCC01000000000000040D /* HashtagChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040D /* HashtagChipsView.swift */; };
@@ -647,6 +648,7 @@
 		4CFFCC000000000000000408 /* MentionSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionSearch.swift; sourceTree = "<group>"; };
 		4CFFCC000000000000000409 /* EmojiRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiRepository.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040A /* ComposeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeMode.swift; sourceTree = "<group>"; };
+		4CFFDD000000000000000401 /* AttachmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentModel.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040B /* ComposeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeViewModel.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040C /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040D /* HashtagChipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagChipsView.swift; sourceTree = "<group>"; };
@@ -996,6 +998,7 @@
 				4CFFB10000000000000C0006 /* SocialGraphNodeDetailSheet.swift */,
 				4CFFB10000000000000C0007 /* SocialGraphView.swift */,
 				4CFFCC00000000000000040A /* ComposeMode.swift */,
+				4CFFDD000000000000000401 /* AttachmentModel.swift */,
 				4CFFCC00000000000000040B /* ComposeViewModel.swift */,
 				4CFFCC00000000000000040C /* ComposeView.swift */,
 				4CDFAB0000000000000DF001 /* Nip37.swift */,
@@ -1521,6 +1524,7 @@
 				4CFFB10100000000000C0006 /* SocialGraphNodeDetailSheet.swift in Sources */,
 				4CFFB10100000000000C0007 /* SocialGraphView.swift in Sources */,
 				4CFFCC01000000000000040A /* ComposeMode.swift in Sources */,
+				4CFFDD010000000000000401 /* AttachmentModel.swift in Sources */,
 				4CFFCC01000000000000040B /* ComposeViewModel.swift in Sources */,
 				4CFFCC01000000000000040C /* ComposeView.swift in Sources */,
 				4CDFAB0000000000000DF101 /* Nip37.swift in Sources */,

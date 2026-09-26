@@ -46,37 +46,52 @@ struct wispApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootContainer()
-                .environment(settings)
-                .environment(powPrefs)
-                .environment(audioPlayer)
-                .preferredColorScheme(settings.preferredColorScheme)
-                // Keep the home indicator drawn over our own bottom bar
-                // instead of leaving it to `.automatic`, which lets the
-                // system dim or drop it. The window's interface style and
-                // the palette are resolved from the same Appearance
-                // preference, so the indicator's auto-chosen tint always
-                // contrasts with the ground the bar is painted on.
-                .persistentSystemOverlays(.visible)
-                .onOpenURL { url in
-                    if url.scheme == "wisp", url.host == "share" {
-                        let files = PendingShareStore.consumePendingFiles()
-                        guard !files.isEmpty else { return }
-                        // A text/link share stages one `.sharetext` file
-                        // instead of media — see `ShareViewController`.
-                        if let textFile = files.first(where: { $0.pathExtension == PendingShareStore.textFileExtension }),
-                           let text = try? String(contentsOf: textFile, encoding: .utf8),
-                           !text.isEmpty {
-                            NotificationCenter.default.post(name: .pendingShareReceived, object: PendingShareItem(text: text))
-                            return
-                        }
-                        let providers = files.compactMap { NSItemProvider(contentsOf: $0) }
-                        guard !providers.isEmpty else { return }
-                        NotificationCenter.default.post(name: .pendingShareReceived, object: PendingShareItem(providers: providers))
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-ComposerDragHarness") {
+                ComposerDragHarness()
+            } else {
+                rootContent
+            }
+            #else
+            rootContent
+            #endif
+        }
+    }
+
+    /// The real app. Split out so the DEBUG harness switch above stays a
+    /// two-line branch instead of wrapping the whole modifier chain.
+    @ViewBuilder
+    private var rootContent: some View {
+        RootContainer()
+            .environment(settings)
+            .environment(powPrefs)
+            .environment(audioPlayer)
+            .preferredColorScheme(settings.preferredColorScheme)
+            // Keep the home indicator drawn over our own bottom bar
+            // instead of leaving it to `.automatic`, which lets the
+            // system dim or drop it. The window's interface style and
+            // the palette are resolved from the same Appearance
+            // preference, so the indicator's auto-chosen tint always
+            // contrasts with the ground the bar is painted on.
+            .persistentSystemOverlays(.visible)
+            .onOpenURL { url in
+                if url.scheme == "wisp", url.host == "share" {
+                    let files = PendingShareStore.consumePendingFiles()
+                    guard !files.isEmpty else { return }
+                    // A text/link share stages one `.sharetext` file
+                    // instead of media — see `ShareViewController`.
+                    if let textFile = files.first(where: { $0.pathExtension == PendingShareStore.textFileExtension }),
+                       let text = try? String(contentsOf: textFile, encoding: .utf8),
+                       !text.isEmpty {
+                        NotificationCenter.default.post(name: .pendingShareReceived, object: PendingShareItem(text: text))
                         return
                     }
+                    let providers = files.compactMap { NSItemProvider(contentsOf: $0) }
+                    guard !providers.isEmpty else { return }
+                    NotificationCenter.default.post(name: .pendingShareReceived, object: PendingShareItem(providers: providers))
+                    return
                 }
-        }
+            }
     }
 }
 
