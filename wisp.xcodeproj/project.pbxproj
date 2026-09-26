@@ -85,7 +85,6 @@
 		4CDDDD010000000000000004 /* DmReactionPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDDDD000000000000000004 /* DmReactionPublisher.swift */; };
 		4CDFAB0000000000000DF101 /* Nip37.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF001 /* Nip37.swift */; };
 		4CDFAB0000000000000DF102 /* Nip09.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF002 /* Nip09.swift */; };
-		CFB7EF5B4C80F43ABDB8DFC8 /* DeletionTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */; };
 		4CDFAB0000000000000DF103 /* DraftsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF003 /* DraftsViewModel.swift */; };
 		4CDFAB0000000000000DF104 /* ScheduleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF004 /* ScheduleSheet.swift */; };
 		4CDFAB0000000000000DF105 /* DraftsScheduledView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFAB0000000000000DF005 /* DraftsScheduledView.swift */; };
@@ -200,9 +199,9 @@
 		4CFF210C0000000000000306 /* InterfaceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210B0000000000000306 /* InterfaceSettingsView.swift */; };
 		4CFF210E0000000000000307 /* ExchangeRateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210D0000000000000307 /* ExchangeRateService.swift */; };
 		4CFF21100000000000000308 /* CurrencyFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF210F0000000000000308 /* CurrencyFormatter.swift */; };
-		4CFF21A20000000000000901 /* NotificationEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21A10000000000000901 /* NotificationEffects.swift */; };
 		4CFF21120000000000000309 /* AvatarPrefetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21110000000000000309 /* AvatarPrefetcher.swift */; };
 		4CFF2114000000000000030A /* EmojiText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF2113000000000000030A /* EmojiText.swift */; };
+		4CFF21A20000000000000901 /* NotificationEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21A10000000000000901 /* NotificationEffects.swift */; };
 		4CFF610100000000000A0001 /* GiphyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0001 /* GiphyConfig.swift */; };
 		4CFF610100000000000A0004 /* GifPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0004 /* GifPickerView.swift */; };
 		4CFF610100000000000A0006 /* GiphyUISDK in Frameworks */ = {isa = PBXBuildFile; productRef = 4CFF610000000000000A0006 /* GiphyUISDK */; };
@@ -218,7 +217,6 @@
 		4CFF98010000000000000002 /* Nip98HeaderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF98000000000000000002 /* Nip98HeaderCache.swift */; };
 		4CFF99010000000000000001 /* RecipeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000001 /* RecipeParser.swift */; };
 		4CFF99010000000000000002 /* RecipeSerializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000002 /* RecipeSerializer.swift */; };
-		4CFF9A010000000000000002 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9A000000000000000002 /* FeatureFlags.swift */; };
 		4CFF99010000000000000003 /* IngredientScaler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000003 /* IngredientScaler.swift */; };
 		4CFF99010000000000000004 /* RecipeFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000004 /* RecipeFormat.swift */; };
 		4CFF99010000000000000005 /* RecipeFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000005 /* RecipeFormats.swift */; };
@@ -241,6 +239,7 @@
 		4CFF99010000000000000016 /* ReportedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000016 /* ReportedContent.swift */; };
 		4CFF99010000000000000017 /* ReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000017 /* ReportSheet.swift */; };
 		4CFF99010000000000000018 /* RecipeComposeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF99000000000000000018 /* RecipeComposeViewModel.swift */; };
+		4CFF9A010000000000000002 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF9A000000000000000002 /* FeatureFlags.swift */; };
 		4CFFA00100000000000A0001 /* Nip51Lists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0001 /* Nip51Lists.swift */; };
 		4CFFA00100000000000A0002 /* RelaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0002 /* RelaySet.swift */; };
 		4CFFA00100000000000A0003 /* RelaySetRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFA00000000000000A0003 /* RelaySetRepository.swift */; };
@@ -287,7 +286,6 @@
 		4CFFCC010000000000000408 /* MentionSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC000000000000000408 /* MentionSearch.swift */; };
 		4CFFCC010000000000000409 /* EmojiRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC000000000000000409 /* EmojiRepository.swift */; };
 		4CFFCC01000000000000040A /* ComposeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040A /* ComposeMode.swift */; };
-		4CFFDD010000000000000401 /* AttachmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFDD000000000000000401 /* AttachmentModel.swift */; };
 		4CFFCC01000000000000040B /* ComposeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040B /* ComposeViewModel.swift */; };
 		4CFFCC01000000000000040C /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040C /* ComposeView.swift */; };
 		4CFFCC01000000000000040D /* HashtagChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFCC00000000000000040D /* HashtagChipsView.swift */; };
@@ -312,6 +310,7 @@
 		4CFFD10100000000000A000F /* AddToPeopleListPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFD10000000000000A000F /* AddToPeopleListPickerSheet.swift */; };
 		4CFFD10100000000000A0010 /* AddToNoteListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFD10000000000000A0010 /* AddToNoteListSheet.swift */; };
 		4CFFD10100000000000A0011 /* AddProfileToListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFD10000000000000A0011 /* AddProfileToListSheet.swift */; };
+		4CFFDD010000000000000401 /* AttachmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFDD000000000000000401 /* AttachmentModel.swift */; };
 		4CFFEE0100000000000E0001 /* EmojiData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFEE0000000000000E0001 /* EmojiData.swift */; };
 		4CFFEE0100000000000E0002 /* Nip25.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFEE0000000000000E0002 /* Nip25.swift */; };
 		4CFFEE0100000000000E0003 /* ReactionSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFFEE0000000000000E0003 /* ReactionSender.swift */; };
@@ -324,6 +323,7 @@
 		8C3D92E0FCDBF00AFDF20671 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 741E8309A7019FA697D18D53 /* Foundation.framework */; };
 		9399A5358082EE4084A6797A /* PendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85D99D72ADD7AFCEFF789A6 /* PendingShareStore.swift */; };
 		B0NWCBACKUP00000000000001 /* NwcBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0NWCBACKUP00000000000002 /* NwcBackup.swift */; };
+		CFB7EF5B4C80F43ABDB8DFC8 /* DeletionTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */; };
 		DA5814B32D1A4ED8AF800C72 /* MediaSaveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07C633F5326A411B9E8DF5A8 /* MediaSaveService.swift */; };
 		DC407BFDBCE95E3D50EF82C4 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 80A6403E9108C21F17DDE95D /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeaderOnCopy, ); }; };
 		E9D598B63D0971EF0CEAF715 /* PendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85D99D72ADD7AFCEFF789A6 /* PendingShareStore.swift */; };
@@ -371,6 +371,7 @@
 /* Begin PBXFileReference section */
 		07C633F5326A411B9E8DF5A8 /* MediaSaveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaSaveService.swift; sourceTree = "<group>"; };
 		1C51B88C4BCC0FBAFD394BE8 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionTracker.swift; sourceTree = "<group>"; };
 		4CAA00020002000000A1BA01 /* AudioTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTrack.swift; sourceTree = "<group>"; };
 		4CAA00040002000000A1BA01 /* AudioPlayerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerStore.swift; sourceTree = "<group>"; };
 		4CAA770100000000000000B1 /* ArticleRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleRoute.swift; sourceTree = "<group>"; };
@@ -451,7 +452,6 @@
 		4CDDDD000000000000000004 /* DmReactionPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmReactionPublisher.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF001 /* Nip37.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip37.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF002 /* Nip09.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip09.swift; sourceTree = "<group>"; };
-		2C12B572C3ABAA62935E4C87 /* DeletionTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionTracker.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF003 /* DraftsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftsViewModel.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF004 /* ScheduleSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleSheet.swift; sourceTree = "<group>"; };
 		4CDFAB0000000000000DF005 /* DraftsScheduledView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftsScheduledView.swift; sourceTree = "<group>"; };
@@ -566,9 +566,9 @@
 		4CFF210B0000000000000306 /* InterfaceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfaceSettingsView.swift; sourceTree = "<group>"; };
 		4CFF210D0000000000000307 /* ExchangeRateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExchangeRateService.swift; sourceTree = "<group>"; };
 		4CFF210F0000000000000308 /* CurrencyFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyFormatter.swift; sourceTree = "<group>"; };
-		4CFF21A10000000000000901 /* NotificationEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationEffects.swift; sourceTree = "<group>"; };
 		4CFF21110000000000000309 /* AvatarPrefetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarPrefetcher.swift; sourceTree = "<group>"; };
 		4CFF2113000000000000030A /* EmojiText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiText.swift; sourceTree = "<group>"; };
+		4CFF21A10000000000000901 /* NotificationEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationEffects.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0001 /* GiphyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiphyConfig.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0004 /* GifPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifPickerView.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0007 /* GifBlossomUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifBlossomUploader.swift; sourceTree = "<group>"; };
@@ -583,7 +583,6 @@
 		4CFF98000000000000000002 /* Nip98HeaderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip98HeaderCache.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000001 /* RecipeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeParser.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000002 /* RecipeSerializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeSerializer.swift; sourceTree = "<group>"; };
-		4CFF9A000000000000000002 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000003 /* IngredientScaler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngredientScaler.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000004 /* RecipeFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormat.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000005 /* RecipeFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeFormats.swift; sourceTree = "<group>"; };
@@ -606,6 +605,7 @@
 		4CFF99000000000000000016 /* ReportedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportedContent.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000017 /* ReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportSheet.swift; sourceTree = "<group>"; };
 		4CFF99000000000000000018 /* RecipeComposeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeComposeViewModel.swift; sourceTree = "<group>"; };
+		4CFF9A000000000000000002 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0001 /* Nip51Lists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip51Lists.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0002 /* RelaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySet.swift; sourceTree = "<group>"; };
 		4CFFA00000000000000A0003 /* RelaySetRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySetRepository.swift; sourceTree = "<group>"; };
@@ -652,7 +652,6 @@
 		4CFFCC000000000000000408 /* MentionSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionSearch.swift; sourceTree = "<group>"; };
 		4CFFCC000000000000000409 /* EmojiRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiRepository.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040A /* ComposeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeMode.swift; sourceTree = "<group>"; };
-		4CFFDD000000000000000401 /* AttachmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentModel.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040B /* ComposeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeViewModel.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040C /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
 		4CFFCC00000000000000040D /* HashtagChipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagChipsView.swift; sourceTree = "<group>"; };
@@ -677,6 +676,7 @@
 		4CFFD10000000000000A000F /* AddToPeopleListPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPeopleListPickerSheet.swift; sourceTree = "<group>"; };
 		4CFFD10000000000000A0010 /* AddToNoteListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToNoteListSheet.swift; sourceTree = "<group>"; };
 		4CFFD10000000000000A0011 /* AddProfileToListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddProfileToListSheet.swift; sourceTree = "<group>"; };
+		4CFFDD000000000000000401 /* AttachmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentModel.swift; sourceTree = "<group>"; };
 		4CFFEE0000000000000E0001 /* EmojiData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiData.swift; sourceTree = "<group>"; };
 		4CFFEE0000000000000E0002 /* Nip25.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip25.swift; sourceTree = "<group>"; };
 		4CFFEE0000000000000E0003 /* ReactionSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionSender.swift; sourceTree = "<group>"; };
@@ -1662,7 +1662,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtensionRelease.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
@@ -1673,7 +1673,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1691,7 +1691,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
@@ -1702,7 +1702,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1836,7 +1836,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = wisp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1862,7 +1862,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1887,7 +1887,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = wisp/wispRelease.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1913,7 +1913,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1935,12 +1935,12 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -1961,12 +1961,12 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -1986,12 +1986,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -2011,12 +2011,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = Z26TJQZZWC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 26.4;
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = cooking.zap.app.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
