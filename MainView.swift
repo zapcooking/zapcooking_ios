@@ -87,6 +87,7 @@ struct MainView: View {
     @State private var showSafety = false
     @State private var showProofOfWork = false
     @State private var showAbout = false
+    @State private var showDataRecovery = false
     @State private var showMediaServers = false
     @State private var hashtagSetRepo = HashtagSetRepository.shared
     @Environment(AudioPlayerStore.self) private var audioPlayer
@@ -544,6 +545,9 @@ struct MainView: View {
                 MediaServersView(keypair: keypair)
             }
         }
+        .sheet(isPresented: $showDataRecovery) {
+            LazarusRecoveryScreen(keypair: keypair)
+        }
         .sheet(isPresented: $showDraftsScheduled) {
             DraftsScheduledView(keypair: keypair)
         }
@@ -723,6 +727,10 @@ struct MainView: View {
             onOpenAbout: {
                 closeDrawer()
                 showAbout = true
+            },
+            onOpenDataRecovery: {
+                closeDrawer()
+                showDataRecovery = true
             }
         )
         .frame(width: drawerWidth)

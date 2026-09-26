@@ -181,12 +181,15 @@ final class ProfileEditViewModel {
 
         let event: NostrEvent
         do {
+            // Dated after the profile it edits: one restored by Data Recovery
+            // can be dated in the future (past a clobber from a fast clock),
+            // and an earlier edit would lose to it on relays and here.
             event = try await Signer.sign(
                 keypair: keypair,
                 kind: 0,
                 tags: tags,
                 content: content,
-                createdAt: NostrClock.now()
+                createdAt: max(NostrClock.now(), ProfileRepository.shared.storedCreatedAt(keypair.pubkey) + 1)
             )
         } catch {
             lastError = "Signing failed: \(error.localizedDescription)"

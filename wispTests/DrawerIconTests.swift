@@ -21,6 +21,7 @@ struct DrawerIconTests {
         "shield",                                // Proof of Work
         "point.3.connected.trianglepath.dotted", // Social Graph
         "face.smiling",                          // Custom Emojis
+        "clock.arrow.circlepath",                // Data Recovery
         "info.circle",                           // About
     ]
 

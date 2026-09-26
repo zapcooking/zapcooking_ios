@@ -19,6 +19,7 @@ struct ProfileView: View {
     @State private var showAddToList = false
     @State private var showQrSheet = false
     @State private var showEditProfile = false
+    @State private var showDataRecovery = false
     @State private var muteRepo = MuteRepository.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -65,6 +66,7 @@ struct ProfileView: View {
                     isMe: isMe,
                     isWatchOnly: NostrKey.isWatchOnly(pubkey: activeUserPubkey),
                     onEditProfile: { showEditProfile = true },
+                    onOpenDataRecovery: { showDataRecovery = true },
                     onProfileTap: onProfileTap,
                     onNoteTap: onNoteTap,
                     onHashtagTap: onHashtagTap
@@ -122,6 +124,13 @@ struct ProfileView: View {
                         viewModel.profiles[updated.pubkey] = updated
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showDataRecovery) {
+            // Own profile only; the follow list is the usual casualty, so it
+            // comes preselected (nothing scans until the user taps Scan).
+            if let keypair = NostrKey.load(), keypair.pubkey == pubkey {
+                LazarusRecoveryScreen(keypair: keypair, initialKind: 3)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .contentHidden)) { _ in
@@ -356,6 +365,9 @@ private struct ProfileHeaderView: View {
     var isMe: Bool = false
     var isWatchOnly: Bool = false
     var onEditProfile: () -> Void = {}
+    /// Own profile: the Restore button beside the follow counts opens Data
+    /// recovery with the follow list preselected.
+    var onOpenDataRecovery: () -> Void = {}
     var onProfileTap: ((String) -> Void)? = nil
     var onNoteTap: ((String) -> Void)? = nil
     var onHashtagTap: ((String) -> Void)? = nil
@@ -699,6 +711,24 @@ private struct ProfileHeaderView: View {
                     ? "∞"
                     : formatCount(viewModel.followersCount)
             )
+            if isMe {
+                // Same entry the web profile has: if another client clobbered
+                // your follows (or mutes, profile, bookmarks), restore an older
+                // version from relay history.
+                Button(action: onOpenDataRecovery) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Restore")
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Restore from relay history")
+                .accessibilityIdentifier("profile-restore")
+            }
             Spacer(minLength: 0)
         }
     }

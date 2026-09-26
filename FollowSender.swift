@@ -49,11 +49,17 @@ final class FollowSender {
             tags.append(clientTag)
         }
 
+        // Dated after the version the local set came from: a list restored by
+        // Data Recovery is dated past the clobber it replaced, which can be in
+        // the future when the clobbering client's clock ran ahead, and an edit
+        // stamped earlier would lose to it on every relay.
+        let createdAt = max(NostrClock.now(), FollowsCache.shared.storedCreatedAt(for: keypair.pubkey) + 1)
         let event = try await Signer.sign(
             keypair: keypair,
             kind: 3,
             tags: tags,
-            content: ""
+            content: "",
+            createdAt: createdAt
         )
 
         let relays = await publishRelays(for: keypair.pubkey)

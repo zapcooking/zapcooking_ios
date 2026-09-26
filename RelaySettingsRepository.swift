@@ -259,6 +259,43 @@ final class RelaySettingsRepository {
         ingestGeneralEvent(event, persist: true)
     }
 
+    // MARK: - Lazarus data recovery
+
+    /// This device's copy of one of the user's relay lists (kind 10002 /
+    /// 10050 / 10006), rebuilt as the tags this repository publishes, with
+    /// the `created_at` it came from. Lazarus re-reads it before a restore
+    /// signs and uses the kind 10002 copy as the relay list to scan. Nil when
+    /// nothing is held for `pubkey`.
+    func ownListSnapshot(kind: Int, pubkey: String) -> (tags: [[String]], createdAt: Int)? {
+        guard loadedFor == pubkey else { return nil }
+        switch kind {
+        case Nip51Lists.kindRelayList:
+            guard generalUpdatedAt > 0 || !generalRelays.isEmpty else { return nil }
+            return (Nip51Lists.buildGeneralRelayTags(generalRelays), generalUpdatedAt)
+        case Nip51Lists.kindDmRelays:
+            guard dmUpdatedAt > 0 || !dmRelays.isEmpty else { return nil }
+            return (Nip51Lists.buildRelaySetListTags(dmRelays), dmUpdatedAt)
+        case Nip51Lists.kindBlockedRelays:
+            guard blockedUpdatedAt > 0 || !blockedRelays.isEmpty else { return nil }
+            return (Nip51Lists.buildRelaySetListTags(blockedRelays), blockedUpdatedAt)
+        default:
+            return nil
+        }
+    }
+
+    /// Adopt a relay list Lazarus data recovery just republished, the same
+    /// way a fetched one merges (newer `created_at` wins), so the next edit
+    /// here builds on the restored list instead of the clobbered one.
+    func ingestRecoveredList(_ event: NostrEvent) {
+        guard event.pubkey == loadedFor else { return }
+        switch event.kind {
+        case Nip51Lists.kindRelayList: ingestGeneralEvent(event, persist: true)
+        case Nip51Lists.kindDmRelays: ingestDmEvent(event, persist: true)
+        case Nip51Lists.kindBlockedRelays: ingestBlockedEvent(event, persist: true)
+        default: break
+        }
+    }
+
     // MARK: - DM relays (kind 10050)
 
     func addDmRelay(_ url: String, keypair: Keypair) {

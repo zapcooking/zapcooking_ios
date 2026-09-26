@@ -244,6 +244,34 @@ final class MuteRepository {
         let parsed = (try? Nip51Mute.decryptAndParse(event: event, privkey32: privkey32))
             ?? Nip51Mute.parsePublicTags(event: event)
 
+        await apply(parsed, updatedAt: event.createdAt)
+    }
+
+    /// Adopt a mute list that Lazarus data recovery just republished, so the
+    /// next mute or block here builds on the restored list instead of the
+    /// clobbered one. The private items arrive already decrypted (NIP-44, or
+    /// legacy NIP-04 content that `merge` can't read), and an equal
+    /// `created_at` still applies: the live sync subscription may have merged
+    /// the same event first and, for NIP-04 content, kept only its public tags.
+    func adoptRecovered(event: NostrEvent, privateTags: [[String]]?) async {
+        guard event.kind == Nip51Mute.kindMuteList,
+              event.pubkey == activePubkey,
+              event.createdAt >= lastUpdatedAt else { return }
+        var parsed = Nip51Mute.parsePublicTags(event: event)
+        if let privateTags,
+           let data = try? JSONSerialization.data(withJSONObject: privateTags),
+           let json = String(data: data, encoding: .utf8) {
+            let priv = Nip51Mute.parsePrivateBody(json)
+            parsed.pubkeys.formUnion(priv.pubkeys)
+            parsed.words.formUnion(priv.words)
+            parsed.threads.formUnion(priv.threads)
+        }
+        await apply(parsed, updatedAt: event.createdAt)
+    }
+
+    /// Replace local mute state with `parsed`, purge newly blocked authors
+    /// from open views, persist, and rebuild the safety snapshot.
+    private func apply(_ parsed: Nip51Mute.Lists, updatedAt: Int) async {
         let previousBlocked = blockedPubkeys
         mutedWords = parsed.words
         // Lowercase here too — NIP-51 mute entries from other clients can be
@@ -251,7 +279,7 @@ final class MuteRepository {
         // relay event in `SafetyFilter.shouldDrop`.
         blockedPubkeys = Set(parsed.pubkeys.map { $0.lowercased() })
         mutedThreads = parsed.threads
-        lastUpdatedAt = event.createdAt
+        lastUpdatedAt = updatedAt
 
         // Newly-arrived block entries that we didn't have before need their
         // in-memory traces purged from open view state — without this, a fresh

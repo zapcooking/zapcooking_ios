@@ -164,6 +164,13 @@ final class ProfileRepository {
         loadFromDefaults(pubkey)
     }
 
+    /// `created_at` of the kind-0 behind the cached profile, 0 when unknown.
+    /// Lazarus re-reads it before restoring a profile.
+    func storedCreatedAt(_ pubkey: String) -> Int {
+        if let ts = timestamps[pubkey] { return ts }
+        return UserDefaults.standard.integer(forKey: "profile_ts_\(pubkey)")
+    }
+
     private func loadFromDefaults(_ pubkey: String) -> ProfileData? {
         guard let dict = UserDefaults.standard.dictionary(forKey: "profile_\(pubkey)") as? [String: Any],
               !dict.isEmpty else { return nil }
