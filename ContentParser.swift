@@ -73,9 +73,13 @@ enum ContentParser {
         options: [.caseInsensitive]
     )
 
-    // Mirrors Android's combined regex with the same TLD whitelist + hashtag, npub, nostr-uri, bare bech32 patterns.
+    // Mirrors Android's combined regex: hashtag, npub, nostr-uri, bare bech32
+    // patterns. The bare-domain alternative interpolates `TldList` — the full
+    // IANA TLD list, generated from the npm `tlds` package — instead of a
+    // hand-trimmed allowlist, so modern gTLDs (`zap.cooking`, `jumble.social`)
+    // linkify like they do on web.
     private static let combinedRegex: NSRegularExpression = {
-        let tlds = "com|net|org|io|dev|app|pro|ai|co|me|info|xyz|cc|tv|to|gg|sh|im|is|it|rs|ly|site|online|store|tech|cloud|social|world|earth|space|lol|wtf|family|life|art|design|blog|news|live|video|media|chat|games|money|finance|agency|studio|build|run|codes|systems|network|zone|pub|blue|limo|fyi|wiki|page|link|click|exchange|markets|fun|club|today"
+        let tlds = TldList.alternation
         // bech32 bodies are constrained with (?-i:…) so the outer .caseInsensitive
         // flag doesn't let [a-z0-9] absorb uppercase letters that immediately follow
         // a URI — e.g. "nostr:nprofile1…Bitcoin" would otherwise greedily swallow
@@ -269,8 +273,11 @@ enum ContentParser {
             if let hashtag, !hashtag.isEmpty, token.hasPrefix("#") {
                 segments.append(.hashtag(hashtag))
             } else if let bareDomain, !bareDomain.isEmpty, !token.lowercased().hasPrefix("http") {
-                let url = "https://\(bareDomain)"
-                segments.append(classifyUrl(url, content: content, range: range, imetaMap: imetaMap))
+                // A bare-domain match is a fuzzy inference: render it as an
+                // inline link with a synthesized scheme and never classify it
+                // into a preview card / media embed — a false positive must
+                // cost at most a stray underline, never a loaded card.
+                segments.append(.inlineLink("https://\(trimTrailingPunctuation(bareDomain))"))
             } else if token.lowercased().hasPrefix("nostr:") {
                 segments.append(decodeNostrToken(token))
             } else if isBareBech32(token) {
