@@ -129,6 +129,9 @@ final class LivePlayerStore {
         if currentURL == urlString, let existing = player { return existing }
         // Switching streams: tear the previous one down.
         player?.pause()
+        if let old = player {
+            ScreenKeepAwake.untrack(old)
+        }
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
@@ -140,6 +143,12 @@ final class LivePlayerStore {
 
     /// Called from `LiveStreamView.onDisappear`. Keeps the player alive when PiP is active.
     func releaseIfNotPiP() {
+        // The view's keep-awake claim goes with the view even into PiP:
+        // `VideoPiPCoordinator` holds its own claim for the floating
+        // window, and a restore re-tracks when the view comes back.
+        if let player {
+            ScreenKeepAwake.untrack(player)
+        }
         if pipActive { return }
         player?.pause()
         player = nil
@@ -148,6 +157,9 @@ final class LivePlayerStore {
 
     func releaseAll() {
         player?.pause()
+        if let player {
+            ScreenKeepAwake.untrack(player)
+        }
         player = nil
         currentURL = nil
         pipActive = false
@@ -250,6 +262,9 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
         vc.player = player
         context.coordinator.attach(player: player)
         player?.play()
+        if let player {
+            ScreenKeepAwake.track(player)
+        }
     }
 
     final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
