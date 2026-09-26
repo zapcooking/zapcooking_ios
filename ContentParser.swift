@@ -91,7 +91,7 @@ enum ContentParser {
             // domain half of a lightning / email address (`user@getalby.com`)
             // or a deeper subdomain segment isn't matched as a standalone URL
             // and rendered as a link-preview card.
-            + #"|(?<![\w@.])((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+(?:\#(tlds))(?:\/\S*)?)(?!\w)"#
+            + #"|(?<![\p{L}\p{M}\p{Nd}_@.])((?:[\p{L}\p{M}0-9](?:[\p{L}\p{M}0-9-]*[\p{L}\p{M}0-9])?\.)+(?:\#(tlds))(?:\/\S*)?)(?![\p{L}\p{M}\p{Nd}_])"#
             + #"|(?<!\w)#([\p{L}0-9_][\p{L}0-9_-]*)"#
             + #"|(?<!\w)((?:note1|nevent1|nprofile1|naddr1)(?-i:[a-z0-9]{10,}))(?!\w)"#
         return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
@@ -277,7 +277,13 @@ enum ContentParser {
                 // inline link with a synthesized scheme and never classify it
                 // into a preview card / media embed — a false positive must
                 // cost at most a stray underline, never a loaded card.
-                segments.append(.inlineLink("https://\(trimTrailingPunctuation(bareDomain))"))
+                let trimmed = trimTrailingPunctuation(bareDomain)
+                segments.append(.inlineLink("https://\(trimmed)"))
+                // The regex path `(\S*)` swallows trailing punctuation
+                // ("jumble.social/notes,"); the href drops it, so re-emit it
+                // as text instead of silently eating it.
+                let trailing = String(bareDomain.dropFirst(trimmed.count))
+                if !trailing.isEmpty { segments.append(.text(trailing)) }
             } else if token.lowercased().hasPrefix("nostr:") {
                 segments.append(decodeNostrToken(token))
             } else if isBareBech32(token) {

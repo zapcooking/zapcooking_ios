@@ -109,4 +109,23 @@ struct ContentParserBareDomainTests {
         let segs = segments("ping chef@zap.cooking please")
         #expect(!segs.contains { if case .inlineLink("https://zap.cooking") = $0 { return true } else { return false } })
     }
+
+    @Test func idnDomainsLinkify() {
+        #expect(inlineLinks("see пример.рф today") == ["https://пример.рф"])
+    }
+
+    @Test func dottedEmailLocalPartDoesNotSplit() {
+        #expect(inlineLinks("first.last@zap.cooking") == [])
+        #expect(inlineLinks("ping chef@zap.cooking please") == [])
+    }
+
+    @Test func trailingPunctuationIsPreservedAsText() {
+        let segs = segments("see jumble.social/notes, please")
+        guard case .inlineLink(let url) = segs[1] else {
+            Issue.record("expected inlineLink at index 1, got \(segs)")
+            return
+        }
+        #expect(url == "https://jumble.social/notes")
+        #expect(segs.dropFirst(2).contains { if case .text(let t) = $0 { return t.hasPrefix(",") } else { return false } })
+    }
 }
