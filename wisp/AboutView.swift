@@ -6,10 +6,9 @@ import SwiftUI
 /// — same origin, same paths, same labels — so the two apps point reviewers
 /// at the same documents.
 ///
-/// Account deletion (4.2) is deliberately not in this list yet: the Android
-/// entry links to an email-request page, and Apple's account-deletion
-/// guidance does not accept an email flow outside regulated industries. It
-/// joins this list once the deletion approach is decided.
+/// Account deletion (4.2) is not a policy link: Apple's account-deletion
+/// guidance does not accept the web's email flow, so it is an in-app flow in
+/// its own About section (`DeleteAccountView`).
 nonisolated enum PolicyLinks {
     static let origin = "https://zap.cooking"
 
@@ -31,6 +30,18 @@ nonisolated enum PolicyLinks {
 /// web pages, and a `WKWebView` carrying them would be one more web surface
 /// for a Guideline 4.2 reviewer to weigh).
 struct AboutView: View {
+    /// The signed-in account, for the Delete Account row. Nil hides the
+    /// section.
+    var account: Account? = nil
+
+    struct Account {
+        let keypair: Keypair
+        let walletStore: WalletStore?
+        /// After deletion: the account the app switched to, or nil when the
+        /// device was wiped and the app should return to the splash.
+        let onDeleted: (Keypair?) -> Void
+    }
+
     @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
 
@@ -43,6 +54,31 @@ struct AboutView: View {
                             Divider().overlay(theme.palette.surfaceVariant)
                         }
                         policyRow(link)
+                    }
+                }
+
+                if let account {
+                    section(title: "Account") {
+                        NavigationLink {
+                            DeleteAccountView(
+                                keypair: account.keypair,
+                                walletStore: account.walletStore,
+                                onDeleted: account.onDeleted
+                            )
+                        } label: {
+                            HStack {
+                                Text("Delete Account")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(.red)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(theme.palette.onSurfaceVariant)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("about-delete-account")
                     }
                 }
 

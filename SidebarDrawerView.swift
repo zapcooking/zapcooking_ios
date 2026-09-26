@@ -180,9 +180,9 @@ struct SidebarDrawerView: View {
             if keypair.isWatchOnly {
                 Text("Sign back in with your npub anytime to resume watching this account.")
             } else if hasEmbeddedWallet {
-                Text("Back up your private key before logging out. Without it, your Nostr account cannot be recovered.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
             } else {
-                Text("Back up your private key before logging out. Without it, your Nostr account cannot be recovered.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.")
             }
         }
         .alert("Update Status", isPresented: $showStatusEditor) {
