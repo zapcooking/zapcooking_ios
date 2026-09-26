@@ -748,12 +748,14 @@ final class ComposeViewModel {
         attachments.insert(moved, at: destination)
     }
 
-    /// Resolve drag (by id) and steppers (by index) onto the same splice.
+    /// Land `id` directly before `targetId`. The splice indexes the array
+    /// after the source's removal, so a forward move lands one slot short
+    /// of the target's original index.
     func moveMedia(id: UUID, before targetId: UUID) {
         guard id != targetId,
               let source = attachments.firstIndex(where: { $0.id == id }),
               let target = attachments.firstIndex(where: { $0.id == targetId }) else { return }
-        moveMedia(from: source, to: target)
+        moveMedia(from: source, to: source < target ? target - 1 : target)
     }
 
     func moveMedia(id: UUID, earlier: Bool) {
@@ -2002,6 +2004,9 @@ final class ComposeViewModel {
                     relayUrls: pollRelays
                 ))
             }
+            // Poll bodies splice attachment URLs like text notes, so described
+            // attachments carry their imeta `alt` the same way.
+            tags.append(contentsOf: AttachmentModel.imetaTags(for: attachments))
             if explicit { tags.append(["content-warning", ""]) }
             tags.append(contentsOf: EmojiShortcode.emojiTags(in: materializedContent))
             if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }

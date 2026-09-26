@@ -156,6 +156,12 @@ struct AttachmentModelTests {
         #expect(clamped.allSatisfy { $0 == "🍲" })
     }
 
+    /// Padding is stripped before the cap, so it can't cost real text.
+    @Test func normalizedAlt_capsAfterTrimming() {
+        let body = String(repeating: "a", count: AttachmentModel.maxAltGraphemes)
+        #expect(AttachmentModel.normalizedAlt("\n" + body) == body)
+    }
+
     @Test func normalizedAlt_flattensLineBreaks() {
         #expect(AttachmentModel.normalizedAlt("two\nlines\r\nhere\rend") == "two lines here end")
         #expect(AttachmentModel.normalizedAlt("") == "")
@@ -209,6 +215,17 @@ struct AttachmentModelTests {
         #expect(vm.attachments[1].altText == "leeks")
     }
 
+    /// Forward moves land before the target too, not after it.
+    @Test func moveMedia_byId_forwardLandsBeforeTarget() {
+        let vm = composer()
+        let a = media("a"), b = media("b"), c = media("c")
+        vm.attachments = [a, b, c]
+        vm.moveMedia(id: a.id, before: c.id)
+        #expect(vm.attachments.map(\.url) == ["b", "a", "c"])
+        vm.moveMedia(id: c.id, before: b.id)
+        #expect(vm.attachments.map(\.url) == ["c", "b", "a"])
+    }
+
     @Test func setAlt_writesTheSlot() {
         let vm = composer()
         let a = media("a")
@@ -239,6 +256,19 @@ struct AttachmentModelTests {
         #expect(imeta.count == 1)
         #expect(imeta[0][1] == "url https://x/a.jpg")
         #expect(imeta[0].last == "alt charred leeks")
+    }
+
+    /// Poll bodies carry attachment URLs too, so their alt must ride along.
+    @Test func publishTags_carryAltForPolls() {
+        let vm = composer()
+        vm.updateContent("Which soup?")
+        vm.pollEnabled = true
+        vm.pollOptions = ["Leek", "Onion"]
+        vm.attachments = [media("https://x/a.jpg", alt: "charred leeks"), media("https://x/b.jpg")]
+        let tags = vm.buildBaseTags(kind: vm.determineKind(), materializedContent: vm.content)
+        let imeta = tags.filter { $0.first == "imeta" }
+        #expect(imeta.count == 1)
+        #expect(imeta.first?.last == "alt charred leeks")
     }
 
     // MARK: - Autosave round-trip: alt persists, boundary lines stripped

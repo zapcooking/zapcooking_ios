@@ -1,5 +1,6 @@
 #if DEBUG
 import ImageIO
+import Observation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers

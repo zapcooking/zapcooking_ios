@@ -95,13 +95,15 @@ enum AttachmentModel {
     /// emoji never ships half a surrogate pair the way a code-unit slice
     /// would. Line breaks become spaces (imeta entries are line-oriented)
     /// and the ends are trimmed, so a whitespace-only description counts
-    /// as undescribed and emits nothing.
+    /// as undescribed and emits nothing. The cap applies to the normalized
+    /// text, so leading padding never spends the budget.
     static func normalizedAlt(_ source: String) -> String {
-        let capped = String(source.prefix(maxAltGraphemes))
-        return capped
+        let flattened = source
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return String(flattened.prefix(maxAltGraphemes))
             .trimmingCharacters(in: .whitespaces)
     }
 

@@ -804,7 +804,9 @@ struct ComposeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(viewModel.attachments) { attachment in
-                            attachmentThumb(attachment, index: 0, size: 140)
+                            // No reorder here: `cellX` is measured by `attachmentsRow`
+                            // only, so a gallery cell has no slot geometry to lift from.
+                            attachmentThumb(attachment, index: nil, size: 140)
                         }
                         Button {
                             presentPhotoPicker(max: 8)
@@ -927,7 +929,7 @@ struct ComposeView: View {
     /// the remove ✕ top-trailing. Reordering is drag-only (long-press and
     /// drag, live-shuffling the cells); VoiceOver reaches the same moves
     /// through named accessibility actions.
-    private func attachmentThumb(_ attachment: ComposeAttachment, index: Int, size: CGFloat) -> some View {
+    private func attachmentThumb(_ attachment: ComposeAttachment, index: Int?, size: CGFloat) -> some View {
         return ZStack {
                 // The media layer is hard-framed and clipped BEFORE the
                 // ZStack sees it: `scaledToFill` lets a non-square image
@@ -1014,14 +1016,11 @@ struct ComposeView: View {
                   AnimatedImageHint.isLikelyAnimated(url: url, mime: attachment.mime) {
             // Post-upload: bytes have been cleared but the attachment
             // is animated. Fetch + animate from the Blossom URL.
-            AnimatedImageView(
-                url: URL(string: url),
-                aspect: nil,
-                contentMode: .fill,
-                placeholder: { Color.wispSurfaceVariant },
-                failure: { Color.wispSurfaceVariant }
-            )
-            .allowsHitTesting(false) // UIKit-drawn, as above
+            if let animatedURL = URL(string: url) {
+                RetryingAnimatedThumbnail(url: animatedURL)
+            } else {
+                Color.wispSurfaceVariant
+            }
         } else if attachment.isVideo, let url = attachment.url, let imageURL = URL(string: url) {
             // Videos: the thumbnail is the video's own frame (sidecar #368) —
             // a downloaded .mp4 can't be decoded by UIImage, so the generic
@@ -1036,7 +1035,7 @@ struct ComposeView: View {
 
     /// "+ ALT" / "✓ ALT" — black translucent until described, accent once
     /// saved (Android `AltChip`). Sized for the 84pt cells.
-    private func altChip(_ attachment: ComposeAttachment, index: Int) -> some View {
+    private func altChip(_ attachment: ComposeAttachment, index: Int?) -> some View {
         let saved = attachment.trimmedAltText != nil
         return Button {
             altEditorTarget = AltTextEditorTarget(
@@ -1059,14 +1058,14 @@ struct ComposeView: View {
                 // touch ahead of any gesture attached to it, so the hold
                 // rides inside the label; a tap still reaches the Button
                 // once the hold fails on release.
-                .gesture(reorderGesture(attachment: attachment, index: index))
+                .reorderHold(index.map { reorderGesture(attachment: attachment, index: $0) })
         }
         .buttonStyle(.plain)
         .accessibilityLabel(saved ? "Edit alt text" : "Add alt text")
     }
 
     /// Remove = splice(i, 1), no text to clean up.
-    private func removeButton(_ attachment: ComposeAttachment, index: Int) -> some View {
+    private func removeButton(_ attachment: ComposeAttachment, index: Int?) -> some View {
         Button {
             viewModel.removeMedia(id: attachment.id)
         } label: {
@@ -1076,7 +1075,7 @@ struct ComposeView: View {
                 .frame(width: 24, height: 24)
                 .background(.black.opacity(0.6), in: Circle())
                 // See `altChip`: the hold rides inside the label.
-                .gesture(reorderGesture(attachment: attachment, index: index))
+                .reorderHold(index.map { reorderGesture(attachment: attachment, index: $0) })
         }
         .buttonStyle(.plain)
         .padding(4)
@@ -1523,6 +1522,19 @@ struct ComposeView: View {
 /// composer's, the sheet's) can start. That is the arbitration
 /// UICollectionView's own reordering relies on. It also reports
 /// cancellation, which SwiftUI's `.onEnded` never did.
+private extension View {
+    /// Attaches the strip's hold-to-reorder when there is one; the gallery
+    /// grid passes nil and keeps plain taps.
+    @ViewBuilder
+    func reorderHold(_ gesture: ReorderPressGesture?) -> some View {
+        if let gesture {
+            self.gesture(gesture)
+        } else {
+            self
+        }
+    }
+}
+
 private struct ReorderPressGesture: UIGestureRecognizerRepresentable {
     var minimumDuration: TimeInterval
     /// The finger's global x when the hold completes.
@@ -1684,10 +1696,12 @@ private struct RetryingMediaThumbnail: View {
         }
     }
 
+    private var bustedURL: URL { Self.busted(url, attempt: attempt) }
+
     /// First attempt hits the URL as-is (cached is fine); retries bust the
     /// cache with a throwaway query parameter so the host can't serve us
     /// the same miss twice.
-    private var bustedURL: URL {
+    static func busted(_ url: URL, attempt: Int) -> URL {
         guard attempt > 0,
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url
@@ -1696,5 +1710,59 @@ private struct RetryingMediaThumbnail: View {
         items.append(URLQueryItem(name: "zc-retry", value: String(attempt)))
         components.queryItems = items
         return components.url ?? url
+    }
+}
+
+/// `RetryingMediaThumbnail` for animated media, whose loader
+/// (`AnimatedImageView`) tries once and has no retry of its own: the same
+/// automatic cache-busted retries, then the same "Tap to retry". The GIF
+/// layer takes no touches (see `thumbImage`), so the retry button sits
+/// beside it in the ZStack rather than inside its failure slot.
+private struct RetryingAnimatedThumbnail: View {
+    let url: URL
+    @State private var attempt = 0
+    @State private var failed = false
+
+    private static let maxAttempts = 3
+
+    var body: some View {
+        ZStack {
+            // A new attempt changes the URL, which restarts the view's load.
+            AnimatedImageView(
+                url: RetryingMediaThumbnail.busted(url, attempt: attempt),
+                aspect: nil,
+                contentMode: .fill,
+                placeholder: { Color.wispSurfaceVariant },
+                failure: {
+                    Color.wispSurfaceVariant.onAppear {
+                        if attempt + 1 < Self.maxAttempts {
+                            attempt += 1
+                        } else {
+                            failed = true
+                        }
+                    }
+                }
+            )
+            .allowsHitTesting(false)
+            if failed {
+                Button {
+                    failed = false
+                    attempt += 1
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 15, weight: .medium))
+                        Text("Tap to retry")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .onChange(of: url) { _, _ in
+            attempt = 0
+            failed = false
+        }
     }
 }
