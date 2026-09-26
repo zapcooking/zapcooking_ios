@@ -10,6 +10,10 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var showQRScanner = false
     @State private var showSignUp = false
+    /// Set by ticking the terms row. Log In, the QR scanner and Create a new
+    /// account all stay disabled while nil — this screen is the account
+    /// switcher's entry point, so it gates like the splash does.
+    @State private var acceptance: TermsAcceptance?
 
     var body: some View {
         NavigationStack {
@@ -59,6 +63,7 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .disabled(acceptance == nil)
                 }
                 .onChange(of: nsecInput) { _, _ in error = nil }
 
@@ -69,6 +74,8 @@ struct LoginView: View {
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
+
+                TermsAgreementRow(acceptance: $acceptance)
 
                 Button {
                     login()
@@ -84,7 +91,7 @@ struct LoginView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.wispPrimary)
                 .controlSize(.large)
-                .disabled(nsecInput.isEmpty || isLoading)
+                .disabled(nsecInput.isEmpty || isLoading || acceptance == nil)
 
                 HStack(spacing: 8) {
                     Rectangle().fill(.tertiary).frame(height: 1)
@@ -102,6 +109,7 @@ struct LoginView: View {
                 .buttonStyle(.bordered)
                 .tint(.wispPrimary)
                 .controlSize(.large)
+                .disabled(acceptance == nil)
 
                 Spacer()
             }
@@ -133,9 +141,11 @@ struct LoginView: View {
                 .ignoresSafeArea()
             }
             .fullScreenCover(isPresented: $showSignUp) {
-                SignUpFlowView { kp in
-                    showSignUp = false
-                    onLogin(kp)
+                if let acceptance {
+                    SignUpFlowView(acceptance: acceptance) { kp in
+                        showSignUp = false
+                        onLogin(kp)
+                    }
                 }
             }
         }
@@ -151,11 +161,12 @@ struct LoginView: View {
 
     private func handleScanned(_ value: String) {
         showQRScanner = false
+        guard let acceptance else { return }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // nsec1… or 64-char hex private key — reuse existing parse + save path.
         if let keypair = NostrKey.parseNsec(trimmed) {
-            NostrKey.save(keypair)
+            NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
             return
         }
@@ -166,7 +177,7 @@ struct LoginView: View {
         // gets ingested and the relay scoreboard is built — otherwise the feed is empty.
         if let uriData = Nip19.decodeNostrUri(trimmed),
            case .profileRef(let pubkeyHex, _) = uriData {
-            NostrKey.saveWatchOnly(pubkey: pubkeyHex)
+            NostrKey.saveWatchOnly(pubkey: pubkeyHex, acceptance: acceptance)
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
@@ -176,6 +187,7 @@ struct LoginView: View {
 
     private func login() {
         error = nil
+        guard let acceptance else { return }
         isLoading = true
         // Trim before parsing: an nsec pasted from a password manager can
         // carry a trailing newline, which fails parseNsec on add-account
@@ -188,7 +200,7 @@ struct LoginView: View {
                 error = "Couldn't read that key. Paste an nsec (\"nsec1…\") or a 64-character hex private key."
                 return
             }
-            NostrKey.save(keypair)
+            NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
         }
     }

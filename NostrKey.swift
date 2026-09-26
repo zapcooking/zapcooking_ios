@@ -61,7 +61,12 @@ enum NostrKey {
 
     private static let service = "com.wisp.nostr"
 
-    static func save(_ keypair: Keypair) {
+    /// `acceptance` is required so no path can store a key without the
+    /// user's agreement to the terms. It is recorded before the key is
+    /// written: a failure between the two leaves a harmless record with no
+    /// key, never a key with no record.
+    static func save(_ keypair: Keypair, acceptance: TermsAcceptance) {
+        acceptance.record(for: keypair.pubkey)
         saveToKeychain(keypair, account: "active")
         saveToKeychain(keypair, account: "account_\(keypair.pubkey)")
         addToAccountList(keypair.pubkey)
@@ -70,9 +75,9 @@ enum NostrKey {
 
     /// Save a watch-only account (npub/nprofile scan). Uses an empty privkey sentinel
     /// distinguishable via `isWatchOnly(pubkey:)`.
-    static func saveWatchOnly(pubkey: String) {
+    static func saveWatchOnly(pubkey: String, acceptance: TermsAcceptance) {
         let kp = Keypair(privkey: "", pubkey: pubkey)
-        save(kp)
+        save(kp, acceptance: acceptance)
         UserDefaults.standard.set(true, forKey: "watch_only_\(pubkey)")
     }
 
@@ -117,6 +122,7 @@ enum NostrKey {
         UserDefaults.standard.set(list, forKey: "wisp_accounts")
         let keys = [
             "onboarding_done_\(pubkey)",
+            "terms_accepted_\(pubkey)",
             "watch_only_\(pubkey)",
             "follow_pubkeys_\(pubkey)",
             "follow_pubkeys_ts_\(pubkey)",

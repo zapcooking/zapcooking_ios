@@ -28,6 +28,14 @@ final class AppleAuthViewModel {
 
     private(set) var state: State = .idle
 
+    /// Given on the splash before this flow started; recorded with every
+    /// key this flow stores (new, restored, or "create another").
+    private let acceptance: TermsAcceptance
+
+    init(acceptance: TermsAcceptance) {
+        self.acceptance = acceptance
+    }
+
     private let signInManager = AppleSignInManager()
     private let keychainService = KeychainBackupService()
 
@@ -160,7 +168,7 @@ final class AppleAuthViewModel {
                 let pubkey = try Schnorr.xonlyPubkey(privkey32: nsec)
                 let pubkeyHex = Hex.encode(pubkey)
                 let keypair = Keypair(privkey: Hex.encode(nsec), pubkey: pubkeyHex)
-                NostrKey.save(keypair)
+                NostrKey.save(keypair, acceptance: acceptance)
                 NostrKey.registerInAccountList(pubkeyHex)
                 state = .done(isNewAccount: false, keypair: keypair)
             } catch {
@@ -206,7 +214,7 @@ final class AppleAuthViewModel {
         let payload = try BackupCrypto.encryptNsec(nsec32: privkey, key32: key)
         try await keychainService.uploadBackup(payload: payload)
         let keypair = Keypair(privkey: Hex.encode(privkey), pubkey: pubkeyHex)
-        NostrKey.save(keypair)
+        NostrKey.save(keypair, acceptance: acceptance)
         NostrKey.registerInAccountList(pubkeyHex)
         state = .done(isNewAccount: true, keypair: keypair)
     }
