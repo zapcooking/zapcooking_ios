@@ -12,11 +12,11 @@ enum AppScreen {
 
 struct ContentView: View {
     @State private var currentScreen: AppScreen = .splash
-    @State private var showNostrSheet = false
-    @State private var showAppleAuth = false
-    /// The agreement given on the splash, handed to whichever sign-in path
-    /// the user picked.
-    @State private var splashAcceptance: TermsAcceptance?
+    /// The splash's two sign-in flows, each presented on the agreement its
+    /// button gave (`PendingAgreement`) — never on a Bool beside a separate
+    /// optional, which renders the flow empty on first presentation.
+    @State private var nostrSignIn: PendingAgreement?
+    @State private var appleSignIn: PendingAgreement?
     @State private var keypair: Keypair?
     @State private var checkedSavedAccount = false
     @State private var accountSwitchInProgress = false
@@ -33,65 +33,55 @@ struct ContentView: View {
             switch currentScreen {
             case .splash:
                 SplashView(
-                    onContinueWithNostr: { acceptance in
-                        splashAcceptance = acceptance
-                        showNostrSheet = true
-                    },
-                    onContinueWithApple: { acceptance in
-                        splashAcceptance = acceptance
-                        showAppleAuth = true
-                    }
+                    onContinueWithNostr: { nostrSignIn = PendingAgreement($0) },
+                    onContinueWithApple: { appleSignIn = PendingAgreement($0) }
                 )
-                .sheet(isPresented: $showNostrSheet) {
-                    if let splashAcceptance {
-                        NostrLoginSheet(
-                            acceptance: splashAcceptance,
-                            onLogin: { kp in
-                                keypair = kp
-                                showNostrSheet = false
-                                // Watch-only accounts skip onboarding (markOnboardingComplete
-                                // is called in NostrLoginSheet before this closure fires).
-                                if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
-                                    currentScreen = .loading
-                                } else {
-                                    currentScreen = .onboarding
-                                }
-                            },
-                            onCreateAccount: {
-                                showNostrSheet = false
-                                currentScreen = .signUp(splashAcceptance)
+                .sheet(item: $nostrSignIn) { pending in
+                    NostrLoginSheet(
+                        acceptance: pending.acceptance,
+                        onLogin: { kp in
+                            keypair = kp
+                            nostrSignIn = nil
+                            // Watch-only accounts skip onboarding (markOnboardingComplete
+                            // is called in NostrLoginSheet before this closure fires).
+                            if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
+                                currentScreen = .loading
+                            } else {
+                                currentScreen = .onboarding
                             }
-                        )
-                    }
+                        },
+                        onCreateAccount: {
+                            nostrSignIn = nil
+                            currentScreen = .signUp(pending.acceptance)
+                        }
+                    )
                 }
-                .fullScreenCover(isPresented: $showAppleAuth) {
-                    if let splashAcceptance {
-                        AppleAuthView(
-                            acceptance: splashAcceptance,
-                            onCancel: { showAppleAuth = false },
-                            onDone: { isNewAccount, kp in
-                                keypair = kp
-                                showAppleAuth = false
-                                if isNewAccount {
-                                    // Brand-new account: run the same profile /
-                                    // follows / hashtags / intro-note wizard as
-                                    // a "Create new account" tap, passing the
-                                    // already-generated, already-backed-up key
-                                    // so the wizard doesn't mint a second one.
-                                    signUpExistingKeypair = kp
-                                    currentScreen = .signUp(splashAcceptance)
-                                } else if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
-                                    currentScreen = .loading
-                                } else {
-                                    // Restored account: outbox-builder fetches
-                                    // kind-3 / kind-10002 from relays so the
-                                    // feed has follows + per-author write
-                                    // relays before MainView mounts.
-                                    currentScreen = .onboarding
-                                }
+                .fullScreenCover(item: $appleSignIn) { pending in
+                    AppleAuthView(
+                        acceptance: pending.acceptance,
+                        onCancel: { appleSignIn = nil },
+                        onDone: { isNewAccount, kp in
+                            keypair = kp
+                            appleSignIn = nil
+                            if isNewAccount {
+                                // Brand-new account: run the same profile /
+                                // follows / hashtags / intro-note wizard as
+                                // a "Create new account" tap, passing the
+                                // already-generated, already-backed-up key
+                                // so the wizard doesn't mint a second one.
+                                signUpExistingKeypair = kp
+                                currentScreen = .signUp(pending.acceptance)
+                            } else if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
+                                currentScreen = .loading
+                            } else {
+                                // Restored account: outbox-builder fetches
+                                // kind-3 / kind-10002 from relays so the
+                                // feed has follows + per-author write
+                                // relays before MainView mounts.
+                                currentScreen = .onboarding
                             }
-                        )
-                    }
+                        }
+                    )
                 }
 
             case .signUp(let acceptance):

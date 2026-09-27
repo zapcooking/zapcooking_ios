@@ -8,14 +8,13 @@ struct LoginView: View {
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
-    @State private var showQRScanner = false
-    @State private var showSignUp = false
-    /// The agreement given by tapping the QR scanner or Create a new
-    /// account (Log In takes its own at the tap), held for the flow that
-    /// tap opens. This screen is the account switcher's entry point, so it
-    /// gates like the splash does: the notice sits beneath the actions and
-    /// tapping one is agreeing.
-    @State private var acceptance: TermsAcceptance?
+    /// The QR scanner and Create a new account, each presented on the
+    /// agreement its tap gave (Log In takes its own at the tap). This screen
+    /// is the account switcher's entry point, so it gates like the splash
+    /// does: the notice sits beneath the actions and tapping one is agreeing.
+    /// `PendingAgreement`, not a Bool beside an optional — see its doc.
+    @State private var qrScan: PendingAgreement?
+    @State private var signUp: PendingAgreement?
 
     var body: some View {
         NavigationStack {
@@ -59,8 +58,7 @@ struct LoginView: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        acceptance = .now()
-                        showQRScanner = true
+                        qrScan = PendingAgreement(.now())
                     } label: {
                         Image(systemName: "qrcode.viewfinder")
                             .foregroundStyle(.secondary)
@@ -101,8 +99,7 @@ struct LoginView: View {
                 .padding(.vertical, 4)
 
                 Button {
-                    acceptance = .now()
-                    showSignUp = true
+                    signUp = PendingAgreement(.now())
                 } label: {
                     Label("Create a new account", systemImage: "person.badge.plus")
                         .frame(maxWidth: .infinity)
@@ -136,19 +133,17 @@ struct LoginView: View {
                 .padding(.leading, 16)
                 .padding(.top, 16)
             }
-            .fullScreenCover(isPresented: $showQRScanner) {
+            .fullScreenCover(item: $qrScan) { pending in
                 QRCodeScannerView(
-                    onScanned: { value in handleScanned(value) },
-                    onCancel: { showQRScanner = false }
+                    onScanned: { value in handleScanned(value, acceptance: pending.acceptance) },
+                    onCancel: { qrScan = nil }
                 )
                 .ignoresSafeArea()
             }
-            .fullScreenCover(isPresented: $showSignUp) {
-                if let acceptance {
-                    SignUpFlowView(acceptance: acceptance) { kp in
-                        showSignUp = false
-                        onLogin(kp)
-                    }
+            .fullScreenCover(item: $signUp) { pending in
+                SignUpFlowView(acceptance: pending.acceptance) { kp in
+                    signUp = nil
+                    onLogin(kp)
                 }
             }
         }
@@ -162,9 +157,8 @@ struct LoginView: View {
         .onDisappear { nsecPasteAllowed = false }
     }
 
-    private func handleScanned(_ value: String) {
-        showQRScanner = false
-        guard let acceptance else { return }
+    private func handleScanned(_ value: String, acceptance: TermsAcceptance) {
+        qrScan = nil
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // nsec1… or 64-char hex private key — reuse existing parse + save path.
