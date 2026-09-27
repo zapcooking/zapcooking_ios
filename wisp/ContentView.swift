@@ -42,8 +42,9 @@ struct ContentView: View {
                         onLogin: { kp in
                             keypair = kp
                             nostrSignIn = nil
-                            // Watch-only accounts skip onboarding (markOnboardingComplete
-                            // is called in NostrLoginSheet before this closure fires).
+                            // An existing key: run the outbox builder unless this
+                            // pubkey already has. Watch-only keys take the same
+                            // route and get `OnboardingView`'s watch-only screen.
                             if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
                                 currentScreen = .loading
                             } else {
