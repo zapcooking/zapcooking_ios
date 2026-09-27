@@ -49,6 +49,28 @@ nonisolated struct TermsAcceptance: Equatable, Sendable {
     }
 }
 
+/// An agreement given by tapping an entry action, held as the presentation
+/// state of the flow that tap opens. The flow is presented with
+/// `.sheet(item:)` / `.fullScreenCover(item:)` on this value, so the flow's
+/// content receives the acceptance as the closure argument.
+///
+/// Not a Bool plus a separate optional. Presenting on a Bool whose content is
+/// `if let acceptance { … }`, with both set in the same tap, renders the
+/// empty branch on first presentation: the content closure reads the
+/// optional as it was before the tap. That was the blank "Continue with
+/// Nostr" sheet in 2.5 (and the same shape sat under Continue with Apple
+/// and LoginView's Create a new account and QR scan). With `item:` the
+/// presentation and its data are one value, so there is nothing to be nil.
+/// `EntryPresentationTests` fails if the Bool shape comes back.
+struct PendingAgreement: Identifiable {
+    let id = UUID()
+    let acceptance: TermsAcceptance
+
+    init(_ acceptance: TermsAcceptance) {
+        self.acceptance = acceptance
+    }
+}
+
 /// The line beneath the entry buttons on the splash and the account
 /// switcher's `LoginView`. There is no checkbox: tapping the action is the
 /// agreement, so each button hands `.now()` to its flow at the moment of the
