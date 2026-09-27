@@ -95,6 +95,14 @@ final class AppSettings {
     /// brand-color-parity concern.
     nonisolated static let defaultAccentARGB: Int = 0xFFFF5722
 
+    /// What a stored startup-screen value loads as: nil (never set) or
+    /// anything unreadable falls back to Feed. Extracted so tests exercise
+    /// exactly what `init` runs.
+    nonisolated static func decodeStartupScreen(_ raw: String?) -> StartupScreen {
+        guard let raw, let screen = StartupScreen(rawValue: raw) else { return .feed }
+        return screen
+    }
+
     var largeText: Bool {
         didSet { UserDefaults.standard.set(largeText, forKey: Keys.largeText) }
     }
@@ -217,8 +225,7 @@ final class AppSettings {
         self.notificationSoundsEnabled = defaults.object(forKey: Keys.notificationSoundsEnabled) as? Bool ?? true
         let notifStyleRaw = defaults.string(forKey: Keys.notificationFeedStyle) ?? NotificationFeedStyle.expanded.rawValue
         self.notificationFeedStyle = NotificationFeedStyle(rawValue: notifStyleRaw) ?? .expanded
-        let startupRaw = defaults.string(forKey: Keys.startupScreen) ?? StartupScreen.feed.rawValue
-        self.startupScreen = StartupScreen(rawValue: startupRaw) ?? .feed
+        self.startupScreen = Self.decodeStartupScreen(defaults.string(forKey: Keys.startupScreen))
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
         let storedSeconds = defaults.object(forKey: Keys.postUndoTimerSeconds) as? Int ?? 10
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
