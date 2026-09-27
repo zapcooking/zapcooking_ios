@@ -195,7 +195,7 @@ struct ProfileView: View {
                         if blocked {
                             muteRepo.unblockUser(pubkey)
                         } else {
-                            muteRepo.blockUser(pubkey)
+                            muteRepo.blockUser(pubkey, context: .profile)
                         }
                     } label: {
                         Label(blocked ? "Unblock User" : "Block User",
@@ -826,7 +826,7 @@ private struct ProfileHeaderView: View {
         if currentlyBlocked {
             muteRepo.unblockUser(viewModel.pubkey)
         } else {
-            muteRepo.blockUser(viewModel.pubkey)
+            muteRepo.blockUser(viewModel.pubkey, context: .profile)
         }
     }
 }

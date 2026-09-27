@@ -119,6 +119,7 @@ struct PostCardView: View {
     private struct MuteCandidate: Equatable {
         let pubkey: String
         let displayName: String
+        let context: BlockContext
     }
     /// Single source of truth for every body-level sheet on the card. Stacking
     /// multiple `.sheet(isPresented:)` modifiers on the same view is a known
@@ -873,8 +874,8 @@ struct PostCardView: View {
             titleVisibility: .visible
         ) {
             Button("Block", role: .destructive) {
-                if let pk = muteCandidate?.pubkey {
-                    MuteRepository.shared.blockUser(pk)
+                if let candidate = muteCandidate {
+                    MuteRepository.shared.blockUser(candidate.pubkey, context: candidate.context)
                 }
                 muteCandidate = nil
             }
@@ -1488,7 +1489,11 @@ struct PostCardView: View {
                             let displayed = profiles[target.pubkey]?.displayString
                                 ?? profile?.displayString
                                 ?? Nip19.shortNpub(hex: target.pubkey)
-                            muteCandidate = MuteCandidate(pubkey: target.pubkey, displayName: displayed)
+                            muteCandidate = MuteCandidate(
+                                pubkey: target.pubkey,
+                                displayName: displayed,
+                                context: .event(id: target.id, kind: target.kind)
+                            )
                             showMuteUserConfirm = true
                         }
                     }

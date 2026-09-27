@@ -252,7 +252,7 @@ struct RecipeDetailView: View {
                         if blocked {
                             muteRepo.unblockUser(event.pubkey)
                         } else {
-                            muteRepo.blockUser(event.pubkey)
+                            muteRepo.blockUser(event.pubkey, context: .event(id: event.id, kind: event.kind))
                         }
                     } label: {
                         Label(

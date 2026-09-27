@@ -46,7 +46,9 @@ struct RecipeCardView: View {
                 }
                 .accessibilityIdentifier("report-recipe-card")
                 Button(role: .destructive) {
-                    MuteRepository.shared.blockUser(event.pubkey)
+                    MuteRepository.shared.blockUser(
+                        event.pubkey, context: .event(id: event.id, kind: event.kind)
+                    )
                 } label: {
                     Label("Block User", systemImage: "person.crop.circle.badge.xmark")
                 }

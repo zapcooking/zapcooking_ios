@@ -223,6 +223,31 @@ final class SafetyFilter: @unchecked Sendable {
         NotificationCenter.default.post(name: .safetyFilterChanged, object: nil)
     }
 
+    /// Synchronous install from the MainActor stores (mutes, reports, prefs),
+    /// carrying the current WoT inputs forward. `rebuildSnapshot` awaits the
+    /// WoT actor, and a live subscription can deliver a just-blocked author's
+    /// next event inside that gap; this closes it. The async rebuild still
+    /// runs after and supersedes this snapshot.
+    @MainActor
+    func installLocalState() {
+        let current = _current
+        let m = MuteRepository.shared
+        let r = ReportedContent.shared
+        let p = SafetyPreferences.shared
+        install(SafetyFilterSnapshot(
+            mutedWords: m.mutedWords,
+            blockedPubkeys: m.blockedPubkeys,
+            mutedThreads: m.mutedThreads,
+            wotEnabled: current.wotEnabled,
+            qualifiedNetwork: current.qualifiedNetwork,
+            userPubkey: current.userPubkey,
+            hellthreadFilterEnabled: p.hellthreadFilterEnabled,
+            hellthreadThreshold: p.hellthreadThreshold,
+            reportedEventIds: r.eventIds,
+            reportedPubkeys: r.pubkeys
+        ))
+    }
+
     /// Rebuild the snapshot from the active sources. Called on login, after every mute /
     /// safelist edit, and after every WoT recompute.
     func rebuildSnapshot() async {

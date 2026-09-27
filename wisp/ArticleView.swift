@@ -309,7 +309,9 @@ struct ArticleView: View {
                     Divider()
                     articleMenuItem(title: "Block User", systemImage: "person.crop.circle.badge.xmark") {
                         showOverflowMenu = false
-                        MuteRepository.shared.blockUser(article.pubkey)
+                        MuteRepository.shared.blockUser(
+                            article.pubkey, context: .event(id: article.id, kind: article.kind)
+                        )
                     }
                 }
             }

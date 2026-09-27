@@ -92,7 +92,9 @@ final class GroupRoomViewModel: EmojiComposing {
     /// leave this room and their posts leave every feed, and the list is
     /// republished. Same word and same store as the feed and profile menus.
     func blockAuthor(_ pubkey: String) {
-        MuteRepository.shared.blockUser(pubkey)
+        MuteRepository.shared.blockUser(
+            pubkey, context: .groupRoom(groupId: groupId, relayUrl: relayUrl)
+        )
     }
 
     /// Admin: kind 9001 on the room's relay. Pantry records a ban with the

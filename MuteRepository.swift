@@ -107,22 +107,37 @@ final class MuteRepository {
         commitChange()
     }
 
-    func blockUser(_ pubkey: String) {
+    /// Guideline 1.2: "Blocking should also notify the developer." Every
+    /// user-initiated block is handed here as a `BlockRecord`, for a signed
+    /// NIP-98 POST to zap.cooking that records it for aggregation (which
+    /// pubkeys get blocked repeatedly). Unset until that endpoint exists —
+    /// nothing is sent, and the block confirmation promises nothing. Blocks
+    /// arriving by kind-10000 sync from another device do not pass here; the
+    /// device that made them already did.
+    @ObservationIgnored var blockRecorder: (@MainActor (BlockRecord) -> Void)?
+
+    func blockUser(_ pubkey: String, context: BlockContext) {
         let normalized = pubkey.lowercased()
         guard !normalized.isEmpty, !blockedPubkeys.contains(normalized) else { return }
         blockedPubkeys.insert(normalized)
         commitChange()
-        // Drop their entries from the in-memory notification state immediately
-        // — without this, single-actor groups (`user replied`) and multi-actor
-        // reaction groups linger in the UI until the next cold launch even
-        // though SafetyFilter would now drop them.
+        // Grouped notification rows (`user replied`, multi-actor reactions)
+        // need a regroup, not just a filter.
         NotificationRepository.shared.purgeAuthor(normalized)
-        // Broadcast so any open feed / thread view models can drop their
-        // in-memory events for this author too.
-        NotificationCenter.default.post(name: .userBlocked, object: normalized)
+        // Same path as a report: snapshot installed now, every open surface
+        // drops the author's content without a refresh.
+        ContentHide.broadcast(pubkeys: [normalized], hiddenAuthors: [normalized])
         // Eagerly purge their cached events so feed reseeds and notification
         // hydration can't resurface them.
         Task.detached { await EventStore.shared.removeByAuthor(normalized) }
+        if let blocker = activePubkey {
+            blockRecorder?(BlockRecord(
+                blocker: blocker,
+                blocked: normalized,
+                context: context,
+                createdAt: NostrClock.now()
+            ))
+        }
     }
 
     func unblockUser(_ pubkey: String) {
@@ -262,22 +277,11 @@ final class MuteRepository {
         if !newlyBlocked.isEmpty {
             for pk in newlyBlocked {
                 NotificationRepository.shared.purgeAuthor(pk)
-                NotificationCenter.default.post(name: .userBlocked, object: pk)
                 Task.detached { await EventStore.shared.removeByAuthor(pk) }
             }
-            // Also rebuild SafetyFilter snapshot synchronously so subsequent
-            // event ingestions see the new block set without waiting for
-            // commitChange's async rebuild.
-            SafetyFilter.shared.install(SafetyFilterSnapshot(
-                mutedWords: mutedWords,
-                blockedPubkeys: blockedPubkeys,
-                mutedThreads: mutedThreads,
-                wotEnabled: SafetyFilter.shared.snapshot.wotEnabled,
-                qualifiedNetwork: SafetyFilter.shared.snapshot.qualifiedNetwork,
-                userPubkey: SafetyFilter.shared.snapshot.userPubkey,
-                reportedEventIds: ReportedContent.shared.eventIds,
-                reportedPubkeys: ReportedContent.shared.pubkeys
-            ))
+            // Same path as a local block (snapshot installed synchronously,
+            // then every open surface drops their content).
+            ContentHide.broadcast(pubkeys: newlyBlocked, hiddenAuthors: newlyBlocked)
         }
 
         guard let pk = activePubkey else { return }
@@ -312,10 +316,31 @@ final class MuteRepository {
     }
 }
 
+/// Where a block was made. Carried to `MuteRepository.blockRecorder` as the
+/// record's context — a block is not an allegation, so this says where the
+/// user was, not what was wrong.
+nonisolated enum BlockContext: Equatable, Sendable {
+    /// From a post, recipe or article card / detail.
+    case event(id: String, kind: Int)
+    /// From the person's profile.
+    case profile
+    /// From a NIP-29 room (message menu or member list).
+    case groupRoom(groupId: String, relayUrl: String)
+}
+
+/// One user-initiated block, as handed to `MuteRepository.blockRecorder`.
+/// Pubkeys are lowercase hex.
+nonisolated struct BlockRecord: Equatable, Sendable {
+    let blocker: String
+    let blocked: String
+    let context: BlockContext
+    let createdAt: Int
+}
+
 extension Notification.Name {
-    /// Posted when the user blocks someone via `MuteRepository.blockUser`.
-    /// `object` is the normalized (lowercased) blocked pubkey. Open feed /
-    /// thread view models listen and drop matching in-memory events so the
-    /// UI updates without waiting for a cold-launch reseed.
+    /// Posted (via `ContentHide.broadcast`) for each newly-hidden author — a
+    /// block, a relay-synced block, or a profile report. `object` is the
+    /// lowercased pubkey. The thread swaps their rows for the blocked
+    /// placeholder; notifications re-filter.
     static let userBlocked = Notification.Name("WispUserBlocked")
 }

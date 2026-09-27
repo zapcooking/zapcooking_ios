@@ -76,28 +76,17 @@ final class ReportedContent {
         guard changed else { return }
         persist()
 
-        let hiddenEventIds = eventIds
-        let hiddenPubkeys = pubkeys
-        let hiddenCoordinates = coordinates
-        NotificationCenter.default.post(
-            name: .contentHidden,
-            object: nil,
-            userInfo: [
-                ContentHideKey.eventIds: Array(hiddenEventIds),
-                ContentHideKey.pubkeys: Array(hiddenPubkeys),
-                ContentHideKey.coordinates: Array(hiddenCoordinates),
-            ]
+        // A profile report also reaches the `.userBlocked` observers so
+        // home / thread / notifications drop the author the same way a block
+        // does.
+        let isProfileReport = target.eventId == nil && target.coordinate == nil
+        ContentHide.broadcast(
+            eventIds: eventIds,
+            pubkeys: pubkeys,
+            coordinates: coordinates,
+            hiddenAuthors: isProfileReport ? [target.reportedPubkey.lowercased()] : []
         )
-        // Profile-level hide reuses the existing block observers so home /
-        // thread / notifications drop the author without a second code path.
-        if target.eventId == nil, target.coordinate == nil {
-            NotificationCenter.default.post(
-                name: .userBlocked,
-                object: target.reportedPubkey.lowercased()
-            )
-        }
         Task { await SafetyFilter.shared.rebuildSnapshot() }
-        RecipeRepository.shared.dropHidden()
     }
 
     // MARK: - Storage
@@ -121,9 +110,51 @@ enum ContentHideKey {
     static let coordinates = "coordinates"
 }
 
+/// The one path by which "this is hidden now" reaches every surface already
+/// holding content. Report (`ReportedContent.hide`) and block
+/// (`MuteRepository.blockUser`, and blocks arriving by relay sync) both come
+/// through here, so a surface that drops reported content drops blocked
+/// content too — Guideline 1.2 asks for both to vanish instantly, and two
+/// paths had drifted (block never posted `.contentHidden`, so OnlyFood,
+/// search, hashtag, trending, profile and the recipe grids kept a blocked
+/// author's posts until a refresh).
+@MainActor
+enum ContentHide {
+    /// Callers update their own store (`ReportedContent` / `MuteRepository`)
+    /// first. Then, in order: the filter snapshot is installed synchronously so
+    /// a live subscription can't deliver the author again in the gap before
+    /// the async rebuild; `.contentHidden` reaches the list observers;
+    /// `.userBlocked` (one per `hiddenAuthors` entry) reaches the thread and
+    /// notifications, which render a placeholder / regroup rather than just
+    /// filter; the recipe grids re-apply their visibility gate.
+    static func broadcast(
+        eventIds: Set<String> = [],
+        pubkeys: Set<String> = [],
+        coordinates: Set<String> = [],
+        hiddenAuthors: Set<String> = []
+    ) {
+        SafetyFilter.shared.installLocalState()
+        NotificationCenter.default.post(
+            name: .contentHidden,
+            object: nil,
+            userInfo: [
+                ContentHideKey.eventIds: Array(eventIds),
+                ContentHideKey.pubkeys: Array(pubkeys),
+                ContentHideKey.coordinates: Array(coordinates),
+            ]
+        )
+        for pk in hiddenAuthors {
+            NotificationCenter.default.post(name: .userBlocked, object: pk)
+        }
+        RecipeRepository.shared.dropHidden()
+    }
+}
+
 extension Notification.Name {
-    /// Posted after `ReportedContent.hide`. `userInfo` carries the current
-    /// hidden event-id / pubkey / coordinate sets under `ContentHideKey`.
+    /// Posted by `ContentHide.broadcast`. `userInfo` carries hidden event-id /
+    /// pubkey / coordinate sets under `ContentHideKey` — the full reported sets
+    /// after a report, the newly-blocked pubkeys after a block. Observers drop
+    /// matches; the sets are never "everything that is hidden".
     static let contentHidden = Notification.Name("WispContentHidden")
 }
 
@@ -134,7 +165,17 @@ extension Array where Element == NostrEvent {
     ) -> [NostrEvent] {
         guard !eventIds.isEmpty || !pubkeys.isEmpty else { return self }
         return filter { event in
-            !eventIds.contains(event.id) && !pubkeys.contains(event.pubkey.lowercased())
+            if eventIds.contains(event.id) || pubkeys.contains(event.pubkey.lowercased()) {
+                return false
+            }
+            // A repost wrapping a hidden author's note hides with them, as in
+            // `SafetyFilter.shouldDrop` and the home feed's observer.
+            if event.kind == 6, !pubkeys.isEmpty,
+               let inner = SafetyFilter.repostInnerPubkey(event),
+               pubkeys.contains(inner.lowercased()) {
+                return false
+            }
+            return true
         }
     }
 }
