@@ -407,6 +407,30 @@ struct LazarusDeltaTests {
         #expect(Lazarus.delta(chosen: chosen, current: current).shrinks)
     }
 
+    /// Copilot review: the current version's encrypted items couldn't be
+    /// counted, so the restore may drop items the counts can't see — that
+    /// alone forces the shrink confirmation, even at zero counted removals.
+    /// Only the current side does this: an undecryptable chosen version adds
+    /// unknown items, it doesn't remove any.
+    @Test func anUncountedCurrentSideCountsAsAShrink() {
+        let encryptedCurrent = F.event(createdAt: 2000, tags: [], content: String(repeating: "A", count: 200))
+        let chosen = F.event(createdAt: 1000, tags: [["p", "a"], ["p", "b"]])
+        let delta = Lazarus.delta(chosen: chosen, current: encryptedCurrent)
+        #expect(delta.currentPrivateUnknown)
+        #expect(delta.privateUnknown)
+        #expect(delta.removedCount == 0)
+        #expect(delta.shrinks)
+        #expect(!delta.grows)
+
+        let encryptedChosen = F.event(createdAt: 2000, tags: [], content: String(repeating: "A", count: 200))
+        let current = F.event(createdAt: 1000, tags: [["p", "a"], ["p", "b"]])
+        let other = Lazarus.delta(chosen: encryptedChosen, current: current)
+        #expect(other.privateUnknown)
+        #expect(!other.currentPrivateUnknown)
+        #expect(other.addedCount == 0)
+        #expect(!other.shrinks)
+    }
+
     @Test func treatsAFollowWhoseRelayHintOrPetnameChangedAsTheSameItem() {
         let current = F.event(createdAt: 2000, tags: [["p", "a"], ["p", "b", "wss://old"]])
         let chosen = F.event(createdAt: 1000, tags: [["p", "a", "wss://new", "alice"], ["p", "b"]])

@@ -134,6 +134,14 @@ struct LazarusPublisher {
         guard request.chosen.pubkey == pubkey, env.activePubkey() == pubkey else {
             return .failed(.wrongAccount)
         }
+        // Same checks the scan applies before anything becomes a candidate.
+        // The scan path always runs them, but this is the signing surface:
+        // whatever reaches here must be a real, signed version of this
+        // account's list, or restoring it would republish forged content
+        // under the user's own signature.
+        guard Lazarus.isVersion(request.chosen, kind: request.chosen.kind, pubkey: pubkey) else {
+            return .failed(.wrongAccount)
+        }
         let targets = Lazarus.publishRelays(
             currentWrite: request.writeRelays,
             answeredRelays: request.answeredRelays,
@@ -154,6 +162,10 @@ struct LazarusPublisher {
         case .unconfirmed, .proceed:
             break
         }
+
+        // The screen went away (or the account switched) while the re-read
+        // ran: stop before signing. Nothing has been published yet.
+        guard !Task.isCancelled, env.activePubkey() == pubkey else { return .failed(.wrongAccount) }
 
         // Dated after the version the delta was computed against, never an
         // older copy the re-read found.
@@ -177,6 +189,9 @@ struct LazarusPublisher {
         )
         guard report.succeeded else { return .failed(.notAccepted(report)) }
 
+        // Past this point the restore took effect on at least one write
+        // relay, so the local copy is updated even if the screen is gone:
+        // the next edit here must not rebuild from the clobbered version.
         if !targets.extra.isEmpty { env.publishBestEffort(signed, targets.extra) }
         await env.adopt(signed, request.privateTags)
         return .published(report)

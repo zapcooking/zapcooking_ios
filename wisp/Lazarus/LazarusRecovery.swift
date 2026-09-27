@@ -118,13 +118,17 @@ nonisolated struct LazarusDelta: Sendable, Equatable {
     /// Either version carries encrypted private items that weren't
     /// decrypted, so the changes cover public tags only.
     var privateUnknown: Bool
+    /// The current version is the side that wasn't decrypted: the restore
+    /// may drop items the added/removed counts can't see, so it counts as a
+    /// shrink and needs its own confirmation even at zero counted removals.
+    var currentPrivateUnknown: Bool
 
     var addedCount: Int { added.count }
     var removedCount: Int { removed.count }
     /// The restore grows the list.
-    var grows: Bool { !added.isEmpty && added.count >= removed.count }
+    var grows: Bool { !added.isEmpty && added.count >= removed.count && !currentPrivateUnknown }
     /// The restore shrinks the list below current: needs its own confirmation.
-    var shrinks: Bool { removed.count > added.count }
+    var shrinks: Bool { removed.count > added.count || currentPrivateUnknown }
 }
 
 nonisolated struct LazarusProfileChange: Sendable, Equatable {
@@ -706,7 +710,8 @@ nonisolated enum Lazarus {
         return LazarusDelta(
             added: chosenTags.filter { !currentIds.contains(itemIdentity($0, kind: chosen.kind)) },
             removed: currentTags.filter { !chosenIds.contains(itemIdentity($0, kind: chosen.kind)) },
-            privateUnknown: chosenItems.unknown || currentItems.unknown
+            privateUnknown: chosenItems.unknown || currentItems.unknown,
+            currentPrivateUnknown: currentItems.unknown
         )
     }
 

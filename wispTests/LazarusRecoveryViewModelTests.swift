@@ -238,3 +238,81 @@ struct LazarusRecoveryViewModelTests {
         #expect(io.published.isEmpty)
     }
 }
+
+/// Copilot review: the relay-list lookup suspends until released, so a test
+/// can dismiss the screen mid-plan and check the history fetch never starts
+/// afterwards.
+private final class GatedPlanIO: LazarusRelayIO, @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [CheckedContinuation<LazarusRelayAnswer, Never>] = []
+    private var _planWaiting = false
+    private var _fetchQueries = 0
+
+    var planWaiting: Bool { lock.withLock { _planWaiting } }
+    var fetchQueries: Int { lock.withLock { _fetchQueries } }
+
+    func query(relay: String, filter: LazarusFilter, timeout: TimeInterval) async -> LazarusRelayAnswer {
+        if filter.kinds == [10002] {
+            return await withCheckedContinuation { continuation in
+                lock.lock()
+                _planWaiting = true
+                pending.append(continuation)
+                lock.unlock()
+            }
+        }
+        lock.withLock { _fetchQueries += 1 }
+        return LazarusRelayAnswer(events: [], outcome: .answered)
+    }
+
+    func publish(event: NostrEvent, relay: String, timeout: TimeInterval) async -> LazarusPublishOutcome {
+        .failed
+    }
+
+    func closeAll() async {}
+
+    func releasePlan() {
+        let waiting: [CheckedContinuation<LazarusRelayAnswer, Never>] = lock.withLock {
+            _planWaiting = false
+            let waiting = pending
+            pending = []
+            return waiting
+        }
+        for continuation in waiting {
+            continuation.resume(returning: LazarusRelayAnswer(events: [], outcome: .answered))
+        }
+    }
+}
+
+struct LazarusScanLifecycleTests {
+
+    private static let sets = LazarusRelaySets(
+        defaults: ["wss://default.example"],
+        standIns: ["wss://default.example"],
+        archival: ["wss://hist.example"]
+    )
+
+    /// Copilot review: dismissing the screen while the relay-list lookup is
+    /// in flight must stop the scan before the history fetch — otherwise the
+    /// fetch opens fresh sockets after `close()` closed everything.
+    @MainActor
+    @Test func aDismissedScanNeverStartsTheHistoryFetch() async throws {
+        let keypair = try LazarusFixture.keypair()
+        let io = GatedPlanIO()
+        let pubkey = keypair.pubkey
+        let model = LazarusRecoveryViewModel(keypair: keypair, initialKind: 3, io: io, sets: Self.sets) { env in
+            env.activePubkey = { pubkey }
+            env.localCopy = { _, _ in nil }
+            env.adopt = { _, _ in }
+        }
+        model.startScan()
+        let deadline = Date().addingTimeInterval(5)
+        while !io.planWaiting {
+            #expect(Date() < deadline, "relay-list lookup never reached the gate")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        model.close()
+        io.releasePlan()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(io.fetchQueries == 0)
+    }
+}

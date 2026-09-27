@@ -119,6 +119,67 @@ struct LazarusPublisherTests {
         return nil
     }
 
+    // MARK: - Review follow-ups
+
+    /// Copilot review: the publisher is a signing surface, so it applies the
+    /// scan's validation to the chosen version itself. A tampered copy of a
+    /// real event (id kept, content swapped) is refused before the re-read,
+    /// and nothing is signed or published.
+    @Test func refusesATamperedChosenVersionBeforeReadingOrSigning() async throws {
+        let keypair = try LazarusFixture.keypair()
+        let real = try followList(keypair, 40, Self.now - 86_400)
+        let forged = NostrEvent(
+            id: real.id, pubkey: real.pubkey, kind: real.kind, createdAt: real.createdAt,
+            tags: real.tags, content: "{\"injected\":true}", sig: real.sig
+        )
+        let f = try fixture(keypair: keypair)
+        let outcome = await f.publisher.restore(request(f, chosen: forged, reviewed: nil))
+        #expect(failure(outcome) != nil)
+        #expect(f.trace.reads.isEmpty)
+        #expect(f.trace.signCalls == 0)
+        #expect(f.trace.published.isEmpty)
+    }
+
+    /// Copilot review: a restore whose screen went away mid-re-read stops
+    /// before signing. Cancellation is observed after the re-read; the
+    /// ViewModel separately drops the result by generation.
+    @Test func aCancelledRestoreStopsBeforeSigning() async throws {
+        let keypair = try LazarusFixture.keypair()
+        let healthy = try followList(keypair, 40, Self.now - 86_400)
+        let trace = Trace()
+        let env = LazarusPublisher.Environment(
+            readCurrent: { _, _, _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return [LazarusReadAnswer(events: [], answered: true)]
+            },
+            localCopy: { _, _ in nil },
+            activePubkey: { keypair.pubkey },
+            now: { Self.now },
+            sign: { signing, draft in
+                trace.signCalls += 1
+                return try await Signer.sign(
+                    keypair: signing, kind: draft.kind, tags: draft.tags,
+                    content: draft.content, createdAt: draft.createdAt
+                )
+            },
+            publish: { event, relays in
+                trace.published.append((event, relays))
+                return [:]
+            },
+            publishBestEffort: { _, _ in },
+            adopt: { _, _ in }
+        )
+        let request = LazarusPublisher.Request(
+            chosen: healthy, reviewedCurrent: nil, keypair: keypair,
+            writeRelays: Self.writeRelays, answeredRelays: [],
+            standIns: ["wss://default.example"], privateTags: nil, allowUnconfirmed: false
+        )
+        let outcome = await LazarusPublisher(env: env).restore(request)
+        #expect(failure(outcome) != nil)
+        #expect(trace.signCalls == 0)
+        #expect(trace.published.isEmpty)
+    }
+
     // MARK: - Re-read and dating
 
     /// The clobber was published elsewhere and the write relays still hold an

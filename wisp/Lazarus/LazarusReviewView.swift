@@ -253,12 +253,28 @@ struct LazarusReviewView: View {
 
     /// Single-line action buttons, matching the Android screen. The version
     /// each one publishes is named in the header above, never on the button.
+
+    /// A shrink the counts can see names what it removes; a shrink caused by
+    /// undecryptable current-side items says what is actually at risk.
+    private func shrinkContinueText(_ delta: LazarusDelta) -> String {
+        delta.currentPrivateUnknown && delta.removedCount == 0
+            ? "Continue: your current version holds encrypted items that couldn't be counted"
+            : "Continue: this removes \(profile.itemsLabel(delta.removedCount))"
+    }
+
+    private func shrinkNoticeText(_ delta: LazarusDelta) -> String {
+        let removal = delta.currentPrivateUnknown && delta.removedCount == 0
+            ? "it may remove items that couldn't be decrypted and counted"
+            : "it removes \(profile.itemsLabel(delta.removedCount)) you have now"
+        return "This restore shrinks your \(profile.name.lowercased()) below the current version: \(removal) and adds \(delta.addedCount.formatted())."
+    }
+
     @ViewBuilder
     private func restoreControls(_ candidate: LazarusCandidate, review: LazarusReview) -> some View {
         if let delta = review.delta, delta.shrinks {
             if review.shrinkArmed {
                 VStack(alignment: .leading, spacing: 10) {
-                    LazarusNotice(text: "This restore shrinks your \(profile.name.lowercased()) below the current version: it removes \(profile.itemsLabel(delta.removedCount)) you have now and adds \(delta.addedCount.formatted()).", style: .error)
+                    LazarusNotice(text: shrinkNoticeText(delta), style: .error)
                     Button(role: .destructive) {
                         model.restore()
                     } label: {
@@ -276,7 +292,7 @@ struct LazarusReviewView: View {
                 Button {
                     model.armShrinkConfirmation(true)
                 } label: {
-                    Text("Continue: this removes \(profile.itemsLabel(delta.removedCount))")
+                    Text(shrinkContinueText(delta))
                         .frame(maxWidth: .infinity)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)

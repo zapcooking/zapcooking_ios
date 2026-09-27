@@ -157,6 +157,9 @@ final class LazarusRecoveryViewModel {
         phase = .scanning
         track(Task {
             let plan = await engine.plan(pubkey: pubkey, appCopy: appCopy)
+            // The screen went away during the relay-list lookup: stop here,
+            // so the fetch can't open fresh sockets after `close()`.
+            guard token == self.generation, !Task.isCancelled else { return }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: plan.relays)
             let prepared = await Task.detached(priority: .userInitiated) {
                 let decrypted = Self.decrypt(page.tagged.map(\.event), with: decryptor, profile: profile, known: [:], failed: [])
@@ -184,6 +187,7 @@ final class LazarusRecoveryViewModel {
         let cursors = scan.olderCursors
         let relays = cursors.keys.sorted()
         track(Task {
+            guard token == self.generation, !Task.isCancelled else { return }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: relays, cursors: cursors)
             await self.merge(page, token: token) { current, tags in
                 Lazarus.mergeOlder(profile, current, page: page, privateTags: tags)
@@ -208,6 +212,7 @@ final class LazarusRecoveryViewModel {
         let token = generation
         let profile = self.profile
         track(Task {
+            guard token == self.generation, !Task.isCancelled else { return }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: relays)
             await self.merge(page, token: token) { current, tags in
                 Lazarus.mergeRetry(profile, current, page: page, writeRelays: plan.write, privateTags: tags)
