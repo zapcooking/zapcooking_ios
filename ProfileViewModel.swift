@@ -145,6 +145,9 @@ final class ProfileViewModel {
                 sortedReplies.removeAll(where: drop)
             }
         }
+        // Registered here rather than in `start()` so a block or report made
+        // while the first load is in flight still lands.
+        observeContentHidden()
     }
 
     private func observeContentHidden() {
@@ -177,7 +180,6 @@ final class ProfileViewModel {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
-        observeContentHidden()
 
         // Drop this pubkey from the watcher's exhausted set so explicit profile
         // navigation re-tries even after a prior batched fetch came up empty.
