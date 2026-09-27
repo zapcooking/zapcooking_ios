@@ -41,6 +41,20 @@ final class AppSettings {
         }
     }
 
+    /// Which tab the app opens on. Feed is the default; Recipes stays a
+    /// choice for the food-first reader.
+    enum StartupScreen: String, CaseIterable {
+        case recipes
+        case feed
+
+        var label: String {
+            switch self {
+            case .recipes: "Recipes"
+            case .feed:    "Feed"
+            }
+        }
+    }
+
     private struct Keys {
         static let largeText = "wisp_settings_large_text"
         static let colorScheme = "wisp_settings_color_scheme"
@@ -52,6 +66,7 @@ final class AppSettings {
         static let fiatCurrency = "wisp_settings_fiat_currency"
         static let notificationSoundsEnabled = "wisp_settings_notification_sounds_enabled"
         static let notificationFeedStyle = "wisp_settings_notification_feed_style"
+        static let startupScreen = "wisp_settings_startup_screen"
         static let postUndoTimerEnabled = "wisp_settings_post_undo_timer_enabled"
         static let postUndoTimerSeconds = "wisp_settings_post_undo_timer_seconds"
         static let postUndoTimerForReplies = "wisp_settings_post_undo_timer_for_replies"
@@ -116,6 +131,11 @@ final class AppSettings {
     /// interface settings, and the choice survives relaunch.
     var notificationFeedStyle: NotificationFeedStyle {
         didSet { UserDefaults.standard.set(notificationFeedStyle.rawValue, forKey: Keys.notificationFeedStyle) }
+    }
+    /// The tab the app opens on. Read once where `MainView` is created, so
+    /// changing it never switches tabs under the user mid-session.
+    var startupScreen: StartupScreen {
+        didSet { UserDefaults.standard.set(startupScreen.rawValue, forKey: Keys.startupScreen) }
     }
     /// When true, publishing a top-level post (and optionally replies — see
     /// `postUndoTimerForReplies`) waits `postUndoTimerSeconds` before sending,
@@ -197,6 +217,8 @@ final class AppSettings {
         self.notificationSoundsEnabled = defaults.object(forKey: Keys.notificationSoundsEnabled) as? Bool ?? true
         let notifStyleRaw = defaults.string(forKey: Keys.notificationFeedStyle) ?? NotificationFeedStyle.expanded.rawValue
         self.notificationFeedStyle = NotificationFeedStyle(rawValue: notifStyleRaw) ?? .expanded
+        let startupRaw = defaults.string(forKey: Keys.startupScreen) ?? StartupScreen.feed.rawValue
+        self.startupScreen = StartupScreen(rawValue: startupRaw) ?? .feed
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
         let storedSeconds = defaults.object(forKey: Keys.postUndoTimerSeconds) as? Int ?? 10
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
