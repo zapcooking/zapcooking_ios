@@ -74,10 +74,14 @@ final class OnboardingViewModel {
         FollowsCache.shared.update(pubkey: keypair.pubkey, follows: followPubkeys, createdAt: followCreatedAt)
 
         guard !followPubkeys.isEmpty else {
-            // Mark this exit too. A relay timeout looks the same as an empty
-            // follow list, and leaving the flag unset sent the account back
-            // through this screen on every launch.
-            NostrKey.markOnboardingComplete(pubkey: keypair.pubkey)
+            // Mark this exit only when the relays answered with a profile or
+            // follow list: the account really follows nobody. A total
+            // timeout lands here too, and marking it would leave the account
+            // with no scoreboard and nothing that rebuilds one — so it stays
+            // unmarked and retries on the next launch.
+            if !profileAndFollows.isEmpty {
+                NostrKey.markOnboardingComplete(pubkey: keypair.pubkey)
+            }
             phase = .done
             isReady = true
             return
