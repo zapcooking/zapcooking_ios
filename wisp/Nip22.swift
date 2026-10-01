@@ -9,9 +9,10 @@ import Foundation
 ///
 /// Two jobs. Rendering: recover enough context that a comment on a web page
 /// doesn't read as a stray remark with no subject — see `ExternalRef`.
-/// Composing: a reply to an externally-rooted comment must itself be a
-/// kind 1111 with the root's `I`/`K` tags, never a kind 1 with NIP-10 tags
-/// — see `buildReplyTags(to:relayHint:)` and `ComposeViewModel`.
+/// Composing: a reply to a comment must itself be a kind 1111 carrying the
+/// parent's root scope forward, whether that root is an external identifier
+/// or a nostr event — see `buildReplyTags(to:relayHint:)` and
+/// `ComposeViewModel`.
 nonisolated enum Nip22 {
     static let kindComment = 1111
 
@@ -143,27 +144,61 @@ nonisolated enum Nip22 {
     /// Build the tag set for a kind-1111 reply to `parent`, carrying its root
     /// scope forward unchanged and pointing the lowercase tags at `parent`.
     ///
-    /// Only the external-root case is supported, which is the one Wisp can
-    /// currently reply to.
+    /// Any comment parent qualifies — externally rooted (`I`) or event-rooted
+    /// (`E`/`A`). NIP-22 forbids answering a comment with a kind-1: the root
+    /// scope has to survive the hop, and a kind-1's NIP-10 `e` tags can neither
+    /// express an `I` root nor stay visible to `#E` readers, which is how a
+    /// branch silently drops out of every comment-aware client. The uppercase
+    /// scope is copied verbatim from the parent (the same thing Ditto does in
+    /// `usePostComment`), the lowercase side points at the parent event.
+    /// Returns nil when `parent` isn't a comment carrying a root scope —
+    /// callers fall back to NIP-10 kind-1 threading for plain notes.
     static func buildReplyTags(to parent: NostrEvent, relayHint: String = "") -> [[String]]? {
-        guard let root = externalRoot(of: parent) else { return nil }
+        guard isComment(parent) else { return nil }
+        // Copy the root scope verbatim, one tag per name: `E`/`A`/`I` name the
+        // root, `K` its kind, `P` its author. A parent without any of E/A/I is
+        // malformed — the reply would be unscoped and unthreadable, so refuse.
+        let rootScopeNames: Set<String> = ["E", "A", "I", "K", "P"]
+        var seenNames = Set<String>()
+        let rootScope = parent.tags.filter { tag in
+            guard let name = tag.first, rootScopeNames.contains(name),
+                  tag.count >= 2, !tag[1].isEmpty else { return false }
+            return seenNames.insert(name).inserted
+        }
+        guard rootScope.contains(where: { $0[0] == "E" || $0[0] == "A" || $0[0] == "I" }) else {
+            return nil
+        }
 
-        var tags: [[String]] = []
-        var rootTag = ["I", root.value]
-        if let hint = root.hint { rootTag.append(hint) }
-        tags.append(rootTag)
-        tags.append(["K", root.kind])
-
+        var tags = rootScope
         // Parent is the comment itself — an event — so the lowercase side uses
-        // e/k/p rather than repeating the I tag.
+        // e/k/p regardless of which form the root scope takes.
         tags.append(["e", parent.id, relayHint, parent.pubkey])
         tags.append(["k", String(kindComment)])
         tags.append(["p", parent.pubkey])
-
-        // Carry the root author forward when the parent named one.
-        if let rootAuthor = parent.tags.first(where: { $0.count >= 2 && $0[0] == "P" }) {
-            tags.append(rootAuthor)
-        }
         return tags
+    }
+
+    /// Whether `event` belongs on the thread screen rooted at `targets` — the
+    /// thread's root id and/or focal id, plus any NIP-22 comment anchors.
+    ///
+    /// The two threading systems answer this differently. A kind-1 NIP-10
+    /// reply carries the conversation root in a lowercase `e` tag, so a
+    /// `#e = root` filter reaches its whole tree. A NIP-22 comment carries
+    /// only its *immediate parent* in lowercase `e` and names the root in
+    /// uppercase `E` — so a comment-to-comment reply matches no lowercase
+    /// check even though it hangs off the same root. Thread display and the
+    /// live reply stream must accept both forms.
+    static func threadsOffRoot(_ event: NostrEvent, targets: Set<String>) -> Bool {
+        var parentEventIds: [String] = []
+        var rootEventIds: [String] = []
+        for tag in event.tags where tag.count >= 2 {
+            switch tag[0] {
+            case "e": parentEventIds.append(tag[1])
+            case "E": rootEventIds.append(tag[1])
+            default: break
+            }
+        }
+        return parentEventIds.contains(where: targets.contains)
+            || rootEventIds.contains(where: targets.contains)
     }
 }

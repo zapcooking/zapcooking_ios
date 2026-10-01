@@ -491,6 +491,7 @@ struct PostCardView: View {
                             relays: combinedRelays(for: displayEvent.id),
                             tags: displayEvent.tags,
                             createdAt: displayEvent.createdAt,
+                            kind: displayEvent.kind,
                             pollEvent: (displayEvent.kind == Nip88.kindPoll || displayEvent.kind == Nip69.kindZapPoll) ? displayEvent : nil,
                             profiles: profiles,
                             onProfileTap: onProfileTap,
@@ -687,6 +688,7 @@ struct PostCardView: View {
                         relays: combinedRelays(for: displayEvent.id),
                         tags: displayEvent.tags,
                         createdAt: displayEvent.createdAt,
+                        kind: displayEvent.kind,
                         pollEvent: (displayEvent.kind == Nip88.kindPoll || displayEvent.kind == Nip69.kindZapPoll) ? displayEvent : nil,
                         profiles: profiles,
                         onProfileTap: onProfileTap,
@@ -1075,6 +1077,7 @@ struct PostCardView: View {
                     relays: combinedRelays(for: displayEvent.id),
                     tags: displayEvent.tags,
                     createdAt: displayEvent.createdAt,
+                    kind: displayEvent.kind,
                     pollEvent: nil,
                     profiles: profiles,
                     onProfileTap: onProfileTap,
@@ -1224,6 +1227,7 @@ struct PostCardView: View {
             ActionRowButton(item: ActionRowItem(glyph: .symbol(expanded ? "chevron.up" : "chevron.down"))) {
                 withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
             }
+            .accessibilityIdentifier("post-details-toggle")
         }
         .foregroundStyle(.secondary)
         .onGeometryChange(for: CGFloat.self) { proxy in
@@ -1436,6 +1440,7 @@ struct PostCardView: View {
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("post-overflow-menu")
         .popover(isPresented: $showOverflowMenu) {
             VStack(alignment: .leading, spacing: 0) {
                 popoverMenuItem(title: "Add to List", systemImage: "bookmark") {
@@ -2356,6 +2361,10 @@ private struct NoteDetailsPanel: View {
     let relays: [String]
     let tags: [[String]]
     let createdAt: Int
+    /// The note's event kind, shown above "Seen on" — next to "Posted via …"
+    /// it answers which kind was used by which client (e.g. a Ditto reply is
+    /// KIND 1111 · COMMENT).
+    let kind: Int
     /// Set when the note is a NIP-88 (1068) or NIP-69 (6969) poll. Drives the
     /// "Votes" section that groups voters under their chosen option.
     let pollEvent: NostrEvent?
@@ -2406,6 +2415,7 @@ private struct NoteDetailsPanel: View {
             if !reactors.isEmpty {
                 reactionsSection
             }
+            kindSection
             if !relays.isEmpty {
                 seenOnSection
             }
@@ -2775,6 +2785,15 @@ private struct NoteDetailsPanel: View {
             map[shortcode] = url
         }
         return map
+    }
+
+    /// The event kind, styled like the other drawer rows so it sits beside
+    /// "Posted via …" as the who-made-this pair: kind from `EventKindLabel`,
+    /// client from the `client` tag.
+    private var kindSection: some View {
+        Text(EventKindLabel.label(for: kind))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 
     private var seenOnSection: some View {

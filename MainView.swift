@@ -202,6 +202,19 @@ struct MainView: View {
         .task {
             await cookingTimers.prepareNotifications()
         }
+        #if DEBUG
+        .task {
+            // `-ThreadHarnessSeed <id> [-ThreadHarnessAuthor <pubkey>]` — the
+            // same launch-argument harness pattern as `-ComposerDragHarness`:
+            // push the thread screen at launch so relay-driven verification
+            // needs no UI driving. No-op without the launch argument.
+            if let seed = ThreadHarness.seedEventId {
+                try? await Task.sleep(for: .seconds(3))
+                selectedTab = .feed
+                feedPath.append(ThreadRoute(eventId: seed, authorPubkey: ThreadHarness.authorHint))
+            }
+        }
+        #endif
         .environment(walletStore)
         .environment(composePresenter)
         .onReceive(NotificationCenter.default.publisher(for: .openWalletTab)) { _ in
