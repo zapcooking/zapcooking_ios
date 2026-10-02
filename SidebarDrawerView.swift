@@ -44,6 +44,9 @@ struct SidebarDrawerView: View {
     /// Settings → About: policy links (privacy, terms, child safety) — the
     /// in-app placement Android uses (drawer → About → Policies).
     var onOpenAbout: () -> Void = {}
+    /// Settings → Data Recovery (Lazarus): restore a list another client
+    /// overwrote, from relay history.
+    var onOpenDataRecovery: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
     @Environment(WalletStore.self) private var walletStore
@@ -420,6 +423,10 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "face.smiling", label: "Custom Emojis", indented: true) {
                 onOpenCustomEmojis()
             }
+            DrawerRow(icon: "clock.arrow.circlepath", label: "Data Recovery", indented: true) {
+                onOpenDataRecovery()
+            }
+            .accessibilityIdentifier("drawer-data-recovery")
             DrawerRow(icon: "info.circle", label: "About", indented: true) { onOpenAbout() }
             // DrawerRow(icon: "heart", label: "Relay Health", indented: true) { onClose() }
             // DrawerRow(icon: "ladybug", label: "Console", indented: true) { onClose() }
