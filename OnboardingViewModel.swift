@@ -46,10 +46,11 @@ final class OnboardingViewModel {
     func startOutboxBuilding() async {
         phase = .fetchingProfile
 
-        let profileAndFollows = await RelayPool.query(
+        let profileAndFollowsResult = await RelayPool.queryDetailed(
             relays: Self.indexerRelays,
             filter: NostrFilter(kinds: [0, 3], authors: [keypair.pubkey])
         )
+        let profileAndFollows = profileAndFollowsResult.events
 
         if let profileEvent = profileAndFollows
             .filter({ $0.kind == 0 })
@@ -79,7 +80,7 @@ final class OnboardingViewModel {
             // timeout lands here too, and marking it would leave the account
             // with no scoreboard and nothing that rebuilds one — so it stays
             // unmarked and retries on the next launch.
-            if !profileAndFollows.isEmpty {
+            if profileAndFollowsResult.relaysResponded > 0 {
                 NostrKey.markOnboardingComplete(pubkey: keypair.pubkey)
             }
             phase = .done
