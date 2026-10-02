@@ -39,6 +39,38 @@ struct InterfaceSettingsView: View {
                     }
                 }
 
+                section(title: "Startup") {
+                    // Same glyphs as the bottom bar, in the bar's order
+                    // (Feed · Recipes), so the choice reads as "the tab I
+                    // know" at a glance.
+                    HStack(spacing: 12) {
+                        ForEach([AppSettings.StartupScreen.feed, .recipes], id: \.self) { screen in
+                            let tab: BottomTab = screen == .feed ? .feed : .recipes
+                            let selected = settings.startupScreen == screen
+                            Button {
+                                settings.startupScreen = screen
+                            } label: {
+                                VStack(spacing: 8) {
+                                    tab.glyph(selected: selected)
+                                    Text(screen.label)
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .padding(.vertical, 14)
+                                .frame(maxWidth: .infinity)
+                                .foregroundStyle(selected ? .white : theme.palette.onSurface)
+                                .background(selected ? theme.primary : theme.palette.surfaceVariant)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open on \(screen.label)")
+                            .accessibilityIdentifier("startup-screen-\(screen.rawValue)")
+                        }
+                    }
+                    Text("The tab the app opens on. Applies the next time you open the app.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.palette.onSurfaceVariant)
+                }
+
                 section(title: "Media") {
                     Toggle("Auto-download media", isOn: $settings.autoLoadMedia)
                         .toggleStyle(SwitchToggleStyle(tint: theme.primary))

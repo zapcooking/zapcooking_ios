@@ -20,10 +20,11 @@ struct MainView: View {
     @State private var groupListVM: GroupListViewModel
     @State private var searchVM: SearchViewModel
     @State private var walletStore: WalletStore
-    // Food-first default (Concern 1.5). `.kitchen` is the My Kitchen hub
-    // (Concern 3.2). `.feed` is the one feed surface (unified feed PR 2): it
-    // renders the OnlyFood list or the general feed by `viewModel.currentKind`.
-    @State private var selectedTab: BottomTab = .recipes
+    // The Open-on Interface setting (Feed by default, Recipes a tap away).
+    // `.kitchen` is the My Kitchen hub (Concern 3.2). `.feed` is the one
+    // feed surface (unified feed PR 2): it renders the OnlyFood list or the
+    // general feed by `viewModel.currentKind`.
+    @State private var selectedTab: BottomTab
     @State private var feedPath = NavigationPath()
     @State private var recipesPath = NavigationPath()
     /// Hoisted out of `MessagesView` (unified feed PR 6) so Messages, now a
@@ -159,6 +160,9 @@ struct MainView: View {
         _searchVM = State(initialValue: SearchViewModel(keypair: keypair))
         _walletStore = State(initialValue: WalletStore(keypair: keypair))
         _onlyfoodFeedVM = State(initialValue: OnlyFoodFeedViewModel(pubkey: keypair.pubkey))
+        // Read once here, so changing the setting applies on the next launch
+        // (or the next login) instead of switching tabs mid-session.
+        _selectedTab = State(initialValue: AppSettings.shared.startupScreen == .feed ? .feed : .recipes)
     }
 
     var body: some View {
@@ -1041,10 +1045,10 @@ struct MainView: View {
                     .allowsHitTesting(selectedTab == .feed)
                     .accessibilityHidden(selectedTab != .feed)
 
-                // Recipes is the launch tab. Kept mounted so the cache-seeded
-                // grid and its ScrollView survive tab changes — the same
-                // reason home stays mounted, and so `.task` cannot re-issue
-                // the feed REQ (§7.4).
+                // Recipes stays mounted so the cache-seeded grid and its
+                // ScrollView survive tab changes — the same reason home
+                // stays mounted, and so `.task` cannot re-issue the feed
+                // REQ (§7.4).
                 recipesTab
                     .opacity(selectedTab == .recipes ? 1 : 0)
                     .allowsHitTesting(selectedTab == .recipes)
@@ -2200,9 +2204,8 @@ struct MainView: View {
 enum BottomTab: String, CaseIterable {
     // Bottom-bar tabs (unified feed §5): Android's bar with Search in the
     // wallet's slot — Feed · Recipes · Search · Messages · Notifications.
-    // Bar ORDER and LAUNCH TAB are separate settings: `MainView.selectedTab`
-    // still launches on `.recipes` (Gate 0-E's food-first lock); Feed
-    // defaulting to OnlyFood carries the food-first story.
+    // Bar ORDER and LAUNCH TAB are separate settings: the launch tab follows
+    // the Open-on Interface setting, which defaults to Feed.
     /// The one feed surface (unified feed PR 2): OnlyFood or the general
     /// feed by `FeedViewModel.currentKind`.
     case feed
