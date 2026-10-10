@@ -1,5 +1,5 @@
 {
-  "originHash" : "226211ae5572ab24646434232543fe925a3bdde36fdcdeb441d8988c2e6a9623",
+  "originHash" : "5a42386395d22e0b0dca14ace2d7c556d84136191f0eadab5868a7279343cc16",
   "pins" : [
     {
       "identity" : "breez-sdk-spark-swift",
@@ -8,24 +8,6 @@
       "state" : {
         "revision" : "5ec711596e508538fd078110bf618a3d4f7c5c9f",
         "version" : "0.23.1"
-      }
-    },
-    {
-      "identity" : "giphy-ios-sdk",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Giphy/giphy-ios-sdk",
-      "state" : {
-        "revision" : "ed91784fe854a8204a9f994282d87f9c18df5fac",
-        "version" : "2.3.1"
-      }
-    },
-    {
-      "identity" : "libwebp-xcode",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SDWebImage/libwebp-Xcode",
-      "state" : {
-        "revision" : "0d60654eeefd5d7d2bef3835804892c40225e8b2",
-        "version" : "1.5.0"
       }
     },
     {

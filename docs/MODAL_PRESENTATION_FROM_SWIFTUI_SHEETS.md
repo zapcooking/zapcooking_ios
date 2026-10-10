@@ -43,6 +43,11 @@ it," and tears down a modal it doesn't own.
 
 ## The Wisp incident (May 2026)
 
+> Historical record: `GifPickerPresenter` and the GIPHY SDK were removed
+> in Oct 2026 — the composer's GIF picker is now a plain SwiftUI sheet
+> over gifs.nostr.build (`GifPickerView.swift`), which needs no UIKit
+> presenter at all. The lesson below outlives the class.
+
 `feat/one-tap-zap` landed a redesigned compose sheet that hosts a few
 helpers via `.background(...)`:
 
@@ -96,8 +101,8 @@ Button {
 } label: { ... }
 ```
 
-When a representable IS the right shape (e.g. `GifPickerPresenter`, which
-needs Giphy's lifecycle hooks), keep the existing pattern but apply the
+When a representable IS the right shape (a controller that needs its
+vendor's lifecycle hooks), keep the existing pattern but apply the
 guarded-dismiss fix above.
 
 ## Audit checklist

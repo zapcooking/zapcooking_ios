@@ -347,7 +347,7 @@ than Android did — but plan against that order of magnitude, not against
 | Kind-30023 article load + render | `ArticleViewModel`, `ArticleView`, `ArticleRoute`, `ArticleCache` | Recipe detail branches from this, exactly as Android branched `ArticleScreen` |
 | **NIP-42 relay AUTH with `auth-required` retry** | `Nip42.buildAuthEvent`, `RelayPool.query` (L274, L593), `GroupRelayPool.publishWithAuthRetry` | ~~Big win~~ **Overstated — writes only** (§7.1). The subscribe/read path needed issue #6 (state machine landed on `issue-6/subscribe-auth`, §7.14); public Nourish/recipe reads turned out not to need AUTH at all (§ Nourish) |
 | Outbox/inbox routing | `RelayScoreBoard`, `RelayPool`, `GroupRelayPool` | Recipe reads fan out over an articles-relay union; publish goes to write relays |
-| Blossom media upload | `BlossomClient.upload`, `GifBlossomUploader` | Recipe cover images |
+| Blossom media upload | `BlossomClient.upload` | Recipe cover images; GIF picks attach by URL instead (`GifSearch`) |
 | Signing | `Signer.sign`, `Schnorr`, `NostrEvent.sign` | Local-key only — see Gate 0-D |
 | Zaps / Lightning | `ZapSender`, `Nip57`, `WalletStore`, `SparkWallet`, `NwcWallet`, `Bolt11`, `LnurlResolver` | Also the biggest App Store risk — §4 |
 | Lists (NIP-51) | `Nip51Lists`, `Nip51UserLists`, `NoteListRepository` | Saved recipes + cookbooks ride on this |
@@ -1417,7 +1417,7 @@ including a legacy `nostrcooking` one and one with a parenthesized d-tag.
   `AboutScreen`, opened in the system browser. The destination privacy
   policy still carries the two retention claims flagged in §4.4 — **web
   policy correction pending**, it gates the App Privacy label, not the link.
-- 4.4 App Privacy nutrition label: OpenAI, Blossom, Giphy,
+- 4.4 App Privacy nutrition label: OpenAI, Blossom, gifs.nostr.build (GIF search),
   Cloudflare analytics (IP + coarse location), crash-report DM relays
 - 4.5 `ITSAppUsesNonExemptEncryption` = `true`; reasoning in §4.4 — **done** (C-G)
 - 4.6 App Review demo account (a seeded npub with recipes + an active Cook+
@@ -1547,7 +1547,7 @@ are fork-only and must be preserved through every port above.
 - Tests: Swift Testing (`import Testing`, `@Test`) under `wispTests/`.
 - Never hand-edit `model-wisp.json`; regenerate `EntityInfo-wisp.generated.swift`
   into **both** `generated/` and the repo root when entities change.
-- Secrets are gitignored bundled resources in `wisp/Resources/` (Breez, Giphy).
+- Secrets are gitignored bundled resources in `wisp/Resources/` (Breez, gifs.nostr.build).
   **Do not introduce xcconfig+Info.plist secret injection** — follow the
   existing pattern.
 - Any backend-contract change lands in **this doc** before the PR merges.

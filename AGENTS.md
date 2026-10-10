@@ -17,7 +17,6 @@ SwiftPM dependencies (resolved via Xcode, no `Package.swift` exists):
 - `objectbox-swift-spm` — embedded event database
 - `swift-secp256k1` (21-DOT-DEV) — Schnorr signing/verification + ECDH
 - `breez-sdk-spark-swift` — Spark (self-custodial Lightning) wallet
-- `giphy-ios-sdk` — GIF picker
 
 ## Build / run / test
 
@@ -44,9 +43,9 @@ The Xcode project mixes two file-management styles:
 API keys ship as gitignored text files in `wisp/Resources/`:
 
 - `wisp/Resources/breez-api-key.txt` (Breez Spark SDK)
-- `wisp/Resources/giphy-api-key.txt` (Giphy)
+- `wisp/Resources/gifs-nostr-build-api-key.txt` (gifs.nostr.build GIF search)
 
-Both have `.example` siblings checked in. `.gitignore` excludes the real files. `BreezConfig` and `GiphyConfig` read them from the bundle at startup, falling back to empty/hardcoded values. Do **not** introduce xcconfig + Info.plist injection for new secrets — follow the bundled-resource pattern.
+Both have `.example` siblings checked in. `.gitignore` excludes the real files. `BreezConfig` and `GifsNostrBuildConfig` read them from the bundle at startup, falling back to empty values. Do **not** introduce xcconfig + Info.plist injection for new secrets — follow the bundled-resource pattern.
 
 `wisp/Resources/nspam/` ships the on-device LightGBM spam model (`model.txt`, `calibration.npz`) and is checked in. `wisp/Resources/bip39-english.txt` is the BIP-39 wordlist.
 
@@ -132,10 +131,10 @@ The `Nip*.swift` files at the repo root each implement one NIP. Quick map: 04 (l
 - **NWC** is a home-grown NIP-47 implementation (`NwcWallet`, `NwcConnection`) over a relay socket — no SDK. Uses NIP-04 if the wallet doesn't support NIP-44 v2.
 - **Zaps** (`ZapSender`, `Nip57`): resolve LNURL from recipient's `lud16`, build signed kind-9734 zap request, fetch bolt11 invoice from LNURL callback, pay via active wallet. `paymentHash → recipientPubkey` is recorded in UserDefaults for history.
 
-### Blossom media + Giphy
+### Blossom media + GIF search
 
 - `BlossomClient.upload` walks the user's server list and tries `/media` then `/upload` per server, returning on first success. Server list is a kind-10063 event published to write relays, cached in UserDefaults; default fallback `https://blossom.primal.net`. Edited via `MediaServersView`.
-- Giphy is a separate path: the GIPHY iOS SDK shows the picker, and `GifBlossomUploader.rehost` downloads the Giphy CDN bytes and re-uploads to Blossom, falling back to the original Giphy URL on failure.
+- GIFs are a separate, upload-free path: the composer's `GifPickerView` searches gifs.nostr.build directly (`GifSearch`/`GifSearchClient`, Bearer key from the bundled resource — native clients may hold the key, unlike browsers). Every result is already hosted on a Nostr media host, so picking attaches the URL as-is with the GIF's title seeded as the alt; un-publishable results (http links, mp4s, junk shapes) are dropped at parse time.
 
 ### NSpam (on-device LightGBM) + WoT filtering
 
