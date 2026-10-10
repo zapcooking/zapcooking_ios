@@ -95,7 +95,7 @@ A built-in non-custodial Lightning wallet powered by [Breez SDK (Spark)](https:/
 - **Blossom** — upload images and media to decentralized [Blossom](https://github.com/hzrd149/blossom) servers
 - Per-account Blossom server list (kind 10063), edited in app
 - Multi-server fallback — tries each configured server until one succeeds
-- **Giphy** — built-in GIF picker; selected GIFs are re-hosted to your Blossom servers, with the original Giphy URL as a fallback
+- **GIFs** — built-in picker on [gifs.nostr.build](https://gifs.nostr.build); every result is already hosted on a Nostr media host, so picks attach by URL (nothing is re-uploaded) with the GIF's title seeded as alt text
 
 ### Performance
 
@@ -266,7 +266,7 @@ TestFlight and App Store availability will be announced on the [Releases](../../
 - macOS with Xcode 26 or later
 - An Apple Developer account if you want to run on a physical device
 - (Optional) Breez Spark API key for Lightning wallet features
-- (Optional) Giphy SDK API key for the GIF picker
+- (Optional) gifs.nostr.build API key for the GIF picker
 
 ### Build
 
@@ -295,10 +295,10 @@ Wisp reads optional API keys from gitignored bundled resources. Copy the example
 
 ```bash
 cp wisp/Resources/breez-api-key.txt.example wisp/Resources/breez-api-key.txt
-cp wisp/Resources/giphy-api-key.txt.example wisp/Resources/giphy-api-key.txt
+cp wisp/Resources/gifs-nostr-build-api-key.txt.example wisp/Resources/gifs-nostr-build-api-key.txt
 ```
 
-Wisp will build and run without these — you'll just lose Spark wallet support and the Giphy GIF picker, respectively.
+Wisp will build and run without these — you'll just lose Spark wallet support and GIF search, respectively.
 
 ### Adding New Files
 
@@ -363,7 +363,7 @@ Contributions are welcome. Wisp is open source and community help makes it bette
 | Cryptography | [`swift-secp256k1`](https://github.com/21-DOT-DEV/swift-secp256k1) (Schnorr / ECDH), in-tree NIP-44 v2 (ChaCha20 + HMAC-SHA256), in-tree BIP-39 |
 | ML | LightGBM (on-device nspam classifier) with MurmurHash3 feature hashing |
 | Lightning | [Breez SDK Spark](https://github.com/breez/breez-sdk-spark) + NWC (NIP-47) |
-| Media | AVFoundation, [Giphy iOS SDK](https://github.com/Giphy/giphy-ios-sdk), Blossom upload |
+| Media | AVFoundation, [gifs.nostr.build](https://gifs.nostr.build) GIF search, Blossom upload |
 | Build | Xcode 26 / SwiftPM (no `Package.swift` — resolved via the Xcode project) |
 
 ---

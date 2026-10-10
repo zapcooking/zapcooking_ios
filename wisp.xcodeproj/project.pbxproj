@@ -202,10 +202,8 @@
 		4CFF21120000000000000309 /* AvatarPrefetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21110000000000000309 /* AvatarPrefetcher.swift */; };
 		4CFF2114000000000000030A /* EmojiText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF2113000000000000030A /* EmojiText.swift */; };
 		4CFF21A20000000000000901 /* NotificationEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF21A10000000000000901 /* NotificationEffects.swift */; };
-		4CFF610100000000000A0001 /* GiphyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0001 /* GiphyConfig.swift */; };
 		4CFF610100000000000A0004 /* GifPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0004 /* GifPickerView.swift */; };
-		4CFF610100000000000A0006 /* GiphyUISDK in Frameworks */ = {isa = PBXBuildFile; productRef = 4CFF610000000000000A0006 /* GiphyUISDK */; };
-		4CFF610100000000000A0007 /* GifBlossomUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0007 /* GifBlossomUploader.swift */; };
+		4CFF610100000000000A000F /* GifSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000F /* GifSearch.swift */; };
 		4CFF610100000000000A0008 /* Nip88.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0008 /* Nip88.swift */; };
 		4CFF610100000000000A0009 /* Nip69.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A0009 /* Nip69.swift */; };
 		4CFF610100000000000A000A /* PollSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF610000000000000A000A /* PollSection.swift */; };
@@ -569,9 +567,8 @@
 		4CFF21110000000000000309 /* AvatarPrefetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarPrefetcher.swift; sourceTree = "<group>"; };
 		4CFF2113000000000000030A /* EmojiText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiText.swift; sourceTree = "<group>"; };
 		4CFF21A10000000000000901 /* NotificationEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationEffects.swift; sourceTree = "<group>"; };
-		4CFF610000000000000A0001 /* GiphyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiphyConfig.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0004 /* GifPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifPickerView.swift; sourceTree = "<group>"; };
-		4CFF610000000000000A0007 /* GifBlossomUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifBlossomUploader.swift; sourceTree = "<group>"; };
+		4CFF610000000000000A000F /* GifSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifSearch.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0008 /* Nip88.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip88.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A0009 /* Nip69.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip69.swift; sourceTree = "<group>"; };
 		4CFF610000000000000A000A /* PollSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollSection.swift; sourceTree = "<group>"; };
@@ -722,7 +719,6 @@
 				4CDA88092F9C6CFB0079A1BA /* ObjectBox.xcframework in Frameworks */,
 				4CDD000100000000000000B1 /* P256K in Frameworks */,
 				4CEE000100000000000000B1 /* BreezSdkSpark in Frameworks */,
-				4CFF610100000000000A0006 /* GiphyUISDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1032,9 +1028,8 @@
 				4CFADE0000000000000F100B /* SpamScorer.swift */,
 				4CFADE0000000000000F100C /* SafetySettingsView.swift */,
 				4CFADE0000000000000F100D /* TranslationRepository.swift */,
-				4CFF610000000000000A0001 /* GiphyConfig.swift */,
 				4CFF610000000000000A0004 /* GifPickerView.swift */,
-				4CFF610000000000000A0007 /* GifBlossomUploader.swift */,
+				4CFF610000000000000A000F /* GifSearch.swift */,
 				4CFF610000000000000A0008 /* Nip88.swift */,
 				4CFF610000000000000A0009 /* Nip69.swift */,
 				4CFF610000000000000A000A /* PollSection.swift */,
@@ -1142,7 +1137,6 @@
 				4CDA88082F9C6CFB0079A1BA /* ObjectBox.xcframework */,
 				4CDD000000000000000000B1 /* P256K */,
 				4CEE000000000000000000B1 /* BreezSdkSpark */,
-				4CFF610000000000000A0006 /* GiphyUISDK */,
 			);
 			productName = wisp;
 			productReference = 4CDA87AB2F9C4BC10079A1BA /* wisp.app */;
@@ -1243,7 +1237,6 @@
 				4CDA88052F9C6CFB0079A1BA /* XCRemoteSwiftPackageReference "objectbox-swift-spm" */,
 				4CDD000200000000000000B2 /* XCRemoteSwiftPackageReference "swift-secp256k1" */,
 				4CEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */,
-				4CFF610200000000000A0006 /* XCRemoteSwiftPackageReference "giphy-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4CDA87AC2F9C4BC10079A1BA /* Products */;
@@ -1560,9 +1553,8 @@
 				4CFADE0100000000000F100B /* SpamScorer.swift in Sources */,
 				4CFADE0100000000000F100C /* SafetySettingsView.swift in Sources */,
 				4CFADE0100000000000F100D /* TranslationRepository.swift in Sources */,
-				4CFF610100000000000A0001 /* GiphyConfig.swift in Sources */,
 				4CFF610100000000000A0004 /* GifPickerView.swift in Sources */,
-				4CFF610100000000000A0007 /* GifBlossomUploader.swift in Sources */,
+				4CFF610100000000000A000F /* GifSearch.swift in Sources */,
 				4CFF610100000000000A0008 /* Nip88.swift in Sources */,
 				4CFF610100000000000A0009 /* Nip69.swift in Sources */,
 				4CFF610100000000000A000A /* PollSection.swift in Sources */,
@@ -2107,14 +2099,6 @@
 				version = 0.23.1;
 			};
 		};
-		4CFF610200000000000A0006 /* XCRemoteSwiftPackageReference "giphy-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Giphy/giphy-ios-sdk";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.2.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -2130,13 +2114,8 @@
 		};
 		4CEE000000000000000000B1 /* BreezSdkSpark */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 4CEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */;
+			package = 4CCEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */;
 			productName = BreezSdkSpark;
-		};
-		4CFF610000000000000A0006 /* GiphyUISDK */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 4CFF610200000000000A0006 /* XCRemoteSwiftPackageReference "giphy-ios-sdk" */;
-			productName = GiphyUISDK;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
