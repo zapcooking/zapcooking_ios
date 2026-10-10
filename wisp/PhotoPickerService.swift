@@ -39,8 +39,9 @@ enum PhotoPickerService {
         let picker = PHPickerViewController(configuration: config)
         // Block swipe-down dismiss — Add / Cancel remain as explicit
         // exits. Does not block programmatic dismiss, which is what
-        // the GifPickerPresenter ancestor-dismiss bug was triggering;
-        // that bug is fixed at the source.
+        // the ancestor-dismiss bug (see
+        // docs/MODAL_PRESENTATION_FROM_SWIFTUI_SHEETS.md) was
+        // triggering; that bug is fixed at the source.
         picker.isModalInPresentation = true
 
         let delegate = PickerDelegate(onPicked: onPicked, onCancel: onCancel)
