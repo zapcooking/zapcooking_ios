@@ -73,9 +73,11 @@ struct KeychainBackupService {
         return files.sorted { $0.createdAt > $1.createdAt }.map { $0.file }
     }
 
-    /// Creates a new keychain item with a fresh UUID account name. Each call
-    /// writes a distinct item — no replace path.
-    func uploadBackup(payload: String) async throws {
+    /// Creates a new keychain item with a fresh UUID account name and returns
+    /// that name (the backup ID). Each call writes a distinct item — no
+    /// replace path.
+    @discardableResult
+    func uploadBackup(payload: String) async throws -> String {
         try ensureICloudAvailable(op: "upload")
         let account = Self.prefix + UUID().uuidString.lowercased()
         guard let data = payload.data(using: .utf8) else {
@@ -93,6 +95,7 @@ struct KeychainBackupService {
         guard status == errSecSuccess else {
             throw KeychainBackupError(kind: .underlying(status), op: "upload")
         }
+        return account
     }
 
     func deleteBackup(backupID: String) async throws {

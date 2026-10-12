@@ -299,6 +299,8 @@ struct AccountDeletionTests {
         let model = DeleteAccountViewModel(keypair: kp, backups: store, requester: requester, deviceWipe: wipe)
 
         await model.checkBackups()
+        #expect(model.backupNote == .unchecked(count: 1))
+        model.checkWithApple()
         #expect(model.step == .needsApple(count: 1))
         model.forgotPin()
         model.removeAllBackups()
@@ -351,6 +353,79 @@ struct AccountDeletionTests {
         #expect(r == DeletionRequestReceipt(status: "pending", billing: .none, scheduledPostsRemoved: 2))
         let odd = #"{"status":"pending","billing":"something-new"}"#
         #expect(try JSONDecoder().decode(DeletionRequestReceipt.self, from: Data(odd.utf8)).billing == .error)
+    }
+
+    // MARK: - Recorded backups
+
+    /// The account Continue with Apple created on this device: its backup is
+    /// recorded, so deletion goes straight to the typed confirmation with
+    /// that backup — and only that one — queued. No Apple step.
+    @Test func recordedBackup_skipsApple_andQueuesOnlyThatBackup() async throws {
+        let key = try BackupCrypto.deriveBackupKey(appleUserID: Self.appleUserID, pin: Self.pin)
+        let kp = try newKeypair()
+        let other = try newKeypair()
+        let mine = try backup(of: kp, key: key)
+        let theirs = try backup(of: other, key: key)
+        ICloudBackupIndex.record([mine.backupID], for: kp.pubkey)
+        defer { ICloudBackupIndex.forget(pubkey: kp.pubkey) }
+
+        let model = DeleteAccountViewModel(keypair: kp, backups: FakeBackups([theirs, mine]),
+                                           requester: FakeRequester(), deviceWipe: RecordingWipe())
+        await model.checkBackups()
+
+        #expect(model.step == .confirmTyped)
+        #expect(model.backupNote == .recorded(count: 1))
+        #expect(model.pendingBackupIDs == [mine.backupID])
+
+        // Deleting the account forgets the record with the rest of its keychain.
+        AccountDeletion.clearKeychain(pubkey: kp.pubkey)
+        #expect(ICloudBackupIndex.backupIDs(for: kp.pubkey).isEmpty)
+    }
+
+    /// An nsec-imported account with someone's backups in this iCloud: no
+    /// record, so the typed confirmation is the default, nothing is queued,
+    /// and the Apple check is an option the user can take and back out of.
+    @Test func unrecordedAccount_withBackups_defaultsToTyped_andOffersTheCheck() async throws {
+        let key = try BackupCrypto.deriveBackupKey(appleUserID: Self.appleUserID, pin: Self.pin)
+        let kp = try newKeypair()
+        let theirs = try backup(of: try newKeypair(), key: key)
+        // A stale record (backup removed elsewhere) counts as no record.
+        ICloudBackupIndex.record(["wisp_bk_gone"], for: kp.pubkey)
+        defer { ICloudBackupIndex.forget(pubkey: kp.pubkey) }
+
+        let model = DeleteAccountViewModel(keypair: kp, backups: FakeBackups([theirs]),
+                                           requester: FakeRequester(), deviceWipe: RecordingWipe())
+        await model.checkBackups()
+
+        #expect(model.step == .confirmTyped)
+        #expect(model.backupNote == .unchecked(count: 1))
+        #expect(model.pendingBackupIDs.isEmpty)
+
+        model.checkWithApple()
+        #expect(model.step == .needsApple(count: 1))
+        model.skipCheck()
+        #expect(model.step == .confirmTyped)
+        #expect(model.backupNote == .unchecked(count: 1))
+        #expect(model.pendingBackupIDs.isEmpty)
+    }
+
+    /// Restore records every backup that holds the restored account — the
+    /// choose screen shows one row per npub, so a duplicate hides behind it —
+    /// and nothing belonging to another account.
+    @Test func restore_recordsEveryBackupOfTheAccount_andNoOthers() throws {
+        let key = try BackupCrypto.deriveBackupKey(appleUserID: Self.appleUserID, pin: Self.pin)
+        let kp = try newKeypair()
+        let first = try backup(of: kp, key: key)
+        let duplicate = try backup(of: kp, key: key)
+        let theirs = try backup(of: try newKeypair(), key: key)
+        defer { ICloudBackupIndex.forget(pubkey: kp.pubkey) }
+
+        ICloudBackupIndex.recordRestored(files: [first, theirs, duplicate], key32: key, pubkeyHex: kp.pubkey)
+        #expect(Set(ICloudBackupIndex.backupIDs(for: kp.pubkey)) == [first.backupID, duplicate.backupID])
+
+        // Recording again (a second restore) adds nothing twice.
+        ICloudBackupIndex.recordRestored(files: [first], key32: key, pubkeyHex: kp.pubkey)
+        #expect(ICloudBackupIndex.backupIDs(for: kp.pubkey).count == 2)
     }
 
     // MARK: - Cook+

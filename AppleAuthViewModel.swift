@@ -170,6 +170,7 @@ final class AppleAuthViewModel {
                 let keypair = Keypair(privkey: Hex.encode(nsec), pubkey: pubkeyHex)
                 NostrKey.save(keypair, acceptance: acceptance)
                 NostrKey.registerInAccountList(pubkeyHex)
+                ICloudBackupIndex.recordRestored(files: pendingFiles, key32: key, pubkeyHex: pubkeyHex)
                 state = .done(isNewAccount: false, keypair: keypair)
             } catch {
                 state = .error(message: error.localizedDescription)
@@ -212,10 +213,11 @@ final class AppleAuthViewModel {
         let pubkey = try Schnorr.xonlyPubkey(privkey32: privkey)
         let pubkeyHex = Hex.encode(pubkey)
         let payload = try BackupCrypto.encryptNsec(nsec32: privkey, key32: key)
-        try await keychainService.uploadBackup(payload: payload)
+        let backupID = try await keychainService.uploadBackup(payload: payload)
         let keypair = Keypair(privkey: Hex.encode(privkey), pubkey: pubkeyHex)
         NostrKey.save(keypair, acceptance: acceptance)
         NostrKey.registerInAccountList(pubkeyHex)
+        ICloudBackupIndex.record([backupID], for: pubkeyHex)
         state = .done(isNewAccount: true, keypair: keypair)
     }
 
