@@ -130,6 +130,8 @@ private struct ProfileStep: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
+                walletToggle
+
                 Spacer().frame(height: 8)
 
                 Button {
@@ -160,6 +162,32 @@ private struct ProfileStep: View {
                 )
             }
         )
+    }
+
+    /// Off by default: the user chooses a wallet and a public Lightning
+    /// address, nothing is set up for them. Kind-0 publishes once, at the
+    /// end of this step, so the choice rides that single publish.
+    private var walletToggle: some View {
+        Toggle(isOn: $viewModel.wantsWallet) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Lightning wallet")
+                    .font(.subheadline.weight(.semibold))
+                Text("Create a wallet so people can zap your posts. This adds a public Lightning address to your profile. You can set one up later from the menu instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(.wispPrimary)
+        .disabled(viewModel.publishingProfile)
+        .accessibilityIdentifier("signup-wallet-optin")
+        .onChange(of: viewModel.wantsWallet) { _, on in
+            if on {
+                viewModel.startWalletSetup()
+            } else {
+                viewModel.tearDownSignupWallet()
+            }
+        }
     }
 
     private var continueEnabled: Bool {

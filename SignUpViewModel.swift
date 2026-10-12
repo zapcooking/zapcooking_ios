@@ -6,7 +6,8 @@ private let signupLog = Logger(subsystem: "wisp", category: "signup-wallet")
 
 /// Orchestrates the brand-new-user sign-up flow:
 ///
-///   1. profile (avatar + bio) while RelayProber discovers good relays
+///   1. profile (avatar + bio, and an opt-in Lightning wallet) while
+///      RelayProber discovers good relays
 ///   2. follow some suggested accounts (curated creators / active in the kitchen)
 ///   3. pick hashtags as an "Interests" set
 ///   4. compose an introduction note
@@ -63,6 +64,12 @@ final class SignUpViewModel {
     let keypair: Keypair
 
     // MARK: - Wallet state
+
+    /// The profile step's "Lightning wallet" toggle. Off by default: a new
+    /// account gets no wallet and no `lud16` unless the user turns it on.
+    /// The view starts the wallet (`startWalletSetup`) when it goes on and
+    /// tears it down when it goes off.
+    var wantsWallet: Bool = false
 
     /// Lightning address registered for this account during signup, e.g.
     /// "bluepanda42@<spark-domain>". Embedded into kind-0 as `lud16` when set.
@@ -177,7 +184,6 @@ final class SignUpViewModel {
 
     func startRelayDiscovery() {
         guard relayPhase == .idle else { return }
-        startWalletSetup()
         relayPhase = .connecting
         let kp = self.keypair
         Task { [weak self] in
@@ -226,15 +232,15 @@ final class SignUpViewModel {
     // MARK: - Wallet setup
 
     /// Derive the default Spark wallet deterministically from the user's nsec
-    /// and start the Breez Spark connect in parallel with relay discovery, so
-    /// by the time the user taps Continue on the profile step the SDK is
-    /// usually already up. Deriving from the key (rather than a random
+    /// and start the Breez Spark connect. Called when the user turns the
+    /// wallet toggle on, so the connect runs while they finish the profile
+    /// step and the SDK is usually up by the time they tap Continue. Deriving from the key (rather than a random
     /// mnemonic) makes the brand-new account's wallet recoverable on any
     /// device by signing in with the same nsec. Silent on failure: a missing
     /// API key, bad entropy, or network error just leaves
     /// `sparkWallet?.isConnected == false` so `finishProfileStep` skips the
     /// lud16 path and publishes the profile bare.
-    private func startWalletSetup() {
+    func startWalletSetup() {
         guard sparkWallet == nil else { return }
         guard BreezConfig.hasApiKey else {
             signupLog.warning("Breez API key missing — skipping auto-wallet setup")
@@ -327,17 +333,12 @@ final class SignUpViewModel {
         publishingProfile = true
         defer { publishingProfile = false }
 
-        // Wait up to 15s for the Spark wallet started in `startWalletSetup`
-        // to come up, then claim a random Lightning-address handle. Failure
-        // returns nil and the kind-0 below ships without `lud16` — never
-        // blocks the user from advancing.
-        let lightning = await registerSparkLightningAddressIfReady()
+        let profileEvent = await preparedProfileEvent()
 
         let writeRelays = discoveredRelays.filter(\.write).map(\.url)
         let publishTargets = (writeRelays + Self.indexerRelays).uniquedPreservingOrder()
 
         let relayListEvent = signRelayListEvent()
-        let profileEvent = signProfileEvent(lightningAddress: lightning)
 
         if let e = relayListEvent {
             await EventStore.shared.persist([e])
@@ -384,6 +385,19 @@ final class SignUpViewModel {
                 }
             }
         }
+    }
+
+    /// The kind-0 this step publishes. Only when the user turned the wallet
+    /// on: wait up to 15s for the Spark wallet started in `startWalletSetup`,
+    /// then claim a random Lightning-address handle for `lud16`. Off, or any
+    /// failure, and the profile ships without `lud16` — never blocking the
+    /// user from advancing.
+    func preparedProfileEvent() async -> NostrEvent? {
+        var lightning: String?
+        if wantsWallet {
+            lightning = await registerSparkLightningAddressIfReady()
+        }
+        return signProfileEvent(lightningAddress: lightning)
     }
 
     /// Nil when discovery *and* the probed fallback both came back empty: we
