@@ -4,12 +4,16 @@ import UIKit
 /// Drives Settings → About → Delete Account. The steps, in order:
 ///   1. Explain what is deleted, what is public and not ours to remove, and
 ///      that Cook+ is separate; offer the nsec (and wallet phrase) exports.
-///   2. Find this account's iCloud-Keychain backup: listing needs no
-///      sign-in, but backups are opaque until decrypted, so when any exist
-///      the user signs in with Apple and enters the recovery PIN — the same
-///      decrypt restore does, and the hard confirmation for backed-up
-///      accounts. A forgotten PIN can only remove every backup here.
-///   3. Everything else confirms by typing DELETE.
+///   2. Find this account's iCloud-Keychain backup. Backups are opaque, but
+///      this device records which are this account's when it creates or
+///      restores one (`ICloudBackupIndex`); a recorded backup is removed
+///      with no Apple step. With backups present and none recorded, the
+///      user may check: Apple sign-in and the recovery PIN decrypt them —
+///      the same decrypt restore does. Checking is opt-in, with copy that
+///      says a backup left behind could restore the identity. A forgotten
+///      PIN can only remove every backup here.
+///   3. Confirm: one tap after a check found the backup, typing DELETE
+///      otherwise.
 ///   4. The deletion request to Zap Cooking (NIP-98, signed by this key, so
 ///      before the wipe). A failure never traps the user: retry, or delete
 ///      from this device anyway with honest copy about what isn't queued.
@@ -61,6 +65,10 @@ final class DeleteAccountViewModel {
         case none
         /// No Zap Cooking backup exists in this iCloud account.
         case noBackups
+        /// This device recorded these backups as this account's.
+        case recorded(count: Int)
+        /// Backups exist, none recorded for this account; the user may check.
+        case unchecked(count: Int)
         /// Backups exist, none is this account.
         case noneForThisAccount
         /// Forgotten PIN: every backup here goes.
@@ -108,10 +116,14 @@ final class DeleteAccountViewModel {
         step = .checkingICloud
         do {
             files = try await backups.listBackups()
+            let present = Set(files.map(\.backupID))
+            let recorded = ICloudBackupIndex.backupIDs(for: keypair.pubkey).filter(present.contains)
             if files.isEmpty {
                 confirmTyped(ids: [], note: .noBackups)
+            } else if !recorded.isEmpty {
+                confirmTyped(ids: recorded, note: .recorded(count: recorded.count))
             } else {
-                step = .needsApple(count: files.count)
+                confirmTyped(ids: [], note: .unchecked(count: files.count))
             }
         } catch let e as KeychainBackupError {
             if case .iCloudUnavailable = e.kind {
@@ -126,6 +138,17 @@ final class DeleteAccountViewModel {
 
     func skipICloud() {
         confirmTyped(ids: [], note: .iCloudSkipped)
+    }
+
+    /// From the confirmation, when no backup is recorded for this account:
+    /// look for one with Apple sign-in and the PIN.
+    func checkWithApple() {
+        step = .needsApple(count: files.count)
+    }
+
+    /// Back out of the check to the typed confirmation.
+    func skipCheck() {
+        confirmTyped(ids: [], note: .unchecked(count: files.count))
     }
 
     func signInWithApple() {
@@ -337,7 +360,7 @@ struct DeleteAccountView: View {
     private var explainStep: some View {
         section(title: "What gets deleted") {
             bullet("Your private key on this device.")
-            bullet("This account\u{2019}s iCloud Keychain backup, so Continue with Apple can no longer restore it.")
+            bullet("This account\u{2019}s iCloud Keychain backup, if it has one, so Continue with Apple can no longer restore it.")
             bullet("This account\u{2019}s settings, cached posts and messages, and wallet keys on this device.")
             if !keypair.isWatchOnly {
                 bullet("Records Zap Cooking holds for this account \u{2014} Cook+ membership, AI credits, scheduled posts, and content on Pantry, our relay. We send a deletion request: scheduled posts go right away, the rest within 30 days. Payment records we\u{2019}re required by law to keep are kept.")
@@ -444,6 +467,10 @@ struct DeleteAccountView: View {
         }
         primaryButton("Continue with Apple") { model.signInWithApple() }
             .accessibilityIdentifier("delete-account-apple")
+        Button("Back") { model.skipCheck() }
+            .font(.system(size: 14))
+            .foregroundStyle(theme.palette.onSurfaceVariant)
+            .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -515,6 +542,9 @@ struct DeleteAccountView: View {
 
     @ViewBuilder
     private var confirmTypedStep: some View {
+        if case .unchecked(let count) = model.backupNote {
+            uncheckedBackupSection(count: count)
+        }
         section(title: "Confirm") {
             Text(backupNoteText)
                 .font(.system(size: 14))
@@ -533,10 +563,41 @@ struct DeleteAccountView: View {
         deleteButton(enabled: typed.trimmingCharacters(in: .whitespaces) == DeleteAccountViewModel.confirmationWord)
     }
 
+    /// No backup is recorded for this account but some exist. Says plainly
+    /// that one of them may be this identity's and would survive deletion.
+    @ViewBuilder
+    private func uncheckedBackupSection(count: Int) -> some View {
+        section(title: "iCloud backup") {
+            Text("If you backed this account up with Continue with Apple, that backup is still in your iCloud and could restore this identity. Check and remove it before you delete.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(theme.palette.onSurface)
+            Text(count == 1
+                 ? "There\u{2019}s 1 Zap Cooking backup in this iCloud account. Checking takes Apple sign-in and your recovery PIN."
+                 : "There are \(count) Zap Cooking backups in this iCloud account. Checking takes Apple sign-in and your recovery PIN.")
+                .font(.system(size: 14))
+                .foregroundStyle(theme.palette.onSurfaceVariant)
+            Button {
+                model.checkWithApple()
+            } label: {
+                Text("Check for a backup").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.wispPrimary)
+            .controlSize(.large)
+            .accessibilityIdentifier("delete-account-check-backup")
+        }
+    }
+
     private var backupNoteText: String {
         switch model.backupNote {
         case .none, .noBackups:
             return "There\u{2019}s no Zap Cooking backup in this iCloud account. Deleting removes your key on this device and this account\u{2019}s data here."
+        case .recorded(let count):
+            return count == 1
+                ? "Deleting removes this account\u{2019}s iCloud backup, so Continue with Apple can no longer restore it, plus your key on this device and this account\u{2019}s data here."
+                : "Deleting removes this account\u{2019}s \(count) iCloud backups, so Continue with Apple can no longer restore it, plus your key on this device and this account\u{2019}s data here."
+        case .unchecked:
+            return "If you delete without checking, any backup stays in iCloud. Deleting removes your key on this device and this account\u{2019}s data here."
         case .noneForThisAccount:
             return "None of the backups in this iCloud account is this account, so none will be removed. Deleting removes your key on this device and this account\u{2019}s data here."
         case .removingAll(let count):

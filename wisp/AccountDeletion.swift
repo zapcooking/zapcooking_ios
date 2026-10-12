@@ -126,14 +126,16 @@ enum AccountDeletion {
 
     // MARK: - Local pieces
 
-    /// Every `com.wisp.nostr` item that belongs to `pubkey`. `NostrKey
-    /// .deleteAccount` stays as the switcher uses it; the wallet secrets it
-    /// does not know about are removed here. `active` is not touched — the
-    /// caller decides whether it points at this account.
+    /// Every `com.wisp.nostr` item that belongs to `pubkey`, and this
+    /// device's record of its backups (`ICloudBackupIndex`, which no wipe
+    /// touches). `NostrKey.deleteAccount` stays as the switcher uses it; the
+    /// wallet secrets it does not know about are removed here. `active` is
+    /// not touched — the caller decides whether it points at this account.
     static func clearKeychain(pubkey: String) {
         NostrKey.deleteAccount(pubkey: pubkey)
         WalletKeychain.deleteSparkMnemonic(for: pubkey)
         WalletKeychain.deleteNwcUri(for: pubkey)
+        ICloudBackupIndex.forget(pubkey: pubkey)
     }
 
     /// This account's state on a device that keeps other accounts.
