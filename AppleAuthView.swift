@@ -5,12 +5,12 @@ import UIKit
 struct AppleAuthView: View {
     @State private var viewModel: AppleAuthViewModel
     var onCancel: () -> Void
-    var onDone: (_ isNewAccount: Bool, _ keypair: Keypair) -> Void
+    var onDone: (_ isNewAccount: Bool, _ keypair: Keypair, _ suggestedName: String?) -> Void
 
     init(
         acceptance: TermsAcceptance,
         onCancel: @escaping () -> Void,
-        onDone: @escaping (_ isNewAccount: Bool, _ keypair: Keypair) -> Void
+        onDone: @escaping (_ isNewAccount: Bool, _ keypair: Keypair, _ suggestedName: String?) -> Void
     ) {
         self._viewModel = State(initialValue: AppleAuthViewModel(acceptance: acceptance))
         self.onCancel = onCancel
@@ -51,8 +51,8 @@ struct AppleAuthView: View {
             }
         }
         .onChange(of: stateKey) { _, _ in
-            if case .done(let isNew, let kp) = viewModel.state {
-                onDone(isNew, kp)
+            if case .done(let isNew, let kp, let suggestedName) = viewModel.state {
+                onDone(isNew, kp, suggestedName)
                 viewModel.reset()
             }
         }
@@ -69,7 +69,7 @@ struct AppleAuthView: View {
         case .setupPin(let step, let mismatch): return "setupPin:\(step):\(mismatch)"
         case .choose(let backups): return "choose:\(backups.map { $0.npub }.joined(separator: ","))"
         case .working: return "working"
-        case .done(let isNew, _): return "done:\(isNew)"
+        case .done(let isNew, _, _): return "done:\(isNew)"
         case .error(let msg): return "error:\(msg)"
         }
     }

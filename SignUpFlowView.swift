@@ -15,14 +15,18 @@ struct SignUpFlowView: View {
     /// already-generated, already-backed-up keypair to the wizard so the
     /// user runs the same profile / follows / hashtags / intro-note flow
     /// as a fresh "Create new account" tap, without minting a second key.
+    /// `suggestedName` is the name Apple shared on that flow's sheet; it
+    /// pre-fills the display name so the user isn't asked twice.
     init(
         existingKeypair: Keypair? = nil,
+        suggestedName: String? = nil,
         acceptance: TermsAcceptance,
         onComplete: @escaping (Keypair) -> Void
     ) {
         self.onComplete = onComplete
         self._viewModel = State(initialValue: SignUpViewModel(
             existingKeypair: existingKeypair,
+            suggestedName: suggestedName,
             acceptance: acceptance
         ))
     }
@@ -74,12 +78,10 @@ struct SignUpFlowView: View {
         // otherwise the first feed query has no scoreboard mappings for the
         // just-followed users and comes back empty.
         Task {
-            await viewModel.awaitOutboxReady()
-            // SparkWallet.storageDir is a single shared path today, so let the
-            // signup-time wallet go before MainView's WalletStore stands up
-            // its own SparkWallet against the same on-disk store.
-            viewModel.tearDownSignupWallet()
-            viewModel.markComplete()
+            // Also lets the signup-time wallet's SDK go (seed kept) before
+            // MainView's WalletStore stands up its own SparkWallet against
+            // the same on-disk store.
+            await viewModel.finishSignup()
             onComplete(viewModel.keypair)
         }
     }
@@ -126,6 +128,8 @@ private struct ProfileStep: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
+                walletToggle
+
                 Spacer().frame(height: 8)
 
                 Button {
@@ -156,6 +160,32 @@ private struct ProfileStep: View {
                 )
             }
         )
+    }
+
+    /// Off by default: the user chooses a wallet and a public Lightning
+    /// address, nothing is set up for them. Kind-0 publishes once, at the
+    /// end of this step, so the choice rides that single publish.
+    private var walletToggle: some View {
+        Toggle(isOn: $viewModel.wantsWallet) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Lightning wallet")
+                    .font(.subheadline.weight(.semibold))
+                Text("Create a wallet so people can zap your posts. This adds a public Lightning address to your profile. You can set one up later from the menu instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(.wispPrimary)
+        .disabled(viewModel.publishingProfile)
+        .accessibilityIdentifier("signup-wallet-optin")
+        .onChange(of: viewModel.wantsWallet) { _, on in
+            if on {
+                viewModel.startWalletSetup()
+            } else {
+                viewModel.discardSignupWallet()
+            }
+        }
     }
 
     private var continueEnabled: Bool {

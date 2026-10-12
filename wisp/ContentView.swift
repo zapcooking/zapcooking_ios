@@ -27,6 +27,8 @@ struct ContentView: View {
     /// still get the profile / follows / hashtags steps without minting a
     /// second key (which would leave the backed-up key abandoned).
     @State private var signUpExistingKeypair: Keypair?
+    /// The name Apple shared, pre-filled in the wizard's display name.
+    @State private var signUpSuggestedName: String?
 
     var body: some View {
         Group {
@@ -61,7 +63,7 @@ struct ContentView: View {
                     AppleAuthView(
                         acceptance: pending.acceptance,
                         onCancel: { appleSignIn = nil },
-                        onDone: { isNewAccount, kp in
+                        onDone: { isNewAccount, kp, suggestedName in
                             keypair = kp
                             appleSignIn = nil
                             if isNewAccount {
@@ -71,6 +73,7 @@ struct ContentView: View {
                                 // already-generated, already-backed-up key
                                 // so the wizard doesn't mint a second one.
                                 signUpExistingKeypair = kp
+                                signUpSuggestedName = suggestedName
                                 currentScreen = .signUp(pending.acceptance)
                             } else if NostrKey.isOnboardingComplete(pubkey: kp.pubkey) {
                                 currentScreen = .loading
@@ -86,9 +89,14 @@ struct ContentView: View {
                 }
 
             case .signUp(let acceptance):
-                SignUpFlowView(existingKeypair: signUpExistingKeypair, acceptance: acceptance) { kp in
+                SignUpFlowView(
+                    existingKeypair: signUpExistingKeypair,
+                    suggestedName: signUpSuggestedName,
+                    acceptance: acceptance
+                ) { kp in
                     keypair = kp
                     signUpExistingKeypair = nil
+                    signUpSuggestedName = nil
                     withAnimation { currentScreen = .main }
                 }
 

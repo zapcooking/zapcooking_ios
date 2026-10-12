@@ -15,6 +15,10 @@ import AuthenticationServices
 final class AppleSignInManager {
     struct AuthResult {
         let userID: String
+        /// The name the user shared on Apple's sheet. Apple returns it only
+        /// on the first authorization for this Apple ID and app; every later
+        /// sign-in (including "create another account") gets nil.
+        let fullName: PersonNameComponents?
     }
 
     enum SignInError: LocalizedError {
@@ -56,9 +60,9 @@ final class AppleSignInManager {
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthResult, Error>) in
             let request = ASAuthorizationAppleIDProvider().createRequest()
             // `.fullName` / `.email` are only populated on the very first
-            // consent for a given (team, Apple ID) — we don't use them, but
-            // requesting them is the conventional shape and keeps the
-            // consent sheet copy familiar to users.
+            // consent for a given (team, Apple ID). The name pre-fills the
+            // sign-up wizard's display name (best effort, still editable);
+            // the email is unused.
             request.requestedScopes = [.fullName, .email]
 
             let controller = ASAuthorizationController(authorizationRequests: [request])
@@ -136,7 +140,7 @@ final class AppleSignInManager {
                 resume(with: .failure(SignInError.missingUserIdentifier))
                 return
             }
-            resume(with: .success(AuthResult(userID: user)))
+            resume(with: .success(AuthResult(userID: user, fullName: cred.fullName)))
         }
 
         func authorizationController(controller: ASAuthorizationController,

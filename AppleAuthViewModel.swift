@@ -22,7 +22,10 @@ final class AppleAuthViewModel {
         case setupPin(step: SetupStep, mismatch: Bool)
         case choose(backups: [AuthBackupSummary])
         case working
-        case done(isNewAccount: Bool, keypair: Keypair)
+        /// `suggestedName`: the name Apple shared, for the sign-up wizard to
+        /// pre-fill. New accounts only, and nil unless this was the first
+        /// authorization for this Apple ID.
+        case done(isNewAccount: Bool, keypair: Keypair, suggestedName: String?)
         case error(message: String)
     }
 
@@ -40,6 +43,7 @@ final class AppleAuthViewModel {
     private let keychainService = KeychainBackupService()
 
     private var pendingUserID: String?
+    private var pendingFullName: PersonNameComponents?
     private var pendingBackupKey: Data?
     private var pendingFiles: [KeychainBackupService.BackupFile] = []
     private var pendingSetupFirstPin: String?
@@ -57,6 +61,7 @@ final class AppleAuthViewModel {
             do {
                 let result = try await signInManager.signIn(presenting: presenting)
                 pendingUserID = result.userID
+                pendingFullName = result.fullName
 
                 state = .checkingICloud
                 let files = try await keychainService.listBackups()
@@ -171,7 +176,7 @@ final class AppleAuthViewModel {
                 NostrKey.save(keypair, acceptance: acceptance)
                 NostrKey.registerInAccountList(pubkeyHex)
                 ICloudBackupIndex.recordRestored(files: pendingFiles, key32: key, pubkeyHex: pubkeyHex)
-                state = .done(isNewAccount: false, keypair: keypair)
+                state = .done(isNewAccount: false, keypair: keypair, suggestedName: nil)
             } catch {
                 state = .error(message: error.localizedDescription)
             }
@@ -199,6 +204,7 @@ final class AppleAuthViewModel {
         profileFetchTask?.cancel()
         profileFetchTask = nil
         pendingUserID = nil
+        pendingFullName = nil
         pendingBackupKey = nil
         pendingFiles = []
         pendingSetupFirstPin = nil
@@ -218,7 +224,16 @@ final class AppleAuthViewModel {
         NostrKey.save(keypair, acceptance: acceptance)
         NostrKey.registerInAccountList(pubkeyHex)
         ICloudBackupIndex.record([backupID], for: pubkeyHex)
-        state = .done(isNewAccount: true, keypair: keypair)
+        state = .done(isNewAccount: true, keypair: keypair, suggestedName: Self.suggestedName(from: pendingFullName))
+    }
+
+    /// Apple's name as one display string, or nil when Apple shared none.
+    nonisolated static func suggestedName(from components: PersonNameComponents?) -> String? {
+        guard let components else { return nil }
+        let formatter = PersonNameComponentsFormatter()
+        formatter.style = .default
+        let name = formatter.string(from: components).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     private func deriveKeyOffMain(appleUserID: String, pin: String) async throws -> Data {
