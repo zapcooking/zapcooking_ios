@@ -88,6 +88,7 @@ struct MainView: View {
     @State private var showSafety = false
     @State private var showProofOfWork = false
     @State private var showAbout = false
+    @State private var showAccount = false
     @State private var showDataRecovery = false
     @State private var showMediaServers = false
     @State private var hashtagSetRepo = HashtagSetRepository.shared
@@ -543,11 +544,16 @@ struct MainView: View {
         }
         .sheet(isPresented: $showAbout) {
             NavigationStack {
-                AboutView(account: AboutView.Account(
+                AboutView()
+            }
+        }
+        .sheet(isPresented: $showAccount) {
+            NavigationStack {
+                AccountSettingsView(account: AccountSettingsView.Account(
                     keypair: keypair,
                     walletStore: walletStore,
                     onDeleted: { next in
-                        showAbout = false
+                        showAccount = false
                         if let next {
                             onSwitchAccount(next)
                         } else {
@@ -748,6 +754,10 @@ struct MainView: View {
             onOpenDataRecovery: {
                 closeDrawer()
                 showDataRecovery = true
+            },
+            onOpenAccount: {
+                closeDrawer()
+                showAccount = true
             }
         )
         .frame(width: drawerWidth)

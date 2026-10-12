@@ -3,7 +3,7 @@ import Security
 import Testing
 @testable import wisp
 
-/// Settings → About → Delete Account. The property under test is the one a
+/// Settings → Account → Delete Account. The property under test is the one a
 /// reviewer checks by hand: after deletion nothing can bring the identity
 /// back — no `com.wisp.nostr` item for it (including `active`, which
 /// `ContentView` logs in from on launch and which survives deleting the app),
