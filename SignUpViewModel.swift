@@ -144,10 +144,13 @@ final class SignUpViewModel {
     /// recorded when `registerAccount()` stores the key.
     let acceptance: TermsAcceptance
 
-    init(existingKeypair: Keypair? = nil, acceptance: TermsAcceptance) {
+    /// `suggestedName` seeds the display name (Apple's name, when it shared
+    /// one); the field stays editable.
+    init(existingKeypair: Keypair? = nil, suggestedName: String? = nil, acceptance: TermsAcceptance) {
         self.acceptance = acceptance
         if let existing = existingKeypair {
             self.keypair = existing
+            self.name = suggestedName ?? ""
             return
         }
         let priv = Schnorr.randomPrivkey()
@@ -160,6 +163,7 @@ final class SignUpViewModel {
             pub = (try? Schnorr.xonlyPubkey(privkey32: Schnorr.randomPrivkey())) ?? Data(count: 32)
         }
         self.keypair = Keypair(privkey: Hex.encode(priv), pubkey: Hex.encode(pub))
+        self.name = suggestedName ?? ""
     }
 
     /// Persist the generated keypair to the Keychain and the multi-account

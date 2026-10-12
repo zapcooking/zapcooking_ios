@@ -15,14 +15,18 @@ struct SignUpFlowView: View {
     /// already-generated, already-backed-up keypair to the wizard so the
     /// user runs the same profile / follows / hashtags / intro-note flow
     /// as a fresh "Create new account" tap, without minting a second key.
+    /// `suggestedName` is the name Apple shared on that flow's sheet; it
+    /// pre-fills the display name so the user isn't asked twice.
     init(
         existingKeypair: Keypair? = nil,
+        suggestedName: String? = nil,
         acceptance: TermsAcceptance,
         onComplete: @escaping (Keypair) -> Void
     ) {
         self.onComplete = onComplete
         self._viewModel = State(initialValue: SignUpViewModel(
             existingKeypair: existingKeypair,
+            suggestedName: suggestedName,
             acceptance: acceptance
         ))
     }
