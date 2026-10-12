@@ -129,39 +129,45 @@ struct AltTextEditorView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                previewImage
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Scrollable: the content (180pt preview + explainer + field +
+            // AI action) exceeds the sheet's height at the medium detent and
+            // when the keyboard is up, and an overflowing VStack is what
+            // drew the nav title over the preview. Scrolling keeps every
+            // item reachable no matter how little room the sheet has.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    previewImage
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Text("A short description makes your photo accessible to screen reader users — and gives everyone context if the image doesn't load.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("A short description makes your photo accessible to screen reader users — and gives everyone context if the image doesn't load.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                TextEditor(text: $text)
-                    .frame(minHeight: 96)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(alignment: .bottomTrailing) {
-                        Text("\(remaining) remaining")
-                            .font(.caption2)
-                            .foregroundStyle(remaining < 100 ? .orange : .secondary)
-                            .padding(8)
-                            .allowsHitTesting(false)
-                    }
-                    .onChange(of: text) { _, newValue in
-                        if newValue.count > Self.maxCharacters {
-                            text = String(newValue.prefix(Self.maxCharacters))
+                    TextEditor(text: $text)
+                        .frame(minHeight: 96)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(alignment: .bottomTrailing) {
+                            Text("\(remaining) remaining")
+                                .font(.caption2)
+                                .foregroundStyle(remaining < 100 ? .orange : .secondary)
+                                .padding(8)
+                                .allowsHitTesting(false)
                         }
-                    }
+                        .onChange(of: text) { _, newValue in
+                            if newValue.count > Self.maxCharacters {
+                                text = String(newValue.prefix(Self.maxCharacters))
+                            }
+                        }
 
-                aiSection
-
-                Spacer(minLength: 0)
+                    aiSection
+                }
+                .padding(16)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("Description")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

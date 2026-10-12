@@ -1121,32 +1121,23 @@ final class ComposeViewModel {
         }
     }
 
-    /// Re-host a GIF picked from Giphy on the user's Blossom servers and
-    /// add it as an attachment slot — the URL never touches the editor
-    /// text, exactly like picker-uploaded media. Falls back to the
-    /// original Giphy URL if the rehost fails so the user always gets a
-    /// working link.
-    func attachGifFromGiphy(_ giphyURL: String) async {
-        uploadProgress = "Uploading GIF…"
-        defer { uploadProgress = nil }
-        let outcome = await GifBlossomUploader.rehost(
-            giphyURL: giphyURL,
-            keypair: signingKeypair,
-            servers: blossomServers
-        )
-        let id = UUID()
+    /// Attach a GIF picked from gifs.nostr.build. Every result is already
+    /// hosted on a Nostr media host, so the URL is attached as-is — nothing
+    /// is uploaded, exactly like picker-uploaded media the URL never touches
+    /// the editor text. The GIF's own title seeds the alt description, so a
+    /// picked GIF publishes with a NIP-92 `imeta` `alt` slot unless the
+    /// writer clears it.
+    func attachPickedGif(_ gif: Gif) {
         attachments.append(ComposeAttachment(
-            id: id,
-            url: outcome.url,
-            mime: "image/gif",
-            dim: .zero,
+            id: UUID(),
+            url: gif.url,
+            mime: gif.mime,
+            dim: CGSize(width: gif.width, height: gif.height),
             durationSec: nil,
             sha256Hex: nil,
-            localBytes: nil
+            localBytes: nil,
+            altText: gif.title.isEmpty ? nil : gif.title
         ))
-        if !outcome.didRehost {
-            lastError = "Couldn't re-host GIF on your Blossom server — using the Giphy link instead."
-        }
     }
 
     // MARK: - Publish

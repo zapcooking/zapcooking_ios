@@ -16,7 +16,6 @@ struct wispApp: App {
         #endif
         NsecPasteGuard.setUp()
         try? ObjectBoxSetup.setUp()
-        GiphyConfig.bootstrap()
         // Estimate device-clock skew so outgoing event `created_at` is correct even
         // when the wall clock is off (relays reject future timestamps). Re-syncs on
         // foreground entry, throttled inside NostrClock.
