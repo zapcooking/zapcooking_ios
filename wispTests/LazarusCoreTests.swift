@@ -422,7 +422,7 @@ struct LazarusDeltaTests {
         #expect(delta.shrinks)
         #expect(!delta.grows)
 
-        let encryptedChosen = F.event(createdAt: 2000, tags: [], content: String(repeating: "A", count: 200))
+        let encryptedChosen = F.event(createdAt: 2000, tags: [["p", "a"], ["p", "b"]], content: String(repeating: "A", count: 200))
         let current = F.event(createdAt: 1000, tags: [["p", "a"], ["p", "b"]])
         let other = Lazarus.delta(chosen: encryptedChosen, current: current)
         #expect(other.privateUnknown)
