@@ -7,8 +7,8 @@ import SwiftUI
 /// at the same documents.
 ///
 /// Account deletion (4.2) is not a policy link: Apple's account-deletion
-/// guidance does not accept the web's email flow, so it is an in-app flow in
-/// its own About section (`DeleteAccountView`).
+/// guidance does not accept the web's email flow, so it is an in-app flow on
+/// its own Settings → Account screen (`AccountSettingsView`), not here.
 nonisolated enum PolicyLinks {
     static let origin = "https://zap.cooking"
 
@@ -30,55 +30,18 @@ nonisolated enum PolicyLinks {
 /// web pages, and a `WKWebView` carrying them would be one more web surface
 /// for a Guideline 4.2 reviewer to weigh).
 struct AboutView: View {
-    /// The signed-in account, for the Delete Account row. Nil hides the
-    /// section.
-    var account: Account? = nil
-
-    struct Account {
-        let keypair: Keypair
-        let walletStore: WalletStore?
-        /// After deletion: the account the app switched to, or nil when the
-        /// device was wiped and the app should return to the splash.
-        let onDeleted: (Keypair?) -> Void
-    }
-
     @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                section(title: "Policies") {
+                SettingsCardSection(title: "Policies") {
                     ForEach(Array(PolicyLinks.all.enumerated()), id: \.offset) { index, link in
                         if index > 0 {
                             Divider().overlay(theme.palette.surfaceVariant)
                         }
                         policyRow(link)
-                    }
-                }
-
-                if let account {
-                    section(title: "Account") {
-                        NavigationLink {
-                            DeleteAccountView(
-                                keypair: account.keypair,
-                                walletStore: account.walletStore,
-                                onDeleted: account.onDeleted
-                            )
-                        } label: {
-                            HStack {
-                                Text("Delete Account")
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(.red)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(theme.palette.onSurfaceVariant)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("about-delete-account")
                     }
                 }
 
@@ -113,23 +76,6 @@ struct AboutView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("policy-link-\(link.url.lastPathComponent)")
-    }
-
-    @ViewBuilder
-    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(theme.palette.onSurfaceVariant)
-                .textCase(.uppercase)
-            VStack(alignment: .leading, spacing: 12) {
-                content()
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(theme.palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
     }
 
     private var versionString: String {

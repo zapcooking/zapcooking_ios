@@ -47,6 +47,9 @@ struct SidebarDrawerView: View {
     /// Settings → Data Recovery (Lazarus): restore a list another client
     /// overwrote, from relay history.
     var onOpenDataRecovery: () -> Void = {}
+    /// Settings → Account: Delete Account (Guideline 5.1.1(v) asks that it
+    /// be easy to find, so it is the first Settings row).
+    var onOpenAccount: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
     @Environment(WalletStore.self) private var walletStore
@@ -411,6 +414,8 @@ struct SidebarDrawerView: View {
 
     private var settingsItems: some View {
         VStack(spacing: 0) {
+            DrawerRow(icon: "person.crop.circle", label: "Account", indented: true) { onOpenAccount() }
+                .accessibilityIdentifier("drawer-account")
             DrawerRow(icon: "paintpalette", label: "Interface", indented: true) {
                 onOpenInterface()
             }
