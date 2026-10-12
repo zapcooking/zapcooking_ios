@@ -68,7 +68,7 @@ final class SignUpViewModel {
     /// The profile step's "Lightning wallet" toggle. Off by default: a new
     /// account gets no wallet and no `lud16` unless the user turns it on.
     /// The view starts the wallet (`startWalletSetup`) when it goes on and
-    /// tears it down when it goes off.
+    /// discards it — seed included — when it goes off (`discardSignupWallet`).
     var wantsWallet: Bool = false
 
     /// Lightning address registered for this account during signup, e.g.
@@ -246,19 +246,28 @@ final class SignUpViewModel {
             signupLog.warning("Breez API key missing — skipping auto-wallet setup")
             return
         }
+        guard let wallet = deriveSignupWallet() else { return }
+        sparkConnectTask = Task { await wallet.connect() }
+    }
+
+    /// The derive half of `startWalletSetup`, without the connect: derives
+    /// the default wallet from the nsec and saves its seed to the keychain
+    /// (`generateDefaultFromPrivkey` → `saveMnemonic`). Deterministic, so
+    /// deriving again after a discard saves the same seed.
+    func deriveSignupWallet() -> SparkWallet? {
         guard let privkey = Hex.decode(keypair.privkey) else {
             signupLog.warning("Invalid privkey — skipping auto-wallet setup")
-            return
+            return nil
         }
         let wallet = SparkWallet(pubkey: keypair.pubkey)
         do {
             _ = try wallet.generateDefaultFromPrivkey(privkey)
         } catch {
             signupLog.warning("Default wallet derivation failed: \(error.localizedDescription, privacy: .public)")
-            return
+            return nil
         }
         sparkWallet = wallet
-        sparkConnectTask = Task { await wallet.connect() }
+        return wallet
     }
 
     /// Wait up to 15s for the Spark SDK to flip `isConnected = true`, then try
@@ -298,11 +307,39 @@ final class SignUpViewModel {
     /// connect its own SparkWallet against the same on-disk Spark store.
     /// `SparkWallet.storageDir` is currently a single shared path, so two
     /// concurrent connects would conflict.
+    ///
+    /// Releases the SDK only — the seed stays. `finishSignup` calls this for
+    /// every user, opted in or not, so it must never delete anything: an
+    /// opted-in user's wallet lives on in MainView's WalletStore.
     func tearDownSignupWallet() {
         sparkConnectTask?.cancel()
         sparkConnectTask = nil
         sparkWallet?.disconnect()
         sparkWallet = nil
+    }
+
+    /// The wallet toggle turned back off: tear the SDK down first (it must
+    /// not be live against a wallet whose seed is about to go), then delete
+    /// the seed `startWalletSetup` saved, so an account that opted out holds
+    /// no wallet seed. Only the toggle calls this, never `finishSignup`.
+    ///
+    /// Breez's on-disk store is left: it lives under
+    /// `spark_data/<network>/<sha256(identity pubkey) prefix>/`, so no other
+    /// account's wallet ever opens it, and this account's own default
+    /// wallet, if set up later, re-derives the same seed and reuses it.
+    func discardSignupWallet() {
+        tearDownSignupWallet()
+        WalletKeychain.deleteSparkMnemonic(for: keypair.pubkey)
+    }
+
+    /// The wizard's last step, after the intro note: wait for the outbox
+    /// builder, release the signup wallet's SDK so MainView's WalletStore can
+    /// connect against the same storage (the seed stays), and mark
+    /// onboarding done.
+    func finishSignup() async {
+        await awaitOutboxReady()
+        tearDownSignupWallet()
+        markComplete()
     }
 
     func uploadAvatar(data: Data, mime: String) async {
