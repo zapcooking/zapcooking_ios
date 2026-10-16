@@ -68,6 +68,13 @@ actor LazarusRelayClient: LazarusRelayIO {
     private let idleTimeout: TimeInterval
     private var connections: [String: LazarusRelayConnection] = [:]
     private var reaper: Task<Void, Never>?
+    /// The relays a *query* may answer an AUTH challenge for: the user's own
+    /// relay list, set once the scan's lookup knows it (spec 0.6.2 — scans
+    /// don't authenticate to relays outside it; authenticating proves to a
+    /// relay that the account itself is asking). The lookup phase and every
+    /// unknown relay query with no list yet never authenticate. Publishes
+    /// are the user's explicit action and may always authenticate.
+    private var queryAuthRelays: Set<String> = []
 
     init(
         transport: GroupRelayTransport = URLSessionGroupRelayTransport(),
@@ -83,6 +90,8 @@ actor LazarusRelayClient: LazarusRelayIO {
     /// when the user lets the app sign in to relays automatically (the
     /// default) or approved this relay. Only a request the relay refused with
     /// `auth-required` triggers it, so scanning an open relay reveals nothing.
+    /// The client additionally scopes queries to the user's own relay list
+    /// (`setQueryAuthRelays`), per spec 0.6.2.
     nonisolated static func authSigner(for keypair: Keypair) -> AuthSigner {
         { relayUrl, challenge in
             let autoApprove = UserDefaults.standard.object(forKey: "wisp_settings_auto_approve_relay_auth") as? Bool ?? true
@@ -93,11 +102,19 @@ actor LazarusRelayClient: LazarusRelayIO {
         }
     }
 
+    /// Let queries answer AUTH challenges from these relays (the user's
+    /// read and write relays, once the scan's lookup knows them).
+    func setQueryAuthRelays(_ relays: Set<String>) {
+        queryAuthRelays = relays
+    }
+
     func query(relay: String, filter: LazarusFilter, timeout: TimeInterval) async -> LazarusRelayAnswer {
         guard let connection = connection(for: relay) else {
             return LazarusRelayAnswer(events: [], outcome: .failed)
         }
-        return await connection.query(filter: filter, timeout: timeout)
+        return await connection.query(
+            filter: filter, timeout: timeout, authAllowed: queryAuthRelays.contains(relay)
+        )
     }
 
     func publish(event: NostrEvent, relay: String, timeout: TimeInterval) async -> LazarusPublishOutcome {
@@ -203,6 +220,9 @@ actor LazarusRelayConnection {
         var awaitingAuth = false
         /// Already sent again after AUTH: a second refusal ends it.
         var replayed = false
+        /// Whether this query's relay may be authenticated at all (the
+        /// user's own relay list; spec 0.6.2's scan rule).
+        var authAllowed = true
     }
 
     private struct PendingPublish {
@@ -231,13 +251,15 @@ actor LazarusRelayConnection {
         "lz-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16).lowercased()
     }
 
-    func query(filter: LazarusFilter, timeout: TimeInterval) async -> LazarusRelayAnswer {
+    func query(filter: LazarusFilter, timeout: TimeInterval, authAllowed: Bool = true) async -> LazarusRelayAnswer {
         guard !isClosed else { return LazarusRelayAnswer(events: [], outcome: .failed) }
         refreshIfStale()
         let subId = Self.subscriptionId()
         let frame = "[\"REQ\",\"\(subId)\",\(filter.json)]"
         return await withCheckedContinuation { continuation in
-            queries[subId] = PendingQuery(frame: frame, continuation: continuation)
+            var pending = PendingQuery(frame: frame, continuation: continuation)
+            pending.authAllowed = authAllowed
+            queries[subId] = pending
             queries[subId]?.timeout = Task { [weak self] in
                 // A request that settled first cancels this; it must settle nothing.
                 do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
@@ -361,7 +383,7 @@ actor LazarusRelayConnection {
         case "CLOSED":
             guard frame.count >= 2, let subId = frame[1] as? String, var pending = queries[subId] else { return }
             let reason = frame.count >= 3 ? (frame[2] as? String ?? "") : ""
-            if Self.isAuthRequired(reason), !pending.replayed, canAttemptAuth {
+            if Self.isAuthRequired(reason), !pending.replayed, pending.authAllowed, canAttemptAuth {
                 pending.awaitingAuth = true
                 queries[subId] = pending
                 proceedWithAuth()

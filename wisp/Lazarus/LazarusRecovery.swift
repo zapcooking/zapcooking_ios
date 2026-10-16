@@ -164,6 +164,11 @@ nonisolated struct LazarusRecoveryDraft: Sendable, Equatable {
 
 nonisolated enum Lazarus {
 
+    /// The spec revision this implementation tracks, shown on the recovery
+    /// screen beside the scan action (as the web app does).
+    static let specVersion = "0.6.2-draft"
+    static let specURL = "https://github.com/dmnyc/lazarus/blob/main/SPEC.md"
+
     /// Per-relay timeout for every request (scan, lookup, re-read).
     static let relayTimeout: TimeInterval = 6
     static let publishTimeout: TimeInterval = 10
@@ -198,6 +203,60 @@ nonisolated enum Lazarus {
         "wss://purplepag.es",
         "wss://nostr.bitcoiner.social",
     ]
+
+    // MARK: - Items
+
+    /// A relay URL as items compare it (spec 0.6.2): scheme and host
+    /// lowercased, a default port, repeated slashes and a trailing slash
+    /// dropped, so a client that rewrote `wss://Relay.Example/` as
+    /// `wss://relay.example` changed nothing. A URL that doesn't parse
+    /// compares as written.
+    static func normalizeRelayURLForComparison(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(), !scheme.isEmpty,
+              let host = url.host?.lowercased(), !host.isEmpty else { return value }
+        var path = url.path
+        while path.contains("//") { path = path.replacingOccurrences(of: "//", with: "/") }
+        while path.hasSuffix("/") { path.removeLast() }
+        let defaultPort: Int?
+        switch scheme {
+        case "ws", "http": defaultPort = 80
+        case "wss", "https": defaultPort = 443
+        default: defaultPort = nil
+        }
+        var out = "\(scheme)://\(host)"
+        if let port = url.port, port != defaultPort { out += ":\(port)" }
+        out += path
+        if let query = url.query, !query.isEmpty { out += "?\(query)" }
+        return out
+    }
+
+    /// What makes a tag an item, and two tags the same item: its type and
+    /// value. A relay hint or petname a client rewrote doesn't change who is
+    /// followed or muted. Relay URLs compare normalized, and on relay lists
+    /// the read/write marker counts too, since it changes what the relay is
+    /// for. A tag without a type or a value is not an item (spec 0.6.2).
+    /// `types` nil accepts every typed tag (an unregistered kind).
+    static func itemKey(_ tag: [String], kind: Int, types: Set<String>?, relayItems: Bool) -> [String]? {
+        guard tag.count >= 2, !tag[0].isEmpty, !tag[1].isEmpty,
+              types?.contains(tag[0]) != false else { return nil }
+        let value = relayItems ? normalizeRelayURLForComparison(tag[1]) : tag[1]
+        return kind == 10002 ? [tag[0], value, tag.count >= 3 ? tag[2] : ""] : [tag[0], value]
+    }
+
+    /// A profile's items (spec 0.6.2): the fields of its content that hold a
+    /// non-null value. Content that isn't a JSON object has none, so a
+    /// profile wiped to `{}` is empty.
+    static func profileFieldCount(_ event: NostrEvent) -> Int {
+        profileFields(of: event).count
+    }
+
+    static func profileFields(of event: NostrEvent) -> [String: Any] {
+        guard let data = event.content.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return object.filter { $0.value is NSNull == false }
+    }
 
     // MARK: - Validation
 
@@ -334,10 +393,14 @@ nonisolated enum Lazarus {
     ) -> LazarusItemCount {
         let itemCount = profile.itemCount(event)
         guard let privateTags, let types = profile.privateItemTypes else { return itemCount }
+        // An item listed both publicly and privately is one item (spec 0.6.2):
+        // only the private items the public tags don't already hold add on.
+        let publicKeys = Set(event.tags.compactMap { Lazarus.itemKey($0, kind: profile.kind, types: types, relayItems: profile.relayItems) })
+        let privateKeys = Set(privateTags.compactMap { Lazarus.itemKey($0, kind: profile.kind, types: types, relayItems: profile.relayItems) })
         return LazarusItemCount(
             count: itemCount.count,
             partial: false,
-            privateCount: LazarusPrivateItems.countItemTags(privateTags, types: types)
+            privateCount: privateKeys.subtracting(publicKeys).count
         )
     }
 
@@ -670,46 +733,46 @@ nonisolated enum Lazarus {
 
     // MARK: - Delta
 
-    /// What makes two tags the same item: their type and value. A relay hint
-    /// or petname a client rewrote doesn't change who is followed or muted.
-    /// On relay lists the read/write marker counts too, since it changes what
-    /// the relay is for.
-    static func itemIdentity(_ tag: [String], kind: Int) -> [String] {
-        Array(tag.prefix(kind == 10002 ? 3 : 2))
-    }
-
+    /// Two versions with identical encrypted content hold the same private
+    /// items, counted or not (spec 0.6.2): one payload, one item set.
     static func delta(
         chosen: NostrEvent,
         current: NostrEvent?,
         privateTags: [String: [[String]]] = [:]
     ) -> LazarusDelta {
+        let profile = LazarusRegistry.profile(for: chosen.kind)
+        let types = profile?.itemTypes
+        let relayItems = profile?.relayItems ?? false
+        let samePrivate = current?.content == chosen.content
         // Decrypted private items compare together with the public tags, so
         // an item that only moved between public and private isn't a change.
-        func items(_ event: NostrEvent?) -> (tags: [[String]], unknown: Bool) {
-            guard let event else { return ([], false) }
-            let decrypted = privateTags[event.id]
-            return (event.tags + (decrypted ?? []),
-                    decrypted == nil && LazarusPrivateItems.encryption(of: event.content) != nil)
-        }
-        func unique(_ tags: [[String]]) -> [[String]] {
-            var order: [[String]] = []
-            var byIdentity: [[String]: [String]] = [:]
-            for tag in tags {
-                let identity = itemIdentity(tag, kind: chosen.kind)
-                if byIdentity[identity] == nil { order.append(identity) }
-                byIdentity[identity] = tag
+        // Identical content shares one decryption: what was decrypted for
+        // either side is what both hold.
+        let shared = current != nil && samePrivate
+            ? (privateTags[chosen.id] ?? privateTags[current?.id ?? ""]) : nil
+        func items(_ event: NostrEvent?) -> (keys: Set<[String]>, tagsByKey: [[String]: [String]], unknown: Bool) {
+            guard let event else { return ([], [:], false) }
+            let decrypted = privateTags[event.id] ?? shared
+            let unknown = decrypted == nil && !samePrivate
+                && LazarusPrivateItems.encryption(of: event.content) != nil
+            var keys: Set<[String]> = []
+            var tagsByKey: [[String]: [String]] = [:]
+            for tag in event.tags + (decrypted ?? []) {
+                guard let key = Lazarus.itemKey(tag, kind: chosen.kind, types: types, relayItems: relayItems) else { continue }
+                if tagsByKey[key] == nil { keys.insert(key) }
+                tagsByKey[key] = tag
             }
-            return order.compactMap { byIdentity[$0] }
+            return (keys, tagsByKey, unknown)
         }
         let chosenItems = items(chosen)
         let currentItems = items(current)
-        let chosenTags = unique(chosenItems.tags)
-        let currentTags = unique(currentItems.tags)
-        let chosenIds = Set(chosenTags.map { itemIdentity($0, kind: chosen.kind) })
-        let currentIds = Set(currentTags.map { itemIdentity($0, kind: chosen.kind) })
         return LazarusDelta(
-            added: chosenTags.filter { !currentIds.contains(itemIdentity($0, kind: chosen.kind)) },
-            removed: currentTags.filter { !chosenIds.contains(itemIdentity($0, kind: chosen.kind)) },
+            added: chosenItems.keys.subtracting(currentItems.keys)
+                .sorted { $0.lexicographicallyPrecedes($1) }
+                .compactMap { chosenItems.tagsByKey[$0] },
+            removed: currentItems.keys.subtracting(chosenItems.keys)
+                .sorted { $0.lexicographicallyPrecedes($1) }
+                .compactMap { currentItems.tagsByKey[$0] },
             privateUnknown: chosenItems.unknown || currentItems.unknown,
             currentPrivateUnknown: currentItems.unknown
         )
@@ -767,13 +830,30 @@ nonisolated enum Lazarus {
 
     // MARK: - Recover
 
+    /// The NIP-01 order every "newer" follows: the later `created_at`, and
+    /// of two from the same second, the lower id (spec 0.6.2 states it for
+    /// the re-read too). The id tie-break applies only between two real
+    /// event ids — a local stand-in's synthetic id is not in that order, so
+    /// same-second comparisons involving one fall back to `created_at`
+    /// alone, and an equal-second stand-in never reads as newer.
+    static func isStrictlyNewer(_ candidate: NostrEvent, than known: NostrEvent) -> Bool {
+        if candidate.createdAt != known.createdAt { return candidate.createdAt > known.createdAt }
+        guard isRealEventId(candidate.id), isRealEventId(known.id) else { return false }
+        return candidate.id < known.id
+    }
+
+    private static func isRealEventId(_ id: String) -> Bool {
+        id.count == 64 && id.allSatisfy(\.isHexDigit)
+    }
+
     /// Decide the re-read before a restore. The list changed only if the
-    /// local copy or a write relay holds a version newer than the one the
-    /// delta was computed against: the re-read asks fewer relays than the
-    /// scan, so an older copy is no edit. Otherwise at least one write relay
-    /// must have answered (an answer with no events counts), or current can't
-    /// be confirmed and the restore must not go ahead. The local copy can't
-    /// confirm it on its own.
+    /// local copy or a write relay holds a version strictly newer than the
+    /// one the delta was computed against, in the NIP-01 order: a later
+    /// `created_at`, or the same second with a lower id — the version relays
+    /// keep. The re-read asks fewer relays than the scan, so an older copy
+    /// is no edit. Otherwise at least one write relay must have answered (an
+    /// answer with no events counts), or current can't be confirmed and the
+    /// restore must not go ahead. The local copy can't confirm it on its own.
     static func checkCurrent(
         reviewed: NostrEvent?,
         local: NostrEvent?,
@@ -783,8 +863,11 @@ nonisolated enum Lazarus {
         // Relay copies first, so a relay's real event wins a tie with this
         // device's copy of the same version.
         for event in answers.flatMap(\.events) + (local.map { [$0] } ?? []) {
-            if let known = newest, event.createdAt <= known.createdAt { continue }
-            newest = event
+            guard let known = newest else {
+                newest = event
+                continue
+            }
+            if isStrictlyNewer(event, than: known) { newest = event }
         }
         if let newest, newest.id != reviewed?.id { return .changed(current: newest) }
         guard answers.contains(where: \.answered) else { return .unconfirmed }

@@ -7,8 +7,8 @@ import Foundation
 // delta / recover, `Lazarus` in LazarusRecovery.swift) never hardcodes kind
 // semantics, so a new kind is added here and nowhere else.
 //
-// Tracks spec 0.6.1-draft, the same revision the zap.cooking web and Android
-// apps follow: https://github.com/dmnyc/lazarus/blob/main/SPEC.md
+// Tracks spec 0.6.2-draft, the revision the zap.cooking web app follows:
+// https://github.com/dmnyc/lazarus/blob/main/SPEC.md
 // Ranking rules change only with a spec version bump; port changes from the
 // spec rather than tuning thresholds here.
 
@@ -70,8 +70,9 @@ nonisolated struct LazarusKindProfile: Sendable, Identifiable {
         /// the content is actually encrypted: a kind 3's content is often
         /// legacy relay JSON, which is not a hidden part of the list.
         case tags(Set<String>, mayHavePrivateItems: Bool)
-        /// Kind 0: one "item" when there is any content at all.
-        case contentPresence
+        /// Kind 0: its items are the content fields that hold a value
+        /// (spec 0.6.2), so a profile wiped to `{}` is empty.
+        case profileFields
     }
 
     let kind: Int
@@ -92,16 +93,50 @@ nonisolated struct LazarusKindProfile: Sendable, Identifiable {
     let counting: Counting
     /// Tag types counted among decrypted private items (NIP-51).
     let privateItemTypes: Set<String>?
+    /// True when the items are relay URLs, which compare normalized
+    /// (spec 0.6.2): a client that rewrote `wss://Relay.Example/` as
+    /// `wss://relay.example` changed nothing.
+    let relayItems: Bool
+
+    init(
+        kind: Int, name: String, label: String,
+        itemSingular: String, itemPlural: String,
+        tier: Int, ranking: LazarusRanking, meaningfulEmpty: Bool,
+        requiredWarnings: [LazarusWarning], counting: Counting,
+        privateItemTypes: Set<String>?, relayItems: Bool = false
+    ) {
+        self.kind = kind
+        self.name = name
+        self.label = label
+        self.itemSingular = itemSingular
+        self.itemPlural = itemPlural
+        self.tier = tier
+        self.ranking = ranking
+        self.meaningfulEmpty = meaningfulEmpty
+        self.requiredWarnings = requiredWarnings
+        self.counting = counting
+        self.privateItemTypes = privateItemTypes
+        self.relayItems = relayItems
+    }
+
+    /// The tag types that are items of this kind, or nil when the kind's
+    /// items aren't tags.
+    var itemTypes: Set<String>? {
+        guard case .tags(let types, _) = counting else { return nil }
+        return types
+    }
 
     var id: Int { kind }
 
     func itemCount(_ event: NostrEvent) -> LazarusItemCount {
         switch counting {
-        case .contentPresence:
-            let hasContent = !event.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return LazarusItemCount(count: hasContent ? 1 : 0, partial: false)
+        case .profileFields:
+            return LazarusItemCount(count: Lazarus.profileFieldCount(event), partial: false)
         case .tags(let types, let mayHavePrivateItems):
-            let count = LazarusPrivateItems.countItemTags(event.tags, types: types)
+            // Items are distinct (spec 0.6.2): a tag repeated, or a client's
+            // rewrite of a relay URL's spelling, is one item, and a tag
+            // without a value is none.
+            let count = Set(event.tags.compactMap { itemKey($0) }).count
             guard mayHavePrivateItems, LazarusPrivateItems.encryption(of: event.content) != nil else {
                 return LazarusItemCount(count: count, partial: false)
             }
@@ -111,6 +146,15 @@ nonisolated struct LazarusKindProfile: Sendable, Identifiable {
                 privateEstimate: LazarusPrivateItems.estimate(event.content)
             )
         }
+    }
+
+    /// What makes a tag an item of this kind, and two tags the same item:
+    /// its type and value (the relay marker counts on relay lists, since it
+    /// changes what the relay is for). Nil when the tag isn't an item: it
+    /// has no type or no value, or its type isn't one of this kind's.
+    func itemKey(_ tag: [String]) -> [String]? {
+        guard let types = itemTypes else { return nil }
+        return Lazarus.itemKey(tag, kind: kind, types: types, relayItems: relayItems)
     }
 
     /// "1 follow" / "1,945 follows".
@@ -139,9 +183,9 @@ nonisolated enum LazarusRegistry {
             ),
             LazarusKindProfile(
                 kind: 0, name: "Profile", label: "Profile",
-                itemSingular: "profile", itemPlural: "profiles",
+                itemSingular: "field", itemPlural: "fields",
                 tier: 2, ranking: .recency, meaningfulEmpty: false, requiredWarnings: [],
-                counting: .contentPresence, privateItemTypes: nil
+                counting: .profileFields, privateItemTypes: nil
             ),
             LazarusKindProfile(
                 kind: 10003, name: "Bookmarks", label: "Bookmarks",
@@ -161,19 +205,22 @@ nonisolated enum LazarusRegistry {
                 kind: 10002, name: "Relay list", label: "Relay list",
                 itemSingular: "relay", itemPlural: "relays",
                 tier: 3, ranking: .recency, meaningfulEmpty: false, requiredWarnings: [.staleRelays],
-                counting: .tags(["r"], mayHavePrivateItems: false), privateItemTypes: nil
+                counting: .tags(["r"], mayHavePrivateItems: false), privateItemTypes: nil,
+                relayItems: true
             ),
             LazarusKindProfile(
                 kind: 10050, name: "DM relays", label: "DM relays",
                 itemSingular: "relay", itemPlural: "relays",
                 tier: 3, ranking: .recency, meaningfulEmpty: false, requiredWarnings: [.staleRelays],
-                counting: .tags(["relay"], mayHavePrivateItems: false), privateItemTypes: nil
+                counting: .tags(["relay"], mayHavePrivateItems: false), privateItemTypes: nil,
+                relayItems: true
             ),
             LazarusKindProfile(
                 kind: 10006, name: "Blocked relays", label: "Blocked relays",
                 itemSingular: "relay", itemPlural: "relays",
                 tier: 3, ranking: .count, meaningfulEmpty: false, requiredWarnings: [],
-                counting: .tags(["relay"], mayHavePrivateItems: false), privateItemTypes: nil
+                counting: .tags(["relay"], mayHavePrivateItems: false), privateItemTypes: nil,
+                relayItems: true
             ),
         ]
         return Dictionary(uniqueKeysWithValues: all.map { ($0.kind, $0) })
