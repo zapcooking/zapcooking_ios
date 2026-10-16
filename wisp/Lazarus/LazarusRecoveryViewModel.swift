@@ -160,6 +160,12 @@ final class LazarusRecoveryViewModel {
             // The screen went away during the relay-list lookup: stop here,
             // so the fetch can't open fresh sockets after `close()`.
             guard token == self.generation, !Task.isCancelled else { return }
+            // Queries may authenticate only to the user's own relays
+            // (spec 0.6.2): the lookup ran without any, the scan gets the
+            // list's read and write relays now.
+            if let client = io as? LazarusRelayClient {
+                await client.setQueryAuthRelays(Set(plan.user.read + plan.user.write))
+            }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: plan.relays)
             let prepared = await Task.detached(priority: .userInitiated) {
                 let decrypted = Self.decrypt(page.tagged.map(\.event), with: decryptor, profile: profile, known: [:], failed: [])
