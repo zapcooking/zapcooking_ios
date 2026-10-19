@@ -423,6 +423,11 @@ final class ComposeViewModel {
     }
 
     func toggleNsfw() { explicit.toggle() }
+
+    /// Per-compose Proof of Work: seeded from the Settings default
+    /// (`PowPreferences.snapshot().noteEnabled`), toggled here for this post
+    /// only — the difficulty always comes from settings.
+    func togglePow() { powEnabled.toggle() }
     /// Toggle the "Private" reply state. No-op when locked (replying to a
     /// rumor that's already private) — the chain stays encrypted end-to-end.
     func togglePrivate() {

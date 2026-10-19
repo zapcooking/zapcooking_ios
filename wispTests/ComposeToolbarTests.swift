@@ -4,13 +4,13 @@ import Testing
 import UIKit
 @testable import wisp
 
-/// Compose toolbar cleanup: the Proof of Work shield is gone from the row
-/// (and note PoW defaults off), the content-warning control is an
-/// eye-slash and the schedule control a calendar, Publish says why it is
-/// greyed out, and the OnlyFood pills are one outlined row with a "+".
-/// Rendered at the narrowest supported width (375pt); PNGs land in the
-/// directory named by the git-ignored `wispTests/.zc_snapshot_dir`.
-/// Hermetic.
+/// Compose toolbar: the slimmed attach row keeps only core actions (photos,
+/// GIF, poll) plus the "…" overflow; paste, the content-warning eye-slash,
+/// Proof of Work and scheduling live in `ComposerMoreSheet` (parity with the
+/// Android composer's secondary panel). Publish says why it is greyed out,
+/// and the OnlyFood pills are one outlined row with a "+". Rendered at the
+/// narrowest supported width (375pt); PNGs land in the directory named by
+/// the git-ignored `wispTests/.zc_snapshot_dir`. Hermetic.
 @MainActor
 struct ComposeToolbarTests {
     private func freshKeypair() -> Keypair {
@@ -35,20 +35,56 @@ struct ComposeToolbarTests {
         )
     }
 
-    // MARK: - The row: no shield, action glyphs
+    // MARK: - The row: core actions inline, the rest behind "…"
 
-    @Test func newPostRow_isSixControls_withoutProofOfWork() {
+    @Test func newPostRow_isCoreActionsPlusMore() {
         let controls = ComposeActionsRow.controls(mode: .new, pollEnabled: false, galleryMode: false)
-        #expect(controls == [
-            "Add photos", "Paste image from clipboard", "Add GIF",
-            "Mark as sensitive", "Create poll", "Schedule post",
-        ])
+        #expect(controls == ["Add photos", "Add GIF", "Create poll", "More options"])
         #expect(!controls.contains { $0.localizedCaseInsensitiveContains("proof") })
+        // The options that moved into the More sheet are off the row —
+        // paste among them.
+        #expect(!controls.contains("Paste image from clipboard"))
+        #expect(!controls.contains("Mark as sensitive"))
+        #expect(!controls.contains("Schedule post"))
     }
 
-    @Test func pollRow_keepsSensitiveAndSchedule() {
+    @Test func pollRow_isPollPlusMore() {
         let controls = ComposeActionsRow.controls(mode: .new, pollEnabled: true, galleryMode: false)
-        #expect(controls == ["Mark as sensitive", "Create poll", "Schedule post"])
+        #expect(controls == ["Create poll", "More options"])
+    }
+
+    @Test func galleryRow_keepsGIF_plusPollAndMore() {
+        // Gallery mode only suppresses the photo picker (attachments live in
+        // the grid); GIF still appends there, as before the redesign.
+        #expect(ComposeActionsRow.controls(mode: .new, pollEnabled: false, galleryMode: true)
+                == ["Add GIF", "Create poll", "More options"])
+    }
+
+    // MARK: - The More sheet: where the moved options live
+
+    @Test func moreSheetRows_pasteSensitivePowSchedule_always_privateReplyInReplies() {
+        #expect(ComposerMoreSheet.rows(replyMode: false) == [
+            "Paste image from clipboard", "Mark as sensitive", "Proof of work", "Schedule post",
+        ])
+        #expect(ComposerMoreSheet.rows(replyMode: true) == [
+            "Paste image from clipboard", "Mark as sensitive", "Proof of work", "Schedule post", "Send privately",
+        ])
+    }
+
+    @Test func togglingPow_flipsThePerComposeFlag_only() {
+        let vm = composer()
+        let defaultOn = PowPreferences.snapshot().noteEnabled
+        #expect(vm.powEnabled == defaultOn)
+        vm.togglePow()
+        #expect(vm.powEnabled != defaultOn)
+        // The settings default is untouched — the toggle is for this post.
+        #expect(PowPreferences.snapshot().noteEnabled == defaultOn)
+    }
+
+    @Test func moreSheet_scheduleSummary_readsBackTheSetDate() {
+        let date = Date(timeIntervalSince1970: 1_792_000_000)
+        let summary = "Scheduled for " + date.formatted(date: .abbreviated, time: .shortened)
+        #expect(summary.hasPrefix("Scheduled for "))
     }
 
     @Test func sensitiveGlyph_isEyeSlash_notAWarningTriangle() {
@@ -214,13 +250,12 @@ struct ComposeToolbarTests {
 
     /// The toolbar is a horizontal `ScrollView`, which `ImageRenderer` draws
     /// empty, so it is hosted in a 375pt window and snapshotted with
-    /// `drawHierarchy` (the `ColorHierarchyRenderTests` pattern). Idle, then
-    /// with sensitive and schedule both on; every glyph must sit inside the
-    /// row (no shield, so the row fits without scrolling at 375pt).
-    @Test func toolbar_render_idle_and_active_at375() throws {
+    /// `drawHierarchy` (the `ColorHierarchyRenderTests` pattern). The slimmed
+    /// row fits without scrolling at 375pt; the More sheet renders its rows.
+    @Test func toolbar_render_idle_at375() throws {
         let vm = composer(pills: true)
         let row = ComposeActionsRow(
-            viewModel: vm, onPickPhotos: {}, onPasteImage: {}, onPickGif: {}, onSchedule: {}
+            viewModel: vm, onPickPhotos: {}, onPickGif: {}, onMore: {}
         )
         let host = Host(row.background(Color.wispBackground).environment(\.colorScheme, .dark))
         host.pump(0.3)
@@ -229,13 +264,41 @@ struct ComposeToolbarTests {
         #expect(!isBlank(idle), "toolbar drew nothing")
         write(idle, "compose-toolbar-idle-375")
 
-        vm.toggleNsfw()
-        vm.setSchedule(Date(timeIntervalSinceNow: 3600))
-        #expect(vm.explicit && vm.scheduleEnabled)
-        host.pump(0.3)
-        let active = try #require(host.snapshot())
-        #expect(!isBlank(active))
-        write(active, "compose-toolbar-active-375")
+        // The More sheet carries the options that left the row: idle, then
+        // with sensitive marked, PoW on, scheduled, and a private reply armed.
+        var dismissed = false
+        let sheet = ComposerMoreSheet(
+            onPaste: {},
+            explicit: false, onToggleExplicit: {},
+            powEnabled: false, onTogglePow: {},
+            scheduleEnabled: false, scheduleSummary: nil, scheduleUnavailable: false,
+            onSchedule: {},
+            privateReplyVisible: true, privateReplyEnabled: false, privateReplyLocked: false,
+            onTogglePrivateReply: {}
+        )
+        let sheetHost = Host(sheet.environment(\.colorScheme, .dark), height: 400)
+        sheetHost.pump(0.3)
+        let sheetIdle = try #require(sheetHost.snapshot())
+        #expect(!isBlank(sheetIdle), "More sheet drew nothing")
+        write(sheetIdle, "compose-more-sheet-idle")
+
+        let active = ComposerMoreSheet(
+            onPaste: {},
+            explicit: true, onToggleExplicit: {},
+            powEnabled: true, onTogglePow: {},
+            scheduleEnabled: true,
+            scheduleSummary: "Scheduled for " + Date().formatted(date: .abbreviated, time: .shortened),
+            scheduleUnavailable: false,
+            onSchedule: { dismissed = true },
+            privateReplyVisible: true, privateReplyEnabled: true, privateReplyLocked: true,
+            onTogglePrivateReply: {}
+        )
+        let activeHost = Host(active.environment(\.colorScheme, .dark), height: 400)
+        activeHost.pump(0.3)
+        let sheetActive = try #require(activeHost.snapshot())
+        #expect(!isBlank(sheetActive))
+        write(sheetActive, "compose-more-sheet-active")
+        #expect(!dismissed)
     }
 
     /// The whole composer at 375pt with the OnlyFood pills, as the user

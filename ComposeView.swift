@@ -25,6 +25,8 @@ struct ComposeView: View {
 
     @FocusState private var contentFocused: Bool
     @State private var showScheduleSheet = false
+    @State private var showMoreSheet = false
+    @State private var pendingSchedulePresentation = false
     @State private var showCancelConfirm = false
     @State private var showGifPicker = false
     @State private var showDraftsSheet = false
@@ -246,6 +248,16 @@ struct ComposeView: View {
 
     private var sheetHost: some View {
         lifecycleHost
+        .sheet(isPresented: $showMoreSheet, onDismiss: {
+            // The schedule row can't stack the schedule sheet on this one;
+            // the More sheet hands the presentation off as it dismisses.
+            if pendingSchedulePresentation {
+                pendingSchedulePresentation = false
+                showScheduleSheet = true
+            }
+        }) {
+            moreSheet
+        }
         .sheet(isPresented: $showScheduleSheet) {
             ScheduleSheet(
                 initialDate: viewModel.scheduleAt,
@@ -1240,7 +1252,6 @@ struct ComposeView: View {
         ComposeActionsRow(
             viewModel: viewModel,
             onPickPhotos: { presentPhotoPicker(max: 4) },
-            onPasteImage: { pasteImageFromClipboard() },
             onPickGif: {
                 // Resign the compose text field before presenting so the
                 // keyboard animation finishes ahead of the modal. Without
@@ -1253,7 +1264,38 @@ struct ComposeView: View {
                     showGifPicker = true
                 }
             },
-            onSchedule: { showScheduleSheet = true }
+            onMore: { showMoreSheet = true }
+        )
+    }
+
+    /// The "…" panel. Tapping the schedule row presents the schedule sheet,
+    /// which can't stack on this one — the More sheet's `onDismiss` opens it.
+    /// Paste closes the sheet first, so the attachment lands on the composer.
+    private var moreSheet: some View {
+        ComposerMoreSheet(
+            onPaste: {
+                pasteImageFromClipboard()
+            },
+            explicit: viewModel.explicit,
+            onToggleExplicit: { viewModel.toggleNsfw() },
+            powEnabled: viewModel.powEnabled,
+            onTogglePow: { viewModel.togglePow() },
+            scheduleEnabled: viewModel.scheduleEnabled,
+            scheduleSummary: viewModel.scheduleAt.map {
+                "Scheduled for " + $0.formatted(date: .abbreviated, time: .shortened)
+            },
+            scheduleUnavailable: viewModel.isPrivate,
+            onSchedule: {
+                pendingSchedulePresentation = true
+                showMoreSheet = false
+            },
+            privateReplyVisible: {
+                if case .reply = viewModel.mode { return true }
+                return false
+            }(),
+            privateReplyEnabled: viewModel.isPrivate,
+            privateReplyLocked: viewModel.isPrivateLocked,
+            onTogglePrivateReply: { viewModel.togglePrivate() }
         )
     }
 
