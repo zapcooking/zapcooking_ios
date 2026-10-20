@@ -1143,7 +1143,9 @@ final class FeedViewModel {
 
     /// Kick off NIP-53 live activity + chat discovery. Uses the user's NIP-65 read relays
     /// when available, falling back to the top relays from the score board for new users.
+    /// No-op when the "Show live streams" setting is off.
     private func startLiveDiscovery() {
+        guard AppSettings.shared.showsLiveContent else { return }
         services.startLiveDiscovery(keypair.pubkey)
     }
 
@@ -1158,6 +1160,16 @@ final class FeedViewModel {
                 relays = board.scoredRelays.prefix(10).map(\.url)
             }
             LiveStreamCoordinator.shared.startDiscovery(myPubkey: pubkey, readRelays: relays)
+        }
+    }
+
+    /// Called from `MainView` when the "Show live streams" setting flips, so the
+    /// change takes effect immediately instead of on next app start.
+    func liveContentSettingChanged(_ enabled: Bool) {
+        if enabled {
+            startLiveDiscovery()
+        } else {
+            LiveStreamCoordinator.shared.stopDiscovery()
         }
     }
 
