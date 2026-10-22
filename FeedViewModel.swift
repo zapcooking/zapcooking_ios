@@ -13,6 +13,11 @@ enum FeedKind: Equatable, Hashable {
     case relay(url: String)
     case relaySet(RelaySet)
     case extendedNetwork
+    /// The Live Video feed: discovered NIP-53 streams, Sidecar-style. Not
+    /// served by `FeedViewModel` — the list comes from
+    /// `LiveStreamRepository.shared`, fed by discovery; the kind exists so
+    /// the picker, pill label and persistence read one type.
+    case liveVideo
 
     var displayName: String {
         switch self {
@@ -26,6 +31,8 @@ enum FeedKind: Equatable, Hashable {
             return set.name
         case .extendedNetwork:
             return "Extended Network"
+        case .liveVideo:
+            return "Live Video"
         }
     }
 }
@@ -412,6 +419,10 @@ final class FeedViewModel {
             await loadUserProfile()
             isLoading = false
             return
+        case .liveVideo:
+            await loadUserProfile()
+            isLoading = false
+            return
         case .relay, .relaySet, .extendedNetwork:
             isLoading = false
             subscribeCurrentRelayKind()
@@ -639,7 +650,7 @@ final class FeedViewModel {
     /// by the explicit selectors and the cold-start landing path in `start()`.
     private func subscribeCurrentRelayKind() {
         switch currentKind {
-        case .follows, .onlyFood:
+        case .follows, .onlyFood, .liveVideo:
             return
         case .relay(let url):
             relayFeedStatus = .connecting
@@ -734,6 +745,17 @@ final class FeedViewModel {
         resetForKindSwitch()
         FeedKindStore.persist(.extendedNetwork, pubkey: keypair.pubkey)
         subscribeCurrentRelayKind()
+    }
+
+    /// The Live Video feed: nothing to subscribe in this VM (discovery feeds
+    /// `LiveStreamRepository`, kicked here and re-kicked by the view's
+    /// on-appear refresh).
+    func selectLiveVideo() {
+        cancelLiveSubscription()
+        currentKind = .liveVideo
+        resetForKindSwitch()
+        FeedKindStore.persist(.liveVideo, pubkey: keypair.pubkey)
+        startLiveDiscovery()
     }
 
     private func cancelLiveSubscription() {
@@ -1042,8 +1064,8 @@ final class FeedViewModel {
             loadOlderFromDisk()
         case .relay, .relaySet, .extendedNetwork:
             loadMore()
-        case .onlyFood:
-            break  // paged by OnlyFoodFeedViewModel
+        case .onlyFood, .liveVideo:
+            break  // paged by OnlyFoodFeedViewModel / live discovery
         }
     }
 
@@ -1105,7 +1127,7 @@ final class FeedViewModel {
         guard loadMoreTask == nil else { return }
         let relays: [String]
         switch currentKind {
-        case .follows, .onlyFood: return
+        case .follows, .onlyFood, .liveVideo: return
         case .relay(let url): relays = [url]
         case .relaySet(let set): relays = set.relays
         case .extendedNetwork:
@@ -1143,7 +1165,9 @@ final class FeedViewModel {
 
     /// Kick off NIP-53 live activity + chat discovery. Uses the user's NIP-65 read relays
     /// when available, falling back to the top relays from the score board for new users.
+    /// No-op when the "Show live streams" setting is off.
     private func startLiveDiscovery() {
+        guard AppSettings.shared.showsLiveContent else { return }
         services.startLiveDiscovery(keypair.pubkey)
     }
 
@@ -1158,6 +1182,16 @@ final class FeedViewModel {
                 relays = board.scoredRelays.prefix(10).map(\.url)
             }
             LiveStreamCoordinator.shared.startDiscovery(myPubkey: pubkey, readRelays: relays)
+        }
+    }
+
+    /// Called from `MainView` when the "Show live streams" setting flips, so the
+    /// change takes effect immediately instead of on next app start.
+    func liveContentSettingChanged(_ enabled: Bool) {
+        if enabled {
+            startLiveDiscovery()
+        } else {
+            LiveStreamCoordinator.shared.stopDiscovery()
         }
     }
 

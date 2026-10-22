@@ -24,11 +24,12 @@ struct FeedTopBarPolishTests {
         ]
     }
 
-    // MARK: - Item 2: live rail on OnlyFood
+    // MARK: - Item 2: live video is its own feed (the strip went away)
 
-    @Test func liveRail_rendersOnEveryKind_includingOnlyFood() {
+    @Test func liveVideoKind_rendersTheLiveVideoBody_andTheRestDoesNot() {
+        #expect(FeedTabRouting.body(for: .liveVideo) == .liveVideo)
         for kind in everyKind {
-            #expect(FeedTabRouting.showsLiveRail(for: kind), "\(kind)")
+            #expect(FeedTabRouting.body(for: kind) != .liveVideo, "\(kind)")
         }
     }
 
