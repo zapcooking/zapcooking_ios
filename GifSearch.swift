@@ -230,11 +230,18 @@ enum GifSearchError: Error {
     }
 }
 
+/// What the picker talks to — a protocol so tests can script pages without
+/// the network. Production uses `GifsNostrBuildClient`.
+protocol GifSearchClient {
+    func search(query: String, offset: Int) async throws -> GifPage
+    func suggest(query: String) async throws -> [String]
+}
+
 /// One-shot GETs against gifs.nostr.build with the Bearer key, an 8-second
 /// timeout, and Task-cancellation-aware aborts. Status errors surface as
 /// `GifSearchError.failed` carrying `GifSearch.errorMessage` so the picker
 /// never shows a raw HTTP code.
-struct GifSearchClient {
+struct GifsNostrBuildClient: GifSearchClient {
     var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8

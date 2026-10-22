@@ -36,15 +36,17 @@ final class GifPickerModel {
 
     /// Whether the visible tail of the grid is close enough to the bottom
     /// that a new page should load. Maintained by cell `onAppear` — the
-    /// SwiftUI equivalent of the web picker's scroll-position check.
+    /// SwiftUI equivalent of the web picker's scroll-position check — and
+    /// reset whenever the grid grows, so it always describes the grid on
+    /// screen, not one the last page already scrolled past.
     private var tailVisible = false
 
     private var pageTask: Task<Void, Never>?
     private var suggestTask: Task<Void, Never>?
 
-    private let client: GifSearchClient
+    private let client: any GifSearchClient
 
-    init(client: GifSearchClient = GifSearchClient()) {
+    init(client: any GifSearchClient = GifsNostrBuildClient()) {
         self.client = client
     }
 
@@ -134,6 +136,11 @@ final class GifPickerModel {
         pageTask?.cancel()
         nextOffset = nil
         searchedQuery = nil
+        // A cancelled request returns without touching `loading`, and no cell
+        // can re-fire onAppear on an empty grid — reset both here or the idle
+        // picker spins forever.
+        loading = false
+        tailVisible = false
         placed = []
         seen = []
         placedCount = 0
@@ -146,7 +153,10 @@ final class GifPickerModel {
     private func load(_ offset: Int) {
         pageTask?.cancel()
         loading = true
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The query that owns the grid, not the field's live text: a tail
+        // cell can fire while new text is still debouncing, and asking the
+        // new query for the old grid's offset appends unrelated GIFs.
+        let q = searchedQuery ?? query.trimmingCharacters(in: .whitespacesAndNewlines)
         pageTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -154,8 +164,10 @@ final class GifPickerModel {
                 // A superseded page (new search, sheet closed) applies nothing
                 // and must not clear the newer request's loading state.
                 guard !Task.isCancelled else { return }
-                self.apply(page: page, offset: offset, query: q)
+                // Clear before applying: apply can start the next page's load,
+                // and clearing after would cancel that request's loading state.
                 self.loading = false
+                self.apply(page: page, offset: offset, query: q)
             } catch is CancellationError {
                 return
             } catch let error as GifSearchError {
@@ -171,6 +183,7 @@ final class GifPickerModel {
     }
 
     private func apply(page: GifPage, offset: Int, query q: String) {
+        let before = placedCount
         place(page.gifs)
         nextOffset = page.next
         if offset == 0 && page.gifs.isEmpty && !q.isEmpty {
@@ -181,8 +194,17 @@ final class GifPickerModel {
         // A page of duplicates or rejected items doesn't grow the grid, so no
         // cell onAppear follows: if the bottom is what's showing, ask for the
         // next page directly — only when the cursor actually moved, so a
-        // cursor that doesn't move can't loop.
-        if GifSearch.pageAdvanced(offset, page.next), tailVisible, let next = page.next {
+        // cursor that doesn't move can't loop. An empty grid pages on too:
+        // a first page that was entirely rejected fired no onAppear that
+        // could. A page that DID grow the grid instead waits for its new
+        // tail cells to appear — otherwise one glimpse of the old tail keeps
+        // fetching pages after the new tail is offscreen.
+        let grew = placedCount > before
+        if grew {
+            tailVisible = false
+        } else if GifSearch.pageAdvanced(offset, page.next),
+                  tailVisible || before == 0,
+                  let next = page.next {
             load(next)
         }
     }
@@ -377,13 +399,17 @@ struct GifPickerView: View {
             onSelect(gif)
             dismiss()
         } label: {
-            AsyncImage(url: gif.previewURL) { image in
-                image.resizable().scaledToFit()
-            } placeholder: {
-                Color.wispSurfaceVariant
-            }
-            // The real dimensions before load, so the grid never jumps.
-            .aspectRatio(gif.width / max(gif.height, 1), contentMode: .fit)
+            // Animated, not AsyncImage: SwiftUI's AsyncImage rasterizes
+            // through UIImage(data:) and keeps only the first frame, and
+            // these previews are the animated w240 renditions. The aspect
+            // hint reserves the real dimensions before load so the grid
+            // never jumps.
+            AnimatedImageView(
+                url: gif.previewURL,
+                aspect: gif.width / max(gif.height, 1),
+                placeholder: { Color.wispSurfaceVariant },
+                failure: { Color.wispSurfaceVariant }
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
