@@ -1,4 +1,8 @@
 import SwiftUI
+import os
+
+/// DEBUG-only lifecycle tracing for the live player (mute-button repro).
+private let livePlayerLog = Logger(subsystem: "cooking.zap.app", category: "live-player")
 import AVKit
 import AVFoundation
 
@@ -31,7 +35,16 @@ struct LiveStreamView: View {
             VStack(spacing: 0) {
                 StreamPlayer(
                     url: vm.activity?.streamingUrl,
-                    onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) }
+                    onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) },
+                    onStartPiP: {
+                        if LivePlayerStore.shared.startPictureInPicture(
+                            onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) }
+                        ) {
+                            // The floating window takes over; the stream view
+                            // pops and the player outlives it in the store.
+                            dismiss()
+                        }
+                    }
                 )
                 StreamInfoBar(
                     hostPubkey: vm.hostPubkey,
@@ -124,13 +137,76 @@ final class LivePlayerStore {
 
     private(set) var player: AVPlayer?
     private(set) var currentURL: String?
-    /// Set true via `AVPlayerViewControllerDelegate` while PiP is active. When false,
-    /// view dismissal releases the player; when true, the player stays alive.
+    /// Set true via `AVPlayerViewControllerDelegate` (system controls) or by
+    /// `startPictureInPicture` (the in-view button) while PiP is active. When
+    /// false, view dismissal releases the player; when true, the player stays
+    /// alive.
     var pipActive: Bool = false
+    /// The layer-driven PiP session started by `startPictureInPicture`.
+    /// Retained here (and by the coordinator) for the session's life.
+    private var manualPipLayer: AVPlayerLayer?
+    private var manualPipController: AVPictureInPictureController?
+    private var manualPipDelegate: ManualLivePipDelegate?
+
+    /// Start PiP from the stream view's own button. `AVPlayerViewController`
+    /// exposes no programmatic PiP trigger, so this drives an offscreen
+    /// `AVPlayerLayer`-based controller rendering the same player. The stream
+    /// view dismisses itself on success; the floating window continues, and
+    /// the layer's restore button routes back through the coordinator.
+    @discardableResult
+    func startPictureInPicture(onRestore: @escaping () -> Void) -> Bool {
+        guard let player,
+              AVPictureInPictureController.isPictureInPictureSupported() else { return false }
+        // Stop a prior manual session first — one PiP at a time.
+        stopManualPictureInPicture()
+
+        let layer = AVPlayerLayer()
+        layer.player = player
+        layer.frame = UIScreen.main.bounds
+        layer.isHidden = true
+        let delegate = ManualLivePipDelegate(
+            onStopped: { [weak self] in self?.stopManualPictureInPicture() },
+            onRestore: onRestore
+        )
+        guard let controller = AVPictureInPictureController(playerLayer: layer) else {
+            return false
+        }
+        controller.delegate = delegate
+        manualPipLayer = layer
+        manualPipController = controller
+        manualPipDelegate = delegate
+        pipActive = true
+        VideoPiPCoordinator.shared.begin(player: player, retaining: [controller, delegate, layer])
+        if let window = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
+            window.layer.addSublayer(layer)
+        }
+        controller.startPictureInPicture()
+        return true
+    }
+
+    /// Tear the manual layer-PiP session down (PiP stopped, or a new session
+    /// replacing it). Ends coordinator ownership; playback continues inline.
+    func stopManualPictureInPicture() {
+        manualPipLayer?.removeFromSuperlayer()
+        manualPipLayer = nil
+        manualPipController = nil
+        manualPipDelegate = nil
+        if VideoPiPCoordinator.shared.isPiPActive {
+            VideoPiPCoordinator.shared.end()
+        }
+        pipActive = false
+    }
 
     func ensurePlayer(for urlString: String) -> AVPlayer? {
         guard !urlString.isEmpty, let url = URL(string: urlString) else { return nil }
-        if currentURL == urlString, let existing = player { return existing }
+        if currentURL == urlString, let existing = player {
+            livePlayerLog.debug("ensurePlayer: reuse \(urlString, privacy: .public)")
+            return existing
+        }
+        #if DEBUG
+        livePlayerLog.notice("ensurePlayer: CREATING player for \(urlString, privacy: .public) (previous url: \(self.currentURL ?? "nil", privacy: .public))")
+        #endif
         // Switching streams: tear the previous one down.
         player?.pause()
         if let old = player {
@@ -174,11 +250,40 @@ final class LivePlayerStore {
     }
 }
 
+/// Delegate for the stream view's manual PiP session. PiP delegates are held
+/// weakly by AVFoundation, so the store retains this for the session's life.
+private final class ManualLivePipDelegate: NSObject, AVPictureInPictureControllerDelegate {
+    private let onStopped: () -> Void
+    private let onRestore: () -> Void
+
+    init(onStopped: @escaping () -> Void, onRestore: @escaping () -> Void) {
+        self.onStopped = onStopped
+        self.onRestore = onRestore
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        // The floating window closed: drop the session and its layer.
+        onStopped()
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        // The floating window's restore button: re-open the stream view.
+        onRestore()
+        completionHandler(true)
+    }
+}
+
 private struct StreamPlayer: View {
     let url: String?
     /// Called when the user taps "return to app" on the system PiP window so
     /// the live stream can be re-opened. Threaded down to the PiP delegate.
     var onRestore: () -> Void = {}
+    /// Starts PiP from the overlay button (the system controls' own PiP
+    /// entry needs their chrome to be showing; this is one tap, always).
+    var onStartPiP: () -> Void
     @State private var failureMessage: String?
 
     var body: some View {
@@ -191,6 +296,23 @@ private struct StreamPlayer: View {
                     onRestore: onRestore
                 )
                 .id(urlString)
+                .overlay(alignment: .topTrailing) {
+                    // The simulator reports PiP as unsupported and a start
+                    // would silently no-op — the button only shows where PiP
+                    // can actually engage (device).
+                    if AVPictureInPictureController.isPictureInPictureSupported() {
+                        Button(action: onStartPiP) {
+                            Image(systemName: "rectangular.inset.filled")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .background(.black.opacity(0.55), in: Circle())
+                                .padding(10)
+                        }
+                        .accessibilityLabel("Picture in Picture")
+                        .accessibilityIdentifier("live-pip-button")
+                    }
+                }
                 if let failureMessage {
                     VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -257,6 +379,9 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
         let player = LivePlayerStore.shared.ensurePlayer(for: urlString)
         if vc.player !== player {
+            #if DEBUG
+            livePlayerLog.notice("updateUIViewController: REASSIGNING vc.player (url: \(urlString, privacy: .public))")
+            #endif
             attach(player: player, to: vc, context: context)
         }
     }
@@ -268,12 +393,20 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
         // released the player; `ensurePlayer` then recreates it and `attach` plays it,
         // leaving an orphaned player sounding off with no view. Pause on teardown
         // unless that player is genuinely out in Picture-in-Picture right now.
-        if let player = vc.player, !VideoPiPCoordinator.shared.isOwning(player) {
-            player.pause()
+        if let player = vc.player {
+            #if DEBUG
+            livePlayerLog.notice("dismantle: pausing=\(!VideoPiPCoordinator.shared.isOwning(player), privacy: .public) player \(ObjectIdentifier(player).hashValue, privacy: .public)")
+            #endif
+            if !VideoPiPCoordinator.shared.isOwning(player) {
+                player.pause()
+            }
         }
     }
 
     private func attach(player: AVPlayer?, to vc: AVPlayerViewController, context: Context) {
+        #if DEBUG
+        livePlayerLog.notice("attach: player isMuted=\(player?.isMuted ?? false, privacy: .public)")
+        #endif
         vc.player = player
         context.coordinator.attach(player: player)
         player?.play()
@@ -287,6 +420,7 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
         private let onRestore: () -> Void
         private var player: AVPlayer?
         private var statusObservation: NSKeyValueObservation?
+        private var muteObservation: NSKeyValueObservation?
         private var failedObserver: NSObjectProtocol?
 
         init(onFailure: @escaping (String) -> Void, onRestore: @escaping () -> Void) {
@@ -297,6 +431,11 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
         func attach(player: AVPlayer?) {
             detach()
             self.player = player
+            #if DEBUG
+            muteObservation = player?.observe(\.isMuted, options: [.new]) { p, _ in
+                livePlayerLog.notice("isMuted KVO -> \(p.isMuted, privacy: .public)")
+            }
+            #endif
             guard let item = player?.currentItem else { return }
             statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 guard let self else { return }
@@ -316,6 +455,8 @@ private struct AVPlayerControllerRepresentable: UIViewControllerRepresentable {
         }
 
         func detach() {
+            muteObservation?.invalidate()
+            muteObservation = nil
             statusObservation?.invalidate()
             statusObservation = nil
             if let failedObserver {
@@ -434,10 +575,6 @@ private struct LiveChatList: View {
     let onReply: (LiveChatMessage) -> Void
     let onReact: (LiveChatMessage, String) -> Void
     let onZap: (LiveChatMessage) -> Void
-    /// Newest row id seen at the last count change — distinguishes appends
-    /// (new chat, autoscroll to bottom) from prepends (older history, keep position).
-    @State private var lastNewestId: String?
-
     private static let memberPalette: [Color] = [
         Color(red: 0.898, green: 0.451, blue: 0.451),  // E57373 red
         Color(red: 0.506, green: 0.780, blue: 0.518),  // 81C784 green
@@ -489,22 +626,40 @@ private struct LiveChatList: View {
                         )
                         .id(msg.id)
                     }
-                    Color.clear.frame(height: 4).id("__bottom__")
+                    Color.clear.frame(height: 4).id("chat-bottom")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
+            // Open — and stay — anchored to the newest message above the
+            // composer. The bottom anchor governs the initial position only:
+            // streams whose chat page arrives after first layout (slow
+            // relays) still need the explicit pin below. Scrolling up pages
+            // older history without yanking the position.
+            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.count) { _, _ in
-                let newest = messages.last?.id
-                let appended = newest != nil && newest != lastNewestId
-                lastNewestId = newest
-                // Older-history prepends keep the reading position; only a new
-                // newest message autoscrolls to the live edge.
-                guard appended, let last = messages.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    reader.scrollTo(last.id, anchor: .bottom)
+            .onAppear { Self.pinToLatest(reader) }
+            .onChange(of: messages.count) { oldCount, newCount in
+                if oldCount == 0, newCount > 0 {
+                    // The newest page just arrived post-layout (slow-relay
+                    // streams — Noderunners-class). Pin once the batch
+                    // settles, with staggered re-fires so LazyVStack
+                    // materialization can't leave the scroll short.
+                    Self.pinToLatest(reader, delays: [100, 400, 900])
                 }
+            }
+        }
+    }
+
+    @MainActor
+    private static func pinToLatest(_ reader: ScrollViewProxy, delays: [Double] = [0, 250]) {
+        let reader = reader
+        Task { @MainActor in
+            for delay in delays {
+                if delay > 0 {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                }
+                reader.scrollTo("chat-bottom", anchor: .bottom)
             }
         }
     }
@@ -625,11 +780,18 @@ private struct LiveChatBubble: View {
         )
     }
 
-    private var timeText: String {
-        let date = Date(timeIntervalSince1970: TimeInterval(message.createdAt))
+    /// 12-hour clock with an explicit AM/PM marker, regardless of the
+    /// device's 24-hour setting. Cached: one formatter, not one per row
+    /// render.
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+
+    private var timeText: String {
+        Self.timeFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(message.createdAt)))
     }
 }
 
