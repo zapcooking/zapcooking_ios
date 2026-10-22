@@ -1401,6 +1401,16 @@ struct MainView: View {
                 )
             }
 
+            if settings.showsLiveContent {
+                Button {
+                    viewModel.selectLiveVideo()
+                } label: {
+                    Label("Live Video", systemImage: viewModel.currentKind == .liveVideo
+                        ? "checkmark"
+                        : "dot.radiowaves.left.and.right")
+                }
+            }
+
             Button {
                 feedPath.append(TrendingFeedRoute())
             } label: {
@@ -1412,7 +1422,7 @@ struct MainView: View {
             } label: {
                 let active: Bool = {
                     switch viewModel.currentKind {
-                    case .onlyFood, .follows, .extendedNetwork: return false
+                    case .onlyFood, .follows, .extendedNetwork, .liveVideo: return false
                     case .relay, .relaySet: return true
                     }
                 }()
@@ -1462,6 +1472,7 @@ struct MainView: View {
         }
         switch viewModel.currentKind {
         case .onlyFood: return "No food posts yet"  // unreachable: OnlyFood renders `onlyFoodBody`
+        case .liveVideo: return "No one is streaming right now"  // unreachable: liveVideo renders `LiveVideoFeedView`
         case .follows: return "No posts yet"
         case .relay: return "Connecting…"
         case .relaySet: return "Connecting…"
@@ -1476,6 +1487,8 @@ struct MainView: View {
         switch viewModel.currentKind {
         case .onlyFood:
             return "Pull down to refresh."  // unreachable: OnlyFood renders `onlyFoodBody`
+        case .liveVideo:
+            return ""  // unreachable: liveVideo renders `LiveVideoFeedView`
         case .follows:
             return "Follow some people to see their posts here"
         case .relay(let url):
@@ -1495,7 +1508,7 @@ struct MainView: View {
         switch viewModel.currentKind {
         case .extendedNetwork where SocialGraphCache.load(pubkey: keypair.pubkey) == nil:
             emptyStateActionButton("Compute Now") { showSocialGraph = true }
-        case .onlyFood, .follows, .relay, .relaySet, .extendedNetwork:
+        case .onlyFood, .follows, .relay, .relaySet, .extendedNetwork, .liveVideo:
             EmptyView()
         }
     }
@@ -1515,7 +1528,7 @@ struct MainView: View {
     @ViewBuilder
     private var relayFeedStatusBanner: some View {
         switch viewModel.currentKind {
-        case .follows, .onlyFood:
+        case .follows, .onlyFood, .liveVideo:
             EmptyView()
         case .relay, .relaySet, .extendedNetwork:
             switch viewModel.relayFeedStatus {
@@ -1555,13 +1568,28 @@ struct MainView: View {
     /// a `@ViewBuilder` switch here tore down OnlyFood's `ScrollView` on
     /// every kind change, and its notes — kept by the view model — came back
     /// scrolled to the top.
+    @ViewBuilder
     private var feedContent: some View {
-        KeptMountedFeedBodies(showOnlyFood: FeedTabRouting.body(for: viewModel.currentKind) == .onlyFood) {
-            onlyFoodBody
-        } general: {
-            VStack(spacing: 0) {
-                relayFeedStatusBanner
-                feedBody
+        if FeedTabRouting.body(for: viewModel.currentKind) == .liveVideo {
+            LiveVideoFeedView(
+                onSelect: { stream in
+                    feedPath.append(LiveStreamRoute(
+                        aTagValue: stream.aTagValue,
+                        hostPubkey: stream.activity.hostPubkey,
+                        dTag: stream.activity.dTag,
+                        relayHints: stream.activity.relayHints
+                    ))
+                },
+                onRefresh: { viewModel.liveContentSettingChanged(true) }
+            )
+        } else {
+            KeptMountedFeedBodies(showOnlyFood: FeedTabRouting.body(for: viewModel.currentKind) == .onlyFood) {
+                onlyFoodBody
+            } general: {
+                VStack(spacing: 0) {
+                    relayFeedStatusBanner
+                    feedBody
+                }
             }
         }
     }
@@ -1686,26 +1714,6 @@ struct MainView: View {
                     // Same anchor as the general feed so a feed-tab re-tap
                     // scrolls this list to the top too.
                     Color.clear.frame(height: 0).id("feedTop")
-                    // Live-now rail, same slot and same data as the general
-                    // feed (`LiveStreamRepository.shared`, fed by the live
-                    // discovery `FeedViewModel.start` kicks off before its
-                    // kind switch, so it runs on an OnlyFood landing too).
-                    // Self-contained: chat mutations re-evaluate the section,
-                    // not this body. §2.3's OnlyFood exclusion is reversed —
-                    // `FeedTabRouting.showsLiveRail`.
-                    if FeedTabRouting.showsLiveRail(for: viewModel.currentKind) {
-                        FeedLiveNowSection(
-                            profiles: onlyfoodFeedVM.profiles,
-                            onSelect: { stream in
-                                feedPath.append(LiveStreamRoute(
-                                    aTagValue: stream.aTagValue,
-                                    hostPubkey: stream.activity.hostPubkey,
-                                    dTag: stream.activity.dTag,
-                                    relayHints: stream.activity.relayHints
-                                ))
-                            }
-                        )
-                    }
                     // Memories teaser, same slot on both bodies
                     // (`FeedTabRouting.showsMemoriesTeaser` — the OnlyFood
                     // inconsistency is deliberate and documented there).
@@ -1844,24 +1852,6 @@ struct MainView: View {
                         // Anchor for tap-Home-on-Home → scroll-to-top. Zero-height
                         // so it doesn't reserve layout space.
                         Color.clear.frame(height: 0).id("feedTop")
-                        // Self-contained so live-chat `streams` mutations
-                        // don't re-evaluate this feed body (and every
-                        // PostCardView in it) — see `FeedLiveNowSection`.
-                        // Shown on every kind (`FeedTabRouting.showsLiveRail`;
-                        // OnlyFood renders the same rail in its own body).
-                        if FeedTabRouting.showsLiveRail(for: viewModel.currentKind) {
-                            FeedLiveNowSection(
-                                profiles: viewModel.profiles,
-                                onSelect: { stream in
-                                    feedPath.append(LiveStreamRoute(
-                                        aTagValue: stream.aTagValue,
-                                        hostPubkey: stream.activity.hostPubkey,
-                                        dTag: stream.activity.dTag,
-                                        relayHints: stream.activity.relayHints
-                                    ))
-                                }
-                            )
-                        }
                         // Memories teaser (`FeedTabRouting.showsMemoriesTeaser`).
                         memoriesTeaser
                         // Iterating events directly with `id: \.id` keeps row
