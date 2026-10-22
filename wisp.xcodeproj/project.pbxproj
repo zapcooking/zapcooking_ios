@@ -2114,7 +2114,7 @@
 		};
 		4CEE000000000000000000B1 /* BreezSdkSpark */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 4CCEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */;
+			package = 4CEE000200000000000000B2 /* XCRemoteSwiftPackageReference "breez-sdk-spark-swift" */;
 			productName = BreezSdkSpark;
 		};
 /* End XCSwiftPackageProductDependency section */
