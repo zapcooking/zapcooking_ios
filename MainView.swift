@@ -1338,6 +1338,7 @@ struct MainView: View {
             CachedAvatarView(url: viewModel.userProfile?.picture, size: 32)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("feed-avatar")
     }
 
     /// Cycles the feed's client-side content filter: ALL → notes →
