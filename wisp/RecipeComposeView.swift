@@ -196,7 +196,9 @@ struct RecipeComposeView: View {
                     store.setAltText(savedText ?? "", forImageId: imageId)
                 }
             }
-            .presentationDetents([.medium, .large])
+            // Large only, matching the note composer: the editor's content
+            // doesn't fit the medium detent.
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
     }
