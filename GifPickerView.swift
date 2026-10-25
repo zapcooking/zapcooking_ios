@@ -405,14 +405,13 @@ struct GifPickerView: View {
             // hint reserves the real dimensions before load so the grid
             // never jumps.
             //
-            // allowsHitTesting(false): the renderer hosts a live UIImageView
-            // (UIViewRepresentable). UIKit views default to hit-testing OFF,
-            // but a view running CA animations has been observed re-enabling
-            // interaction on some iOS versions — and a UIKit view inside the
-            // Button's label consumes the touch before SwiftUI's Button
-            // gesture sees it, so the tap reads as a no-op. The picker cell
-            // has no gestures of its own; the tap belongs to the Button, so
-            // the image must never be hit-testable here.
+            // Once loaded, the preview draws in a UIKit `UIImageView`, and a
+            // touch landing on that view never reaches SwiftUI's gesture
+            // system: the tap went dead the moment a preview loaded. So the
+            // preview opts out of hit-testing, and the content shape hands
+            // the Button the whole cell. Without it, a label whose only
+            // content ignores touches has nothing left to hit, and every
+            // tap is dead, loaded or not.
             AnimatedImageView(
                 url: gif.previewURL,
                 aspect: gif.width / max(gif.height, 1),
@@ -421,6 +420,7 @@ struct GifPickerView: View {
             )
             .allowsHitTesting(false)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(gif.title.isEmpty ? "GIF" : gif.title)
