@@ -404,12 +404,22 @@ struct GifPickerView: View {
             // these previews are the animated w240 renditions. The aspect
             // hint reserves the real dimensions before load so the grid
             // never jumps.
+            //
+            // allowsHitTesting(false): the renderer hosts a live UIImageView
+            // (UIViewRepresentable). UIKit views default to hit-testing OFF,
+            // but a view running CA animations has been observed re-enabling
+            // interaction on some iOS versions — and a UIKit view inside the
+            // Button's label consumes the touch before SwiftUI's Button
+            // gesture sees it, so the tap reads as a no-op. The picker cell
+            // has no gestures of its own; the tap belongs to the Button, so
+            // the image must never be hit-testable here.
             AnimatedImageView(
                 url: gif.previewURL,
                 aspect: gif.width / max(gif.height, 1),
                 placeholder: { Color.wispSurfaceVariant },
                 failure: { Color.wispSurfaceVariant }
             )
+            .allowsHitTesting(false)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
