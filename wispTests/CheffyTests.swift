@@ -351,10 +351,23 @@ struct CheffyTests {
 
     // MARK: - Kill switch
 
-    @Test func killSwitch_offHidesEntry_defaultIsOn() {
+    @Test func killSwitch_offHidesEntry_onShowsIt() {
         #expect(CheffyGate.entryVisible(flagEnabled: false) == false)
         #expect(CheffyGate.entryVisible(flagEnabled: true) == true)
-        #expect(FeatureFlags.cheffyEnabled)
+    }
+
+    /// Ships off. App Review's Guideline 2.1(b) inquiry of 2026-10-26 asked
+    /// which paid features the app unlocks without In-App Purchase; Cook+ is
+    /// sold off-app, so the answer has to be "none" and the build has to
+    /// match. This is a REVERSIBLE compliance posture, not a product
+    /// decision: the plan is to turn Cheffy back on for the US storefront
+    /// once a region-gated external purchase link ships (permitted on the
+    /// US storefront post-Epic). Turning it back on without that region
+    /// gate re-opens the 2.1(b) problem — this pin is here so it can't
+    /// happen by accident.
+    @Test func killSwitch_shipsOff_guideline2_1b() {
+        #expect(!FeatureFlags.cheffyEnabled)
+        #expect(!CheffyGate.entryVisible())
     }
 
     // MARK: - Icon geometry
