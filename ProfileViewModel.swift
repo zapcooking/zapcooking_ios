@@ -39,8 +39,10 @@ final class ProfileViewModel {
     var galleryLoaded: Bool = false
 
     /// NIP-22 comments this user left on external items (web pages, podcast
-    /// episodes). Kept out of Notes/Replies: those are kind-1 surfaces, and a
-    /// comment's subject is the linked item rather than another nostr note.
+    /// episodes). Kept out of Notes: a comment's subject is the linked item,
+    /// not another nostr note. Event-rooted comments (`E`/`A`) are the
+    /// exception — those are replies inside nostr threads and live in the
+    /// Replies tab alongside kind-1 replies.
     var comments: [NostrEvent] = []
     var isLoadingComments: Bool = false
     var commentsLoaded: Bool = false
@@ -444,8 +446,13 @@ final class ProfileViewModel {
         repliesStreamTask?.cancel()
 
         // Cache-seed the same way as loadInitialNotes so replies tab fills
-        // instantly when the user has prior history cached.
-        let cached = await eventStore.loadRecentByAuthor(pubkey: pubkey, kinds: [1], limit: 100)
+        // instantly when the user has prior history cached. Kind 1111 rides
+        // along: mixed-thread comments are replies here too.
+        let cached = await eventStore.loadRecentByAuthor(
+            pubkey: pubkey,
+            kinds: [1, Nip22.kindComment],
+            limit: 100
+        )
         if gen == repliesQueryGen {
             let cachedReplies = cached
                 .filter { isReply($0) && !SafetyFilter.shared.shouldDrop(event: $0, context: .feed) }
@@ -458,7 +465,7 @@ final class ProfileViewModel {
         }
 
         let relays = queryRelays()
-        let filter = NostrFilter(kinds: [1], authors: [pubkey], limit: 100)
+        let filter = NostrFilter(kinds: [1, Nip22.kindComment], authors: [pubkey], limit: 100)
         let queries = relays.map { RelayQuery(relayUrl: $0, filter: filter) }
         let cancelGen = gen
 
@@ -521,7 +528,7 @@ final class ProfileViewModel {
 
     func loadMoreReplies() async {
         guard repliesSortMode == .recency, let until = oldestReplyTs else { return }
-        let events = await fetchAuthorEvents(kinds: [1], limit: 100, until: until - 1)
+        let events = await fetchAuthorEvents(kinds: [1, Nip22.kindComment], limit: 100, until: until - 1)
         let knownIds = Set(replies.map(\.id))
         let extra = events.filter {
             isReply($0)
@@ -584,7 +591,7 @@ final class ProfileViewModel {
         let url = "wss://feeds.nostrarchives.com/profiles/replies/\(mode.relaySlug)"
         let queries = [RelayQuery(
             relayUrl: url,
-            filter: NostrFilter(kinds: [1], authors: [pubkey], limit: 100)
+            filter: NostrFilter(kinds: [1, Nip22.kindComment], authors: [pubkey], limit: 100)
         )]
 
         sortedRepliesStreamTask = Task { [weak self] in
@@ -593,7 +600,7 @@ final class ProfileViewModel {
             for await (event, _) in RelayPool.stream(queries: queries, timeout: 12) {
                 guard gen == self.repliesQueryGen else { return }
                 if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
-                guard event.kind == 1, seen.insert(event.id).inserted else { continue }
+                guard self.isReply(event), seen.insert(event.id).inserted else { continue }
                 self.sortedReplies.append(event)
                 if self.isLoadingSortedReplies { self.isLoadingSortedReplies = false }
             }
@@ -655,7 +662,8 @@ final class ProfileViewModel {
     /// Only externally-rooted ones are listed. A comment replying to another
     /// comment already appears in that thread, and without its own subject
     /// card it would read here exactly like the context-free rows this tab
-    /// exists to avoid.
+    /// exists to avoid. Event-rooted comments (`E`/`A`) are listed in the
+    /// Replies tab instead — see `isReply`.
     private func loadComments() async {
         commentsStreamTask?.cancel()
         isLoadingComments = true
@@ -1040,9 +1048,17 @@ final class ProfileViewModel {
         return event.kind == 1 && !event.hasThreadingETag
     }
 
-    private func isReply(_ event: NostrEvent) -> Bool {
-        guard event.pubkey == pubkey, event.kind == 1 else { return false }
-        return event.hasThreadingETag
+    /// What belongs in the profile Replies tab: kind-1 notes carrying a
+    /// threading `e` tag, plus NIP-22 comments rooted on a nostr event
+    /// (`E`/`A`). A mixed kind-1/1111 thread is one conversation, but a
+    /// kind-1-only query can't see its comment half — the root rides in the
+    /// uppercase `E`, invisible to NIP-10 parsing. Externally-rooted
+    /// comments (`I`) keep to the Comments tab.
+    /// Internal (not private) so the tab-split tests can pin this directly.
+    func isReply(_ event: NostrEvent) -> Bool {
+        guard event.pubkey == pubkey else { return false }
+        if event.kind == 1 { return event.hasThreadingETag }
+        return Nip22.isEventRootedComment(event)
     }
 
     private func persistKnownKinds(_ events: [NostrEvent]) async {
