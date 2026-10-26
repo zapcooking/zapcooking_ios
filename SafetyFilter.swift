@@ -16,6 +16,10 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
     let mutedWords: Set<String>           // already lowercased
     let blockedPubkeys: Set<String>
     let mutedThreads: Set<String>
+    /// Note-level mutes (the Sidecar model): ids that hide the note itself
+    /// and anything tagging it directly (e/q/E). Kept beside `mutedThreads`
+    /// — same kind-10000 list, different id semantics.
+    let mutedNotes: Set<String>
     let wotEnabled: Bool
     let qualifiedNetwork: Set<String>     // empty when WoT off or never computed — with
                                           // wotEnabled that means FAIL CLOSED (drop all)
@@ -29,6 +33,7 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
     let reportedPubkeys: Set<String>
 
     init(mutedWords: Set<String>, blockedPubkeys: Set<String>, mutedThreads: Set<String>,
+         mutedNotes: Set<String> = [],
          wotEnabled: Bool, qualifiedNetwork: Set<String>, userPubkey: String,
          hellthreadFilterEnabled: Bool = false,
          hellthreadThreshold: Int = NostrEvent.hellthreadThreshold,
@@ -37,6 +42,7 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
         self.mutedWords = mutedWords
         self.blockedPubkeys = blockedPubkeys
         self.mutedThreads = mutedThreads
+        self.mutedNotes = mutedNotes
         self.wotEnabled = wotEnabled
         self.qualifiedNetwork = qualifiedNetwork
         self.userPubkey = userPubkey
@@ -47,7 +53,7 @@ final class SafetyFilterSnapshot: @unchecked Sendable {
     }
 
     static let empty = SafetyFilterSnapshot(
-        mutedWords: [], blockedPubkeys: [], mutedThreads: [],
+        mutedWords: [], blockedPubkeys: [], mutedThreads: [], mutedNotes: [],
         wotEnabled: false, qualifiedNetwork: [], userPubkey: ""
     )
 }
@@ -238,6 +244,7 @@ final class SafetyFilter: @unchecked Sendable {
             mutedWords: m.mutedWords,
             blockedPubkeys: m.blockedPubkeys,
             mutedThreads: m.mutedThreads,
+            mutedNotes: m.mutedNotes,
             wotEnabled: current.wotEnabled,
             qualifiedNetwork: current.qualifiedNetwork,
             userPubkey: current.userPubkey,
@@ -251,10 +258,10 @@ final class SafetyFilter: @unchecked Sendable {
     /// Rebuild the snapshot from the active sources. Called on login, after every mute /
     /// safelist edit, and after every WoT recompute.
     func rebuildSnapshot() async {
-        let mutes: (words: Set<String>, pubkeys: Set<String>, threads: Set<String>) =
+        let mutes: (words: Set<String>, pubkeys: Set<String>, threads: Set<String>, notes: Set<String>) =
             await MainActor.run {
                 let m = MuteRepository.shared
-                return (m.mutedWords, m.blockedPubkeys, m.mutedThreads)
+                return (m.mutedWords, m.blockedPubkeys, m.mutedThreads, m.mutedNotes)
             }
         let reported: (eventIds: Set<String>, pubkeys: Set<String>) = await MainActor.run {
             let r = ReportedContent.shared
@@ -270,6 +277,7 @@ final class SafetyFilter: @unchecked Sendable {
             mutedWords: mutes.words,
             blockedPubkeys: mutes.pubkeys,
             mutedThreads: mutes.threads,
+            mutedNotes: mutes.notes,
             wotEnabled: prefs.wot,
             qualifiedNetwork: qualified,
             userPubkey: prefs.pubkey,

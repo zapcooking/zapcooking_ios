@@ -16,6 +16,10 @@ final class MuteRepository {
     private(set) var mutedWords: Set<String> = []
     private(set) var blockedPubkeys: Set<String> = []
     private(set) var mutedThreads: Set<String> = []
+    /// Note-level mutes: "mute this note and replies". Distinct ids from
+    /// `mutedThreads` — a note mute carries the note's own id, a thread mute
+    /// the conversation root. Both ride the same kind-10000 event.
+    private(set) var mutedNotes: Set<String> = []
     private(set) var lastUpdatedAt: Int = 0
 
     @ObservationIgnored private var binding = false
@@ -43,6 +47,7 @@ final class MuteRepository {
         // that come off the wire from relays.
         blockedPubkeys = Set((d.stringArray(forKey: Self.pubkeysKey(pk)) ?? []).map { $0.lowercased() })
         mutedThreads = Set(d.stringArray(forKey: Self.threadsKey(pk)) ?? [])
+        mutedNotes = Set(d.stringArray(forKey: Self.notesKey(pk)) ?? [])
         lastUpdatedAt = d.integer(forKey: Self.updatedAtKey(pk))
 
         // Install a synchronous SafetyFilter snapshot from the local mute
@@ -82,6 +87,7 @@ final class MuteRepository {
         mutedWords = []
         blockedPubkeys = []
         mutedThreads = []
+        mutedNotes = []
         lastUpdatedAt = 0
     }
 
@@ -150,11 +156,65 @@ final class MuteRepository {
         guard !rootEventId.isEmpty, !mutedThreads.contains(rootEventId) else { return }
         mutedThreads.insert(rootEventId)
         commitChange()
+        sweepMutedThread(rootEventId)
     }
 
     func unmuteThread(_ rootEventId: String) {
         guard mutedThreads.remove(rootEventId) != nil else { return }
         commitChange()
+    }
+
+    // MARK: - Note and replies
+
+    /// Mute one note and its direct replies (the Sidecar model): the note's
+    /// own id goes on the mute list, and everything tagging it as root,
+    /// parent or quote target disappears with it. Deeper branches — a reply
+    /// to a reply — are NOT covered; that is what `muteThread` is for.
+    /// Storage is the same kind-10000 list as thread mutes; only which id is
+    /// carried differs, so other clients (and Sidecar) read both levels.
+    func muteNoteAndReplies(_ eventId: String) {
+        guard !eventId.isEmpty, !mutedNotes.contains(eventId) else { return }
+        mutedNotes.insert(eventId)
+        commitChange()
+        sweepMutedThread(eventId)
+    }
+
+    func unmuteNoteAndReplies(_ eventId: String) {
+        guard mutedNotes.remove(eventId) != nil else { return }
+        commitChange()
+    }
+
+    func isNoteMuted(_ eventId: String) -> Bool { mutedNotes.contains(eventId) }
+
+    /// A kind-1 is covered by a note-level mute when the muted id is the
+    /// note itself, its thread root, its reply parent, or a quoted note.
+    func isNoteAndRepliesMuted(_ event: NostrEvent) -> Bool {
+        guard !mutedNotes.isEmpty else { return false }
+        if mutedNotes.contains(event.id) { return true }
+        for tag in event.tags where tag.count >= 2 && (tag[0] == "e" || tag[0] == "q" || tag[0] == "E") {
+            if mutedNotes.contains(tag[1]) { return true }
+        }
+        return false
+    }
+
+    /// Sweep already-ingested events the moment a mute lands — the piece
+    /// thread mutes were missing (a mute that only updates the snapshot
+    /// leaves every feed row on screen until a refresh, which read as a
+    /// no-op). Posts `.contentHidden` with the ids to drop: every surface
+    /// that drops blocked content drops muted-thread content through the
+    /// same door. Feed view models resolve each held event's thread root
+    /// and drop it when it matches; the thread screen does the same for its
+    /// replies (the focused note stays, matching web).
+    private func sweepMutedThread(_ mutedId: String) {
+        var doomed: Set<String> = []
+        for event in EventStore.shared.allKind1() {
+            let root = Nip10.rootId(of: event) ?? Nip10.replyTarget(of: event) ?? event.id
+            if root == mutedId || event.id == mutedId {
+                doomed.insert(event.id)
+            }
+        }
+        guard !doomed.isEmpty else { return }
+        ContentHide.broadcast(eventIds: doomed)
     }
 
     func containsMutedWord(_ content: String) -> Bool {
@@ -326,6 +386,7 @@ final class MuteRepository {
     static func wordsKey(_ pubkey: String) -> String { "muted_words_\(pubkey)" }
     static func pubkeysKey(_ pubkey: String) -> String { "blocked_pubkeys_\(pubkey)" }
     static func threadsKey(_ pubkey: String) -> String { "muted_threads_\(pubkey)" }
+    static func notesKey(_ pubkey: String) -> String { "muted_notes_\(pubkey)" }
     static func updatedAtKey(_ pubkey: String) -> String { "mute_list_updated_at_\(pubkey)" }
 
     static let fallbackRelays = RelayDefaults.fallbacks
@@ -339,6 +400,7 @@ final class MuteRepository {
         d.set(Array(mutedWords), forKey: Self.wordsKey(pk))
         d.set(Array(blockedPubkeys), forKey: Self.pubkeysKey(pk))
         d.set(Array(mutedThreads), forKey: Self.threadsKey(pk))
+        d.set(Array(mutedNotes), forKey: Self.notesKey(pk))
         Task { await SafetyFilter.shared.rebuildSnapshot() }
         Task { [weak self] in await self?.republish() }
     }

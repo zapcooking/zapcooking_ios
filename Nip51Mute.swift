@@ -15,6 +15,12 @@ nonisolated enum Nip51Mute {
         var pubkeys: Set<String> = []
         var words: Set<String> = []
         var threads: Set<String> = []
+        /// Note-level mutes ("mute this note and replies"). On the wire an
+        /// `e` tag is indistinguishable from a thread mute — both are `e` —
+        /// so this set is the UNION of both kinds of `e` entry. Clients that
+        /// know the distinction (Sidecar, Zap Cooking) store which id they
+        /// muted locally; filtering treats any match as a mute either way.
+        var notes: Set<String> = []
 
         static let empty = Lists()
     }
@@ -24,15 +30,17 @@ nonisolated enum Nip51Mute {
     static func buildPrivateBodyJson(
         pubkeys: Set<String>,
         words: Set<String>,
-        threads: Set<String>
+        threads: Set<String>,
+        notes: Set<String> = []
     ) -> String {
         // Stable ordering so equal inputs produce equal output (important for tests; not load-bearing
         // at runtime since the relay treats it as opaque ciphertext).
         var entries: [[String]] = []
-        entries.reserveCapacity(pubkeys.count + words.count + threads.count)
+        entries.reserveCapacity(pubkeys.count + words.count + threads.count + notes.count)
         for pk in pubkeys.sorted() { entries.append(["p", pk]) }
         for w in words.sorted() { entries.append(["word", w]) }
         for t in threads.sorted() { entries.append(["e", t]) }
+        for n in notes.sorted() where !threads.contains(n) { entries.append(["e", n]) }
         guard let data = try? JSONSerialization.data(withJSONObject: entries, options: []),
               let s = String(data: data, encoding: .utf8) else {
             return "[]"
@@ -46,10 +54,12 @@ nonisolated enum Nip51Mute {
         blockedPubkeys: Set<String>,
         mutedWords: Set<String>,
         mutedThreads: Set<String>,
+        mutedNotes: Set<String> = [],
         createdAt: Int = NostrClock.now()
     ) async throws -> NostrEvent {
         let json = buildPrivateBodyJson(
-            pubkeys: blockedPubkeys, words: mutedWords, threads: mutedThreads
+            pubkeys: blockedPubkeys, words: mutedWords, threads: mutedThreads,
+            notes: mutedNotes
         )
         // NIP-44 rejects empty plaintext, so even an empty list still contains "[]".
         let cipher = try await Signer.nip44Encrypt(
