@@ -534,6 +534,24 @@ actor EventStore {
         }
     }
 
+    /// Every cached kind-1 note (and kind-22 comment), oldest page last.
+    /// MuteRepository's thread-mute sweep resolves each cached note's thread
+    /// root through this; the cap mirrors seedCache so a huge cache can't
+    /// stall the mute path.
+    func allKind1(limit: Int = 5000) -> [NostrEvent] {
+        guard let box = ensureBox() else { return [] }
+        do {
+            let query = try box.query {
+                EventEntity.kind == 1 || EventEntity.kind == Nip22.kindComment
+            }
+            .ordered(by: EventEntity.createdAt, flags: .descending)
+            .build()
+            return try query.find(offset: 0, limit: limit).compactMap { $0.toNostrEvent() }
+        } catch {
+            return []
+        }
+    }
+
     // MARK: - Emoji (NIP-30)
 
     /// Cached kind-10030 (user emoji list, replaceable) and kind-30030 packs

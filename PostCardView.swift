@@ -1515,6 +1515,25 @@ struct PostCardView: View {
                         }
                     }
                     Divider()
+                    // Note-and-replies mute (Sidecar model): hide this note,
+                    // its direct replies, and quotes of it — without muting
+                    // the whole thread. Skipped on the thread root itself,
+                    // where it would duplicate Mute Thread.
+                    if threadRoot != target.id {
+                        let noteMuted = muteRepo.isNoteMuted(target.id)
+                        popoverMenuItem(
+                            title: noteMuted ? "Unmute Note & Replies" : "Mute Note & Replies",
+                            systemImage: "eye.slash"
+                        ) {
+                            showOverflowMenu = false
+                            if noteMuted {
+                                muteRepo.unmuteNoteAndReplies(target.id)
+                            } else {
+                                muteRepo.muteNoteAndReplies(target.id)
+                            }
+                        }
+                        Divider()
+                    }
                 }
 
                 // A bare `ShareLink` here never presented: the row's tap both

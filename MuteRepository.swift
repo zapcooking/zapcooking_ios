@@ -59,6 +59,7 @@ final class MuteRepository {
             mutedWords: mutedWords,
             blockedPubkeys: blockedPubkeys,
             mutedThreads: mutedThreads,
+            mutedNotes: mutedNotes,
             wotEnabled: false,
             qualifiedNetwork: [],
             userPubkey: pk,
@@ -206,15 +207,17 @@ final class MuteRepository {
     /// and drop it when it matches; the thread screen does the same for its
     /// replies (the focused note stays, matching web).
     private func sweepMutedThread(_ mutedId: String) {
-        var doomed: Set<String> = []
-        for event in EventStore.shared.allKind1() {
-            let root = Nip10.rootId(of: event) ?? Nip10.replyTarget(of: event) ?? event.id
-            if root == mutedId || event.id == mutedId {
-                doomed.insert(event.id)
+        Task { [weak self] in
+            var doomed: Set<String> = []
+            for event in await EventStore.shared.allKind1() {
+                let root = Nip10.rootId(of: event) ?? Nip10.replyTarget(of: event) ?? event.id
+                if root == mutedId || event.id == mutedId {
+                    doomed.insert(event.id)
+                }
             }
+            guard !doomed.isEmpty else { return }
+            ContentHide.broadcast(eventIds: doomed)
         }
-        guard !doomed.isEmpty else { return }
-        ContentHide.broadcast(eventIds: doomed)
     }
 
     func containsMutedWord(_ content: String) -> Bool {
@@ -249,6 +252,7 @@ final class MuteRepository {
         let words = mutedWords
         let pubkeys = blockedPubkeys
         let threads = mutedThreads
+        let notes = mutedNotes
         let createdAt = max(NostrClock.now(), lastUpdatedAt + 1)
         do {
             let event = try await Nip51Mute.buildSignedMuteEvent(
@@ -256,6 +260,7 @@ final class MuteRepository {
                 blockedPubkeys: pubkeys,
                 mutedWords: words,
                 mutedThreads: threads,
+                mutedNotes: notes,
                 createdAt: createdAt
             )
             lastUpdatedAt = createdAt
@@ -340,6 +345,7 @@ final class MuteRepository {
             parsed.pubkeys.formUnion(priv.pubkeys)
             parsed.words.formUnion(priv.words)
             parsed.threads.formUnion(priv.threads)
+            parsed.notes.formUnion(priv.notes)
         }
         await apply(parsed, updatedAt: event.createdAt)
     }
@@ -354,6 +360,7 @@ final class MuteRepository {
         // relay event in `SafetyFilter.shouldDrop`.
         blockedPubkeys = Set(parsed.pubkeys.map { $0.lowercased() })
         mutedThreads = parsed.threads
+        mutedNotes = parsed.notes
         lastUpdatedAt = updatedAt
 
         // Newly-arrived block entries that we didn't have before need their
@@ -377,6 +384,7 @@ final class MuteRepository {
         d.set(Array(mutedWords), forKey: Self.wordsKey(pk))
         d.set(Array(blockedPubkeys), forKey: Self.pubkeysKey(pk))
         d.set(Array(mutedThreads), forKey: Self.threadsKey(pk))
+        d.set(Array(mutedNotes), forKey: Self.notesKey(pk))
         d.set(lastUpdatedAt, forKey: Self.updatedAtKey(pk))
         await SafetyFilter.shared.rebuildSnapshot()
     }

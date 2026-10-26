@@ -141,6 +141,22 @@ final class SafetyFilter: @unchecked Sendable {
             }
         }
 
+        // Note-and-replies mutes (Sidecar model): the muted id is the note
+        // itself, its thread root, its reply parent, or a quoted note. Same
+        // contexts as thread mutes — inside the thread the focused note stays
+        // visible so the mute can be undone from where it was applied.
+        if !s.mutedNotes.isEmpty {
+            switch context {
+            case .feed, .notifications:
+                if s.mutedNotes.contains(event.id) { return true }
+                for tag in event.tags where tag.count >= 2 && (tag[0] == "e" || tag[0] == "q") {
+                    if s.mutedNotes.contains(tag[1]) { return true }
+                }
+            case .thread, .messages:
+                break
+            }
+        }
+
         if s.hellthreadFilterEnabled {
             switch context {
             case .feed, .notifications:
