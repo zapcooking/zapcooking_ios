@@ -30,6 +30,20 @@ xcodebuild -project wisp.xcodeproj -scheme wisp -destination 'platform=iOS Simul
 
 Tests under `wispTests/` use the Swift Testing framework (`import Testing`, `@Test`), not XCTest. Substantive coverage lives in `Nip44Tests`, `NSpamTests`, `RelaySettingsTests`, `SafetyTests`. UI tests under `wispUITests/` are XCTest.
 
+## Screenshots for UI changes (required)
+
+Any change that alters what a screen looks like — layout, styling, new/removed controls, gesture behavior — ships simulator screenshots in the same PR, committed under `docs/screenshots/<area>/` (`composer/`, `live/`, `lazarus/` exist; add a folder for new areas). Unit tests alone are not sufficient evidence for a UI change.
+
+Capture from the real app on a simulator, not a mockup. The reusable path is a UI test driving the DEBUG harnesses (`-ComposerDragHarness` hosts the real composer without login) with `XCTAttachment(screenshot:)` at `.keepAlways` — see `ComposerUrlOfferScreenshotsUITests` — then export and copy:
+
+```
+xcodebuild test -project wisp.xcodeproj -scheme wisp -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:wispUITests/<YourScreenshotTests> -resultBundlePath /tmp/shots.xcresult
+xcrun xcresulttool export attachments --path /tmp/shots.xcresult --output-path /tmp/shots
+```
+
+Name files for the behavior they show (`composer-url-gating-plain-url.png`), reference them in the PR description, and re-shoot when a later change alters the same screen so the folder reflects current UI.
+
 ## Source layout — important
 
 The Xcode project mixes two file-management styles:
