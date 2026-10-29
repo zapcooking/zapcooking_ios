@@ -181,6 +181,14 @@ struct LoginView: View {
         qrScan = nil
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // An ncryptsec QR can't be decrypted without its password — drop the
+        // payload into the key field so the password field appears and the
+        // user signs in through the normal Log In path.
+        if trimmed.lowercased().hasPrefix("ncryptsec1") {
+            nsecInput = trimmed
+            return
+        }
+
         // nsec1… or 64-char hex private key — reuse existing parse + save path.
         if let keypair = NostrKey.parseNsec(trimmed) {
             NostrKey.save(keypair, acceptance: acceptance)
@@ -199,7 +207,7 @@ struct LoginView: View {
             return
         }
 
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, or hex private key."
     }
 
     private func login() {

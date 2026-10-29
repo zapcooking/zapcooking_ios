@@ -329,10 +329,19 @@ struct NostrLoginSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nsecInput = ""
+    /// Only used when the key field holds an `ncryptsec1…` (NIP-49) backup —
+    /// decryption needs the encryption password. Mirrors `LoginView`.
+    @State private var ncryptsecPassword = ""
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
     @State private var showQRScanner = false
+
+    private var isNcryptsec: Bool {
+        nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("ncryptsec1")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -356,15 +365,18 @@ struct NostrLoginSheet: View {
             HStack(spacing: 8) {
                 Group {
                     if isSecure {
-                        SecureField("nsec or npub…", text: $nsecInput)
+                        SecureField("nsec, ncryptsec or npub…", text: $nsecInput)
                     } else {
-                        TextField("nsec or npub…", text: $nsecInput)
+                        TextField("nsec, ncryptsec or npub…", text: $nsecInput)
                     }
                 }
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .onChange(of: nsecInput) { _, _ in error = nil }
+                .onChange(of: nsecInput) { _, _ in
+                    error = nil
+                    if !isNcryptsec { ncryptsecPassword = "" }
+                }
 
                 Button {
                     isSecure.toggle()
@@ -383,6 +395,15 @@ struct NostrLoginSheet: View {
                 .buttonStyle(.plain)
             }
             .padding(.top, 20)
+
+            if isNcryptsec {
+                SecureField("Password", text: $ncryptsecPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onChange(of: ncryptsecPassword) { _, _ in error = nil }
+                    .padding(.top, 8)
+            }
 
             NsecIdentityPreview(nsecInput: nsecInput)
                 .padding(.top, 12)
@@ -407,7 +428,7 @@ struct NostrLoginSheet: View {
             .buttonStyle(.borderedProminent)
             .tint(.wispPrimary)
             .clipShape(Capsule())
-            .disabled(nsecInput.isEmpty || isLoading)
+            .disabled(nsecInput.isEmpty || isLoading || (isNcryptsec && ncryptsecPassword.isEmpty))
             .padding(.top, 12)
 
             HStack(spacing: 0) {
@@ -455,6 +476,37 @@ struct NostrLoginSheet: View {
     private func login() {
         error = nil
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isNcryptsec {
+            isLoading = true
+            let password = ncryptsecPassword
+            Task {
+                do {
+                    // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
+                    // of CPU — keep it off the main actor so the spinner spins.
+                    let privkey = try await Task.detached(priority: .userInitiated) {
+                        try Nip49.decrypt(trimmed, password: password)
+                    }.value
+                    guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
+                        error = "That ncryptsec decrypted to an invalid private key."
+                        isLoading = false
+                        return
+                    }
+                    let keypair = Keypair(privkey: Hex.encode(Data(privkey)), pubkey: Hex.encode(pub))
+                    NostrKey.save(keypair, acceptance: acceptance)
+                    isLoading = false
+                    onLogin(keypair)
+                } catch Nip49.CryptoError.wrongPassword {
+                    error = "Wrong password for that ncryptsec key."
+                    isLoading = false
+                } catch {
+                    self.error = "Couldn't read that ncryptsec key. Check the password and try again."
+                    isLoading = false
+                }
+            }
+            return
+        }
+
         if let keypair = NostrKey.parseNsec(trimmed) {
             isLoading = true
             NostrKey.save(keypair, acceptance: acceptance)
@@ -468,12 +520,21 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an npub / nprofile to browse watch-only, or a 64-character hex private key."
+        error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an ncryptsec (\"ncryptsec1…\"), an npub / nprofile to browse watch-only, or a 64-character hex private key."
     }
 
     private func handleScanned(_ value: String) {
         showQRScanner = false
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // An ncryptsec QR can't be decrypted without its password — drop the
+        // payload into the key field so the password field appears and the
+        // user signs in through the normal Log In path.
+        if trimmed.lowercased().hasPrefix("ncryptsec1") {
+            nsecInput = trimmed
+            return
+        }
+
         if let keypair = NostrKey.parseNsec(trimmed) {
             NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
@@ -485,7 +546,7 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, or hex private key."
     }
 }
 
