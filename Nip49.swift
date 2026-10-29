@@ -68,6 +68,7 @@ nonisolated enum Nip49 {
 
     // MARK: - scrypt (RFC 7914)
 
+    @_optimize(speed)
     static func scrypt(password: [UInt8], salt: [UInt8], logN: Int, r: Int, p: Int, dkLen: Int) throws -> [UInt8] {
         let n = 1 << logN
         let chunkWords = 32 * r
@@ -82,67 +83,177 @@ nonisolated enum Nip49 {
     }
 
     /// ROMix over one `128 * r`-byte chunk (r salsa-blocks × 2 of 16 words).
+    /// Scratch buffers are hoisted and the hot loops run over raw pointers:
+    /// at log_n 16 this is ~2M salsa invocations, and Debug builds stayed
+    /// 200× slower than reference implementations until bounds-checked
+    /// Array subscripts came out of the inner loops.
+    @_optimize(speed)
     private static func romix(_ chunk: [UInt32], n: Int, r: Int) -> [UInt32] {
-        var v: [[UInt32]] = []
-        v.reserveCapacity(n)
+        let blockWords = 32 * r
+        var v = [UInt32](repeating: 0, count: n * blockWords)
         var x = chunk
-        for _ in 0..<n {
-            v.append(x)
-            x = blockMix(x, r: r)
-        }
-        for _ in 0..<n {
-            let last = x.count - 16
-            // Integerify: the last 64-byte block's first 8 bytes as LE64 —
-            // the second word lands in the HIGH half.
-            let j = (UInt64(x[last + 1]) << 32 | UInt64(x[last])) % UInt64(n)
-            let mixed = zip(x, v[Int(j)]).map { $0 ^ $1 }
-            x = blockMix(mixed, r: r)
+        var out = [UInt32](repeating: 0, count: blockWords)
+        var xb = [UInt32](repeating: 0, count: 16)
+        var t = [UInt32](repeating: 0, count: 16)
+        v.withUnsafeMutableBufferPointer { vp in
+            x.withUnsafeMutableBufferPointer { xp in
+                out.withUnsafeMutableBufferPointer { op in
+                    xb.withUnsafeMutableBufferPointer { xbp in
+                        t.withUnsafeMutableBufferPointer { tp in
+                            guard let vp = vp.baseAddress, let xp = xp.baseAddress,
+                                  let op = op.baseAddress, let xbp = xbp.baseAddress,
+                                  let tp = tp.baseAddress else { return }
+                                for i in 0..<n {
+                                    (vp + i * blockWords).update(from: xp, count: blockWords)
+                                    blockMix(block: xp, out: op, xb: xbp, t: tp, r: r)
+                                }
+                                for _ in 0..<n {
+                                    let last = blockWords - 16
+                                    // Integerify: the last 64-byte block's first
+                                    // 8 bytes as LE64 — second word in the HIGH half.
+                                    let j = Int((UInt64(xp[last + 1]) << 32 | UInt64(xp[last])) % UInt64(n))
+                                    let base = j * blockWords
+                                    for k in 0..<blockWords { xp[k] ^= vp[base + k] }
+                                    blockMix(block: xp, out: op, xb: xbp, t: tp, r: r)
+                                }
+                        }
+                    }
+                }
+            }
         }
         return x
     }
 
-    /// BlockMix_salsa8: alternate 16-word salsa blocks, then split even/odd.
-    private static func blockMix(_ block: [UInt32], r: Int) -> [UInt32] {
-        var x = Array(block[(2 * r - 1) * 16..<2 * r * 16])
-        var y: [[UInt32]] = []
-        y.reserveCapacity(2 * r)
+    /// BlockMix_salsa8 over raw pointers: even-index results fill the first
+    /// r blocks of `out`, odd-index the second; `out` copies back over `block`.
+    @_optimize(speed)
+    private static func blockMix(block: UnsafeMutablePointer<UInt32>, out: UnsafeMutablePointer<UInt32>, xb: UnsafeMutablePointer<UInt32>, t: UnsafeMutablePointer<UInt32>, r: Int) {
+        xb.update(from: block + (2 * r - 1) * 16, count: 16)
         for i in 0..<(2 * r) {
-            let bi = Array(block[i * 16..<(i + 1) * 16])
-            x = salsa208(zip(x, bi).map { $0 ^ $1 })
-            y.append(x)
+            let off = i * 16
+            for k in 0..<16 { t[k] = xb[k] ^ block[off + k] }
+            salsa208(t)
+            let dest = (i % 2 == 0 ? i / 2 : r + (i - 1) / 2) * 16
+            (out + dest).update(from: t, count: 16)
+            xb.update(from: t, count: 16)
         }
-        var out = [UInt32]()
-        out.reserveCapacity(32 * r)
-        for i in stride(from: 0, to: 2 * r, by: 2) { out.append(contentsOf: y[i]) }
-        for i in stride(from: 1, to: 2 * r, by: 2) { out.append(contentsOf: y[i]) }
-        return out
+        block.update(from: out, count: 32 * r)
     }
 
-    /// Salsa20/8 core with feed-forward addition (scrypt's variant, 8 rounds).
-    private static func salsa208(_ input: [UInt32]) -> [UInt32] {
-        var x = input
-        for _ in 0..<4 {
-            // column round
-            x[4] ^= rotl(x[0] &+ x[12], 7);  x[8] ^= rotl(x[4] &+ x[0], 9)
-            x[12] ^= rotl(x[8] &+ x[4], 13); x[0] ^= rotl(x[12] &+ x[8], 18)
-            x[9] ^= rotl(x[5] &+ x[1], 7);   x[13] ^= rotl(x[9] &+ x[5], 9)
-            x[1] ^= rotl(x[13] &+ x[9], 13); x[5] ^= rotl(x[1] &+ x[13], 18)
-            x[14] ^= rotl(x[10] &+ x[6], 7); x[2] ^= rotl(x[14] &+ x[10], 9)
-            x[6] ^= rotl(x[2] &+ x[14], 13); x[10] ^= rotl(x[6] &+ x[2], 18)
-            x[3] ^= rotl(x[15] &+ x[11], 7); x[7] ^= rotl(x[3] &+ x[15], 9)
-            x[11] ^= rotl(x[7] &+ x[3], 13); x[15] ^= rotl(x[11] &+ x[7], 18)
+    /// Salsa20/8 core with feed-forward addition (scrypt's variant, 8 rounds),
+    /// in place: result lands back in `t`, `s` is 16 words of scratch. The
+    /// state is held in locals for the rounds — subscript bounds checks are
+    /// what kept Debug builds ~200× slower than reference scrypts.
+    @inline(__always)
+    @_optimize(speed)
+    private static func salsa208(_ t: UnsafeMutablePointer<UInt32>) {
+        var x0 = t[0]
+        var x1 = t[1]
+        var x2 = t[2]
+        var x3 = t[3]
+        var x4 = t[4]
+        var x5 = t[5]
+        var x6 = t[6]
+        var x7 = t[7]
+        var x8 = t[8]
+        var x9 = t[9]
+        var x10 = t[10]
+        var x11 = t[11]
+        var x12 = t[12]
+        var x13 = t[13]
+        var x14 = t[14]
+        var x15 = t[15]
+        // salsa20/8: column + row, repeated 4×
+// column round
+            x4 ^= rotl(x0 &+ x12, 7);  x8 ^= rotl(x4 &+ x0, 9)
+            x12 ^= rotl(x8 &+ x4, 13); x0 ^= rotl(x12 &+ x8, 18)
+            x9 ^= rotl(x5 &+ x1, 7);   x13 ^= rotl(x9 &+ x5, 9)
+            x1 ^= rotl(x13 &+ x9, 13); x5 ^= rotl(x1 &+ x13, 18)
+            x14 ^= rotl(x10 &+ x6, 7); x2 ^= rotl(x14 &+ x10, 9)
+            x6 ^= rotl(x2 &+ x14, 13); x10 ^= rotl(x6 &+ x2, 18)
+            x3 ^= rotl(x15 &+ x11, 7); x7 ^= rotl(x3 &+ x15, 9)
+            x11 ^= rotl(x7 &+ x3, 13); x15 ^= rotl(x11 &+ x7, 18)
             // row round
-            x[1] ^= rotl(x[0] &+ x[3], 7);   x[2] ^= rotl(x[1] &+ x[0], 9)
-            x[3] ^= rotl(x[2] &+ x[1], 13);  x[0] ^= rotl(x[3] &+ x[2], 18)
-            x[6] ^= rotl(x[5] &+ x[4], 7);   x[7] ^= rotl(x[6] &+ x[5], 9)
-            x[4] ^= rotl(x[7] &+ x[6], 13);  x[5] ^= rotl(x[4] &+ x[7], 18)
-            x[11] ^= rotl(x[10] &+ x[9], 7); x[8] ^= rotl(x[11] &+ x[10], 9)
-            x[9] ^= rotl(x[8] &+ x[11], 13); x[10] ^= rotl(x[9] &+ x[8], 18)
-            x[12] ^= rotl(x[15] &+ x[14], 7); x[13] ^= rotl(x[12] &+ x[15], 9)
-            x[14] ^= rotl(x[13] &+ x[12], 13); x[15] ^= rotl(x[14] &+ x[13], 18)
-        }
-        return zip(x, input).map { $0 &+ $1 }
+            x1 ^= rotl(x0 &+ x3, 7);   x2 ^= rotl(x1 &+ x0, 9)
+            x3 ^= rotl(x2 &+ x1, 13);  x0 ^= rotl(x3 &+ x2, 18)
+            x6 ^= rotl(x5 &+ x4, 7);   x7 ^= rotl(x6 &+ x5, 9)
+            x4 ^= rotl(x7 &+ x6, 13);  x5 ^= rotl(x4 &+ x7, 18)
+            x11 ^= rotl(x10 &+ x9, 7); x8 ^= rotl(x11 &+ x10, 9)
+            x9 ^= rotl(x8 &+ x11, 13); x10 ^= rotl(x9 &+ x8, 18)
+            x12 ^= rotl(x15 &+ x14, 7); x13 ^= rotl(x12 &+ x15, 9)
+            x14 ^= rotl(x13 &+ x12, 13); x15 ^= rotl(x14 &+ x13, 18)
+// column round
+            x4 ^= rotl(x0 &+ x12, 7);  x8 ^= rotl(x4 &+ x0, 9)
+            x12 ^= rotl(x8 &+ x4, 13); x0 ^= rotl(x12 &+ x8, 18)
+            x9 ^= rotl(x5 &+ x1, 7);   x13 ^= rotl(x9 &+ x5, 9)
+            x1 ^= rotl(x13 &+ x9, 13); x5 ^= rotl(x1 &+ x13, 18)
+            x14 ^= rotl(x10 &+ x6, 7); x2 ^= rotl(x14 &+ x10, 9)
+            x6 ^= rotl(x2 &+ x14, 13); x10 ^= rotl(x6 &+ x2, 18)
+            x3 ^= rotl(x15 &+ x11, 7); x7 ^= rotl(x3 &+ x15, 9)
+            x11 ^= rotl(x7 &+ x3, 13); x15 ^= rotl(x11 &+ x7, 18)
+            // row round
+            x1 ^= rotl(x0 &+ x3, 7);   x2 ^= rotl(x1 &+ x0, 9)
+            x3 ^= rotl(x2 &+ x1, 13);  x0 ^= rotl(x3 &+ x2, 18)
+            x6 ^= rotl(x5 &+ x4, 7);   x7 ^= rotl(x6 &+ x5, 9)
+            x4 ^= rotl(x7 &+ x6, 13);  x5 ^= rotl(x4 &+ x7, 18)
+            x11 ^= rotl(x10 &+ x9, 7); x8 ^= rotl(x11 &+ x10, 9)
+            x9 ^= rotl(x8 &+ x11, 13); x10 ^= rotl(x9 &+ x8, 18)
+            x12 ^= rotl(x15 &+ x14, 7); x13 ^= rotl(x12 &+ x15, 9)
+            x14 ^= rotl(x13 &+ x12, 13); x15 ^= rotl(x14 &+ x13, 18)
+// column round
+            x4 ^= rotl(x0 &+ x12, 7);  x8 ^= rotl(x4 &+ x0, 9)
+            x12 ^= rotl(x8 &+ x4, 13); x0 ^= rotl(x12 &+ x8, 18)
+            x9 ^= rotl(x5 &+ x1, 7);   x13 ^= rotl(x9 &+ x5, 9)
+            x1 ^= rotl(x13 &+ x9, 13); x5 ^= rotl(x1 &+ x13, 18)
+            x14 ^= rotl(x10 &+ x6, 7); x2 ^= rotl(x14 &+ x10, 9)
+            x6 ^= rotl(x2 &+ x14, 13); x10 ^= rotl(x6 &+ x2, 18)
+            x3 ^= rotl(x15 &+ x11, 7); x7 ^= rotl(x3 &+ x15, 9)
+            x11 ^= rotl(x7 &+ x3, 13); x15 ^= rotl(x11 &+ x7, 18)
+            // row round
+            x1 ^= rotl(x0 &+ x3, 7);   x2 ^= rotl(x1 &+ x0, 9)
+            x3 ^= rotl(x2 &+ x1, 13);  x0 ^= rotl(x3 &+ x2, 18)
+            x6 ^= rotl(x5 &+ x4, 7);   x7 ^= rotl(x6 &+ x5, 9)
+            x4 ^= rotl(x7 &+ x6, 13);  x5 ^= rotl(x4 &+ x7, 18)
+            x11 ^= rotl(x10 &+ x9, 7); x8 ^= rotl(x11 &+ x10, 9)
+            x9 ^= rotl(x8 &+ x11, 13); x10 ^= rotl(x9 &+ x8, 18)
+            x12 ^= rotl(x15 &+ x14, 7); x13 ^= rotl(x12 &+ x15, 9)
+            x14 ^= rotl(x13 &+ x12, 13); x15 ^= rotl(x14 &+ x13, 18)
+// column round
+            x4 ^= rotl(x0 &+ x12, 7);  x8 ^= rotl(x4 &+ x0, 9)
+            x12 ^= rotl(x8 &+ x4, 13); x0 ^= rotl(x12 &+ x8, 18)
+            x9 ^= rotl(x5 &+ x1, 7);   x13 ^= rotl(x9 &+ x5, 9)
+            x1 ^= rotl(x13 &+ x9, 13); x5 ^= rotl(x1 &+ x13, 18)
+            x14 ^= rotl(x10 &+ x6, 7); x2 ^= rotl(x14 &+ x10, 9)
+            x6 ^= rotl(x2 &+ x14, 13); x10 ^= rotl(x6 &+ x2, 18)
+            x3 ^= rotl(x15 &+ x11, 7); x7 ^= rotl(x3 &+ x15, 9)
+            x11 ^= rotl(x7 &+ x3, 13); x15 ^= rotl(x11 &+ x7, 18)
+            // row round
+            x1 ^= rotl(x0 &+ x3, 7);   x2 ^= rotl(x1 &+ x0, 9)
+            x3 ^= rotl(x2 &+ x1, 13);  x0 ^= rotl(x3 &+ x2, 18)
+            x6 ^= rotl(x5 &+ x4, 7);   x7 ^= rotl(x6 &+ x5, 9)
+            x4 ^= rotl(x7 &+ x6, 13);  x5 ^= rotl(x4 &+ x7, 18)
+            x11 ^= rotl(x10 &+ x9, 7); x8 ^= rotl(x11 &+ x10, 9)
+            x9 ^= rotl(x8 &+ x11, 13); x10 ^= rotl(x9 &+ x8, 18)
+            x12 ^= rotl(x15 &+ x14, 7); x13 ^= rotl(x12 &+ x15, 9)
+            x14 ^= rotl(x13 &+ x12, 13); x15 ^= rotl(x14 &+ x13, 18)
+        t[0] &+= x0
+        t[1] &+= x1
+        t[2] &+= x2
+        t[3] &+= x3
+        t[4] &+= x4
+        t[5] &+= x5
+        t[6] &+= x6
+        t[7] &+= x7
+        t[8] &+= x8
+        t[9] &+= x9
+        t[10] &+= x10
+        t[11] &+= x11
+        t[12] &+= x12
+        t[13] &+= x13
+        t[14] &+= x14
+        t[15] &+= x15
     }
+
 
     private static func pbkdf2Sha256(password: [UInt8], salt: [UInt8], iterations: UInt32, keyLength: Int) throws -> Data {
         var derived = Data(count: keyLength)
@@ -219,6 +330,7 @@ private extension Array where Element == UInt32 {
     }
 }
 
+@inline(__always)
 private func rotl(_ value: UInt32, _ shift: UInt32) -> UInt32 {
     (value << shift) | (value >> (32 - shift))
 }
