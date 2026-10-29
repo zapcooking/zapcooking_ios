@@ -5,6 +5,9 @@ struct LoginView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nsecInput = ""
+    /// Only used when the key field holds an `ncryptsec1…` (NIP-49) backup —
+    /// decryption needs the encryption password.
+    @State private var ncryptsecPassword = ""
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
@@ -15,6 +18,12 @@ struct LoginView: View {
     /// `PendingAgreement`, not a Bool beside an optional — see its doc.
     @State private var qrScan: PendingAgreement?
     @State private var signUp: PendingAgreement?
+
+    private var isNcryptsec: Bool {
+        nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("ncryptsec1")
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,15 +43,15 @@ struct LoginView: View {
                     .font(.title.bold())
                     .foregroundStyle(Color.wispOnSurface)
 
-                Text("Enter your nsec key")
+                Text(isNcryptsec ? "Enter the password for your ncryptsec key" : "Enter your nsec key")
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 12) {
                     Group {
                         if isSecure {
-                            SecureField("nsec1...", text: $nsecInput)
+                            SecureField("nsec1… / ncryptsec1…", text: $nsecInput)
                         } else {
-                            TextField("nsec1...", text: $nsecInput)
+                            TextField("nsec1… / ncryptsec1…", text: $nsecInput)
                         }
                     }
                     .textFieldStyle(.roundedBorder)
@@ -65,7 +74,18 @@ struct LoginView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onChange(of: nsecInput) { _, _ in error = nil }
+                .onChange(of: nsecInput) { _, _ in
+                    error = nil
+                    if !isNcryptsec { ncryptsecPassword = "" }
+                }
+
+                if isNcryptsec {
+                    SecureField("Password", text: $ncryptsecPassword)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: ncryptsecPassword) { _, _ in error = nil }
+                }
 
                 NsecIdentityPreview(nsecInput: nsecInput)
 
@@ -89,7 +109,7 @@ struct LoginView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.wispPrimary)
                 .controlSize(.large)
-                .disabled(nsecInput.isEmpty || isLoading)
+                .disabled(nsecInput.isEmpty || isLoading || (isNcryptsec && ncryptsecPassword.isEmpty))
 
                 HStack(spacing: 8) {
                     Rectangle().fill(.tertiary).frame(height: 1)
@@ -161,6 +181,14 @@ struct LoginView: View {
         qrScan = nil
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // An ncryptsec QR can't be decrypted without its password — drop the
+        // payload into the key field so the password field appears and the
+        // user signs in through the normal Log In path.
+        if trimmed.lowercased().hasPrefix("ncryptsec1") {
+            nsecInput = trimmed
+            return
+        }
+
         // nsec1… or 64-char hex private key — reuse existing parse + save path.
         if let keypair = NostrKey.parseNsec(trimmed) {
             NostrKey.save(keypair, acceptance: acceptance)
@@ -179,7 +207,7 @@ struct LoginView: View {
             return
         }
 
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, or hex private key."
     }
 
     private func login() {
@@ -190,11 +218,41 @@ struct LoginView: View {
         // carry a trailing newline, which fails parseNsec on add-account
         // while the QR path and first-run login both trim and succeed.
         let input = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isNcryptsec {
+            let password = ncryptsecPassword
+            Task {
+                do {
+                    // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
+                    // of CPU — keep it off the main actor so the spinner spins.
+                    let privkey = try await Task.detached(priority: .userInitiated) {
+                        try Nip49.decrypt(input, password: password)
+                    }.value
+                    guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
+                        error = "That ncryptsec decrypted to an invalid private key."
+                        isLoading = false
+                        return
+                    }
+                    let keypair = Keypair(privkey: Hex.encode(Data(privkey)), pubkey: Hex.encode(pub))
+                    NostrKey.save(keypair, acceptance: acceptance)
+                    isLoading = false
+                    onLogin(keypair)
+                } catch Nip49.CryptoError.wrongPassword {
+                    error = "Wrong password for that ncryptsec key."
+                    isLoading = false
+                } catch {
+                    self.error = "Couldn't read that ncryptsec key. Check the password and try again."
+                    isLoading = false
+                }
+            }
+            return
+        }
+
         Task {
             let result = NostrKey.parseNsec(input)
             isLoading = false
             guard let keypair = result else {
-                error = "Couldn't read that key. Paste an nsec (\"nsec1…\") or a 64-character hex private key."
+                error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an ncryptsec (\"ncryptsec1…\"), or a 64-character hex private key."
                 return
             }
             NostrKey.save(keypair, acceptance: acceptance)
