@@ -62,8 +62,8 @@ struct SidebarDrawerView: View {
     @State private var statusDraft = ""
     @State private var userStatus: String? = nil
     @State private var torEnabled = false
-    @State private var avatarTapCount = 0
-    @State private var avatarTapResetTask: Task<Void, Never>?
+    @State private var crashTapCount = 0
+    @State private var crashTapResetTask: Task<Void, Never>?
 
     private var hasEmbeddedWallet: Bool { false }
     private var displayName: String { profile?.displayString ?? truncatedPubkey }
@@ -239,34 +239,33 @@ struct SidebarDrawerView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Button(action: handleAvatarTap) {
-                    CachedAvatarView(url: profile?.picture, size: 64, alwaysLoad: true)
+                // Avatar + account count in one capsule: the whole pill is a
+                // single tap target that opens the account switcher (switch
+                // or add an account), with a "+N" badge counting the other
+                // accounts when more than one is signed in.
+                let otherCount = accounts.count - 1
+                Button {
+                    showAccountSwitcher = true
+                } label: {
+                    HStack(spacing: 8) {
+                        CachedAvatarView(url: profile?.picture, size: 44, alwaysLoad: true)
+                        Image(systemName: "person.2")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                        if otherCount > 0 {
+                            Text("+\(otherCount)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color.secondary)
+                        }
+                    }
+                    .padding(.leading, 8)
+                    .padding(.trailing, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.wispSurfaceVariant, in: Capsule())
                 }
                 .buttonStyle(.plain)
-
-            // Icon-only affordance that opens the account switcher sheet. Same
-            // action (switch or add an account) regardless of how many
-            // accounts are signed in; shows a "+N" badge counting the other
-            // accounts when more than one is signed in.
-            let otherCount = accounts.count - 1
-            Button {
-                showAccountSwitcher = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
-                    if otherCount > 0 {
-                        Text("+\(otherCount)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.secondary)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.wispSurfaceVariant, in: Capsule())
-            }
-            .buttonStyle(.plain)
+                .accessibilityLabel("Switch account")
+                .accessibilityIdentifier("drawer-account-switcher")
 
                 Spacer()
 
@@ -339,20 +338,6 @@ struct SidebarDrawerView: View {
                     }
                 }
                 .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func handleAvatarTap() {
-        avatarTapCount += 1
-        if avatarTapCount >= 7 {
-            fatalError("Test crash")
-        }
-        avatarTapResetTask?.cancel()
-        avatarTapResetTask = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !Task.isCancelled {
-                avatarTapCount = 0
             }
         }
     }
@@ -452,17 +437,41 @@ struct SidebarDrawerView: View {
     }
 
     private var versionFooter: some View {
-        HStack(spacing: 6) {
-            Image("ZcLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 16, height: 16)
-                .opacity(0.3)
-            Text(versionString)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary.opacity(0.5))
+        // Crash-reporting QA hook: 7 taps within 2 s of each other crash the
+        // app on purpose ("Test crash"). The version label is the
+        // conventional multi-tap spot and has no competing action — the
+        // hook's previous home was the drawer avatar, which now opens the
+        // account switcher.
+        Button {
+            handleCrashTestTap()
+        } label: {
+            HStack(spacing: 6) {
+                Image("ZcLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .opacity(0.3)
+                Text(versionString)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+    }
+
+    private func handleCrashTestTap() {
+        crashTapCount += 1
+        if crashTapCount >= 7 {
+            fatalError("Test crash")
+        }
+        crashTapResetTask?.cancel()
+        crashTapResetTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled {
+                crashTapCount = 0
+            }
+        }
     }
 
 }
