@@ -138,6 +138,7 @@
 		4CFF040100000000000000D1 /* ChaCha20.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040000000000000000D1 /* ChaCha20.swift */; };
 		4CFF040300000000000000D2 /* Nip44.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040200000000000000D2 /* Nip44.swift */; };
 		4CFF040500000000000000D3 /* Nip17.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040400000000000000D3 /* Nip17.swift */; };
+		4CFF040800000000000000D3 /* Nip49.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040700000000000000D3 /* Nip49.swift */; };
 		4CFF040700000000000000D4 /* DmMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040600000000000000D4 /* DmMessage.swift */; };
 		4CFF040900000000000000D5 /* DmRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040800000000000000D5 /* DmRepository.swift */; };
 		4CFF040B00000000000000D6 /* MessagesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFF040A00000000000000D6 /* MessagesViewModel.swift */; };
@@ -505,6 +506,7 @@
 		4CFF040000000000000000D1 /* ChaCha20.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChaCha20.swift; sourceTree = "<group>"; };
 		4CFF040200000000000000D2 /* Nip44.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip44.swift; sourceTree = "<group>"; };
 		4CFF040400000000000000D3 /* Nip17.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip17.swift; sourceTree = "<group>"; };
+		4CFF040700000000000000D3 /* Nip49.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip49.swift; sourceTree = "<group>"; };
 		4CFF040600000000000000D4 /* DmMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmMessage.swift; sourceTree = "<group>"; };
 		4CFF040800000000000000D5 /* DmRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmRepository.swift; sourceTree = "<group>"; };
 		4CFF040A00000000000000D6 /* MessagesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesViewModel.swift; sourceTree = "<group>"; };
@@ -839,6 +841,7 @@
 				4CFF040000000000000000D1 /* ChaCha20.swift */,
 				4CFF040200000000000000D2 /* Nip44.swift */,
 				4CFF040400000000000000D3 /* Nip17.swift */,
+				4CFF040700000000000000D3 /* Nip49.swift */,
 				4CFF040600000000000000D4 /* DmMessage.swift */,
 				4CFF040800000000000000D5 /* DmRepository.swift */,
 				4CFF040A00000000000000D6 /* MessagesViewModel.swift */,
@@ -1367,6 +1370,7 @@
 				4CFF040100000000000000D1 /* ChaCha20.swift in Sources */,
 				4CFF040300000000000000D2 /* Nip44.swift in Sources */,
 				4CFF040500000000000000D3 /* Nip17.swift in Sources */,
+				4CFF040800000000000000D3 /* Nip49.swift in Sources */,
 				4CFF040700000000000000D4 /* DmMessage.swift in Sources */,
 				4CFF040900000000000000D5 /* DmRepository.swift in Sources */,
 				4CFF040B00000000000000D6 /* MessagesViewModel.swift in Sources */,
