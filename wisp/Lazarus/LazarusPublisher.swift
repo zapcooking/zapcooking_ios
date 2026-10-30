@@ -29,7 +29,16 @@ nonisolated enum LazarusRestoreFailure: Sendable {
     /// No write relays to publish to or judge success on (the relay list
     /// couldn't be fetched).
     case noWriteRelays
-    case signFailed
+    /// Signing threw. Carries the signer's own explanation when one came
+    /// back ("event too large", a permission denial), so the screen can
+    /// say why instead of a bare signing failure.
+    case signFailed(String?)
+    /// The version serializes larger than a remote signer can be asked to
+    /// sign: NIP-46 rides the event inside an encrypted kind-24133, and
+    /// signer apps cap those requests (~64 KB; Primal refuses larger).
+    /// Detected before the request so the screen can say exactly this.
+    case tooLargeForRemoteSigner(serializedBytes: Int)
+
     /// No write relay accepted the event.
     case notAccepted(LazarusPublishReport)
 }
@@ -65,6 +74,34 @@ nonisolated enum LazarusRestoreOutcome: Sendable {
 ///    the clobbered version.
 @MainActor
 struct LazarusPublisher {
+
+    /// Serialized size of an unsigned event — the number the remote-signer
+    /// cap is expressed against.
+    nonisolated static func serializedBytes(pubkey: String, createdAt: Int, kind: Int, tags: [[String]], content: String) -> Int {
+        NostrEvent.serializeForId(pubkey: pubkey, createdAt: createdAt, kind: kind, tags: tags, content: content).utf8.count
+    }
+
+    /// Largest event handed to a remote signer without a size warning. The
+    /// NIP-44 encryption expands the request ~1.35x and the kind-24133 wrap
+    /// adds a couple hundred bytes, so ~48 KB of plaintext event is the
+    /// point past which the wire request crosses a 64 KB signer cap.
+    nonisolated static let remoteSignerSafeEventBytes = 48_000
+
+    /// The user-facing warning for an oversized restore, shared by the
+    /// publisher's failure and the review screen's pre-restore notice.
+    nonisolated static func sizeWarningIfTooLarge(serializedBytes: Int) -> String? {
+        guard serializedBytes > remoteSignerSafeEventBytes else { return nil }
+        let kb = (serializedBytes + 512) / 1024
+        return "This version serializes to about \(kb) KB. Signer apps cap remote-signing requests around 64 KB once the request is encrypted, so your signer app will refuse to publish it. Restore from a device that holds the account's local key, or trim the list inside your signer app."
+    }
+
+    /// The signer's own explanation when one came back.
+    static func signFailureReason(_ error: Error) -> String? {
+        if let e = error as? Nip46.NipError { return e.description }
+        if let e = error as? Signer.SignerError { return e.description }
+        return nil
+    }
+
 
     struct Environment {
         /// Every write relay's answer to the re-read.
@@ -171,17 +208,26 @@ struct LazarusPublisher {
         // older copy the re-read found.
         let draft = Lazarus.draft(chosen: request.chosen, current: request.reviewedCurrent, now: env.now())
         guard env.activePubkey() == pubkey else { return .failed(.wrongAccount) }
+        if request.keypair.isRemote {
+            let bytes = Self.serializedBytes(
+                pubkey: pubkey, createdAt: draft.createdAt, kind: draft.kind,
+                tags: draft.tags, content: draft.content
+            )
+            if bytes > Self.remoteSignerSafeEventBytes {
+                return .failed(.tooLargeForRemoteSigner(serializedBytes: bytes))
+            }
+        }
         let signed: NostrEvent
         do {
             signed = try await env.sign(request.keypair, draft)
         } catch {
-            return .failed(.signFailed)
+            return .failed(.signFailed(Self.signFailureReason(error)))
         }
         // Restoring one account's list as another's is forbidden, including
         // when the account changed while signing.
         guard signed.pubkey == pubkey, env.activePubkey() == pubkey else { return .failed(.wrongAccount) }
         guard signed.kind == draft.kind, signed.createdAt == draft.createdAt,
-              Lazarus.hasValidSignature(signed) else { return .failed(.signFailed) }
+              Lazarus.hasValidSignature(signed) else { return .failed(.signFailed(nil)) }
 
         let outcomes = await env.publish(signed, targets.judged)
         let report = LazarusPublishReport(
