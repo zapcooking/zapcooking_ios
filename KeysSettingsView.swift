@@ -33,6 +33,8 @@ struct KeysSettingsView: View {
                 publicKeySection
                 if keypair.isWatchOnly {
                     watchOnlySection
+                } else if keypair.isRemote {
+                    remoteSignerSection
                 } else {
                     privateKeySection
                 }
@@ -119,6 +121,25 @@ struct KeysSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: - Remote signer
+
+    /// Android's Keys screen (AuthScreen/SplashScreen signer flow): no
+    /// reveal affordance, no nsec warning — one calm info box, since the
+    /// key simply doesn't live here.
+    private var remoteSignerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Private Key")
+                .font(.subheadline.weight(.semibold))
+
+            Text("Signing is handled by a connected signer app. No private key is stored on this device.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.wispSurface, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
