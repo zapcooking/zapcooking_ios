@@ -124,7 +124,7 @@ struct RelayNoteReviewReplyPublisher: NoteReviewReplyPublishing {
 
     func publish(content: String, parent: NostrEvent, keypair: Keypair) async -> NoteReviewPublishOutcome {
         // A watch-only / empty key cannot sign — "your signer, not the relays".
-        if keypair.privkey.isEmpty { return .signRejected }
+        if !Signer.canSign(keypair) { return .signRejected }
         let tags = Self.replyTags(parent: parent)
         let signed: NostrEvent
         do {

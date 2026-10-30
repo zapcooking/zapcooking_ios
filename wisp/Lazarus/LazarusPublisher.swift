@@ -122,10 +122,10 @@ struct LazarusPublisher {
 
     let env: Environment
 
-    /// Whether this key can sign at all: local keys only in this app, so a
-    /// view-only account (empty private key) can't.
+    /// Whether this key can sign at all: a local key or a NIP-46 remote
+    /// signer. A view-only account (empty private key, no signer) can't.
     nonisolated static func canSign(_ keypair: Keypair) -> Bool {
-        Hex.decode(keypair.privkey)?.count == 32
+        Signer.canSign(keypair)
     }
 
     func restore(_ request: Request) async -> LazarusRestoreOutcome {

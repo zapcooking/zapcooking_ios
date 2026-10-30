@@ -238,7 +238,7 @@ final class RelaySetRepository {
     // MARK: - Publish
 
     private func publishFavorites(keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let now = NostrClock.now()
         favoritesUpdatedAt = max(favoritesUpdatedAt + 1, now)
         let tags = Nip51Lists.buildFavoriteRelayTags(favoriteRelays)
@@ -246,13 +246,12 @@ final class RelaySetRepository {
         let createdAt = favoritesUpdatedAt
         let relays = topWriteRelays(pubkey: pubkey)
         Task.detached {
-            guard let event = try? NostrEvent.sign(
-                privkey32: privkey,
-                pubkey: pubkey,
+            guard let event = try? await Signer.sign(
+                keypair: keypair,
                 kind: Nip51Lists.kindFavoriteRelays,
-                createdAt: createdAt,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: createdAt
             ) else { return }
             _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
             await EventStore.shared.persist([event])
@@ -260,19 +259,18 @@ final class RelaySetRepository {
     }
 
     private func publishRelaySet(_ set: RelaySet, keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let tags = Nip51Lists.buildRelaySetTags(dTag: set.dTag, name: set.name, relays: set.relays)
         let pubkey = keypair.pubkey
         let createdAt = set.createdAt
         let relays = topWriteRelays(pubkey: pubkey)
         Task.detached {
-            guard let event = try? NostrEvent.sign(
-                privkey32: privkey,
-                pubkey: pubkey,
+            guard let event = try? await Signer.sign(
+                keypair: keypair,
                 kind: Nip51Lists.kindRelaySet,
-                createdAt: createdAt,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: createdAt
             ) else { return }
             _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
             await EventStore.shared.persist([event])
@@ -283,19 +281,18 @@ final class RelaySetRepository {
     /// the latest 30002 with no relay tags as a removal). The d-tag is preserved so the
     /// replacement targets the right address.
     private func publishRelaySetDeletion(dTag: String, keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let tags: [[String]] = [["d", dTag]]
         let pubkey = keypair.pubkey
         let createdAt = NostrClock.now()
         let relays = topWriteRelays(pubkey: pubkey)
         Task.detached {
-            guard let event = try? NostrEvent.sign(
-                privkey32: privkey,
-                pubkey: pubkey,
+            guard let event = try? await Signer.sign(
+                keypair: keypair,
                 kind: Nip51Lists.kindRelaySet,
-                createdAt: createdAt,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: createdAt
             ) else { return }
             _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
         }

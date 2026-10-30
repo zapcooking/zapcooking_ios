@@ -35,9 +35,11 @@ enum RelayPool {
 
     // MARK: - NIP-42 hooks (set once at app start from MainView.task)
 
-    /// Returns a signed kind-22242 AUTH event for the given (relay, challenge), or
-    /// nil if signing failed / no keypair is available.
-    nonisolated(unsafe) static var authSigner: (@Sendable (_ relayUrl: String, _ challenge: String) -> NostrEvent?)?
+    /// Returns a signed kind-22242 AUTH event for the given (relay, challenge).
+    /// Async + throwing because remote-signer (NIP-46) accounts sign over the
+    /// network — possibly seconds, possibly failing. Throws if signing failed /
+    /// no keypair is available.
+    nonisolated(unsafe) static var authSigner: (@Sendable (_ relayUrl: String, _ challenge: String) async throws -> NostrEvent)?
 
     /// Returns true if the relay is pre-approved for AUTH (auth flag on its
     /// `GeneralRelay` entry in `RelaySettingsRepository`).
@@ -62,7 +64,18 @@ enum RelayPool {
                                        ws: URLSessionWebSocketTask) async -> Bool {
         let autoApprove = UserDefaults.standard.object(forKey: "wisp_settings_auto_approve_relay_auth") as? Bool ?? true
         guard (autoApprove || authApprovalCheck?(urlString) == true),
-              let event = authSigner?(urlString, challenge) else { return false }
+              let signer = authSigner else { return false }
+        let event: NostrEvent
+        do {
+            event = try await signer(urlString, challenge)
+        } catch {
+            // Signer unavailable / rejected (e.g. remote signer offline). Skip AUTH;
+            // the connection stays up and auth-gated subs just return nothing.
+            #if DEBUG
+            relayPoolLog.log("NIP-42 AUTH signing failed for \(urlString, privacy: .public): \(String(describing: error), privacy: .public)")
+            #endif
+            return false
+        }
         let payload = "[\"AUTH\",\(event.toJSON())]"
         do {
             try await ws.send(.string(payload))
@@ -660,12 +673,14 @@ actor RelayConn {
                 guard arr.count >= 2, let challenge = arr[1] as? String else { continue }
                 lastChallenge = challenge
                 for (_, sub) in subs { sub.sink.onAuth(urlString) }
-                let didAuth = await RelayPool.respondToAuthChallenge(
-                    challenge: challenge, urlString: urlString, ws: socket
-                )
-                if didAuth {
-                    // Re-issue every REQ now that the connection is authed.
-                    for (_, sub) in subs { try? await socket.send(.string(sub.req)) }
+                // Sign off the receive loop: a remote (NIP-46) signer can take
+                // seconds, and frames for other subs must keep flowing meanwhile.
+                let relayUrl = urlString
+                Task { [weak self] in
+                    let didAuth = await RelayPool.respondToAuthChallenge(
+                        challenge: challenge, urlString: relayUrl, ws: socket
+                    )
+                    if didAuth { await self?.reissueAfterAuth(on: socket) }
                 }
 
             default:
@@ -675,6 +690,13 @@ actor RelayConn {
             }
         }
         return false
+    }
+
+    /// Re-issue every REQ now that the connection is authed — but only if
+    /// `socket` is still the live one (it may have dropped while signing).
+    private func reissueAfterAuth(on socket: URLSessionWebSocketTask) async {
+        guard connected, ws === socket else { return }
+        for (_, sub) in subs { try? await socket.send(.string(sub.req)) }
     }
 }
 

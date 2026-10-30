@@ -333,6 +333,7 @@ struct NostrLoginSheet: View {
     @State private var isSecure = true
     @State private var isLoading = false
     @State private var showQRScanner = false
+    @State private var showRemoteSigner = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -356,9 +357,9 @@ struct NostrLoginSheet: View {
             HStack(spacing: 8) {
                 Group {
                     if isSecure {
-                        SecureField("nsec or npub…", text: $nsecInput)
+                        SecureField("nsec, npub, or bunker://…", text: $nsecInput)
                     } else {
-                        TextField("nsec or npub…", text: $nsecInput)
+                        TextField("nsec, npub, or bunker://…", text: $nsecInput)
                     }
                 }
                 .textFieldStyle(.roundedBorder)
@@ -426,6 +427,18 @@ struct NostrLoginSheet: View {
             .tint(.wispPrimary)
             .clipShape(Capsule())
 
+            Button {
+                showRemoteSigner = true
+            } label: {
+                Label("Use a signer app", systemImage: "qrcode")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(.wispPrimary)
+            .clipShape(Capsule())
+            .padding(.top, 8)
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
@@ -448,6 +461,15 @@ struct NostrLoginSheet: View {
             )
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $showRemoteSigner) {
+            Nip46LoginView(
+                onLogin: { kp in
+                    showRemoteSigner = false
+                    onLogin(kp)
+                },
+                acceptance: acceptance
+            )
+        }
         .onAppear { nsecPasteAllowed = true }
         .onDisappear { nsecPasteAllowed = false }
     }
@@ -455,6 +477,10 @@ struct NostrLoginSheet: View {
     private func login() {
         error = nil
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed)
+            return
+        }
         if let keypair = NostrKey.parseNsec(trimmed) {
             isLoading = true
             NostrKey.save(keypair, acceptance: acceptance)
@@ -485,7 +511,31 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed)
+            return
+        }
+        error = "Unrecognized format. Scan an nsec, npub, nprofile, bunker link, or hex private key."
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect it
+    /// inline — spinner while the user approves in their signer app.
+    private func connectSignerURI(_ input: String) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                isLoading = false
+                onLogin(keypair)
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
+        }
     }
 }
 

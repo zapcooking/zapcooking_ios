@@ -81,6 +81,15 @@ enum NostrKey {
         UserDefaults.standard.set(true, forKey: "watch_only_\(pubkey)")
     }
 
+    /// Save a remote-signer (NIP-46) account. Same empty-privkey sentinel as
+    /// watch-only; `Keypair.isRemote` tells them apart by the saved signer
+    /// session in `Nip46SessionStore`, which the caller has already written.
+    /// Clears any watch-only flag left from browsing this npub earlier.
+    static func saveRemote(pubkey: String, acceptance: TermsAcceptance) {
+        save(Keypair(privkey: "", pubkey: pubkey), acceptance: acceptance)
+        UserDefaults.standard.removeObject(forKey: "watch_only_\(pubkey)")
+    }
+
     static func isWatchOnly(pubkey: String) -> Bool {
         UserDefaults.standard.bool(forKey: "watch_only_\(pubkey)")
     }
@@ -114,6 +123,10 @@ enum NostrKey {
 
     static func deleteAccount(pubkey: String) {
         deleteFromKeychain(account: "account_\(pubkey)")
+        // The signer session's app key is per-account; spec says delete it on
+        // logout. (`Nip46Manager.endSession` also tells the signer, when the
+        // caller can await it.)
+        Nip46SessionStore.delete(pubkey: pubkey)
         if cachedActive()?.pubkey == pubkey {
             setCachedActive(nil)
         }

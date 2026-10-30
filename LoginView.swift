@@ -15,6 +15,7 @@ struct LoginView: View {
     /// `PendingAgreement`, not a Bool beside an optional — see its doc.
     @State private var qrScan: PendingAgreement?
     @State private var signUp: PendingAgreement?
+    @State private var remoteSigner: PendingAgreement?
 
     var body: some View {
         NavigationStack {
@@ -40,9 +41,9 @@ struct LoginView: View {
                 HStack(spacing: 12) {
                     Group {
                         if isSecure {
-                            SecureField("nsec1...", text: $nsecInput)
+                            SecureField("nsec or bunker://…", text: $nsecInput)
                         } else {
-                            TextField("nsec1...", text: $nsecInput)
+                            TextField("nsec or bunker://…", text: $nsecInput)
                         }
                     }
                     .textFieldStyle(.roundedBorder)
@@ -108,6 +109,16 @@ struct LoginView: View {
                 .tint(.wispPrimary)
                 .controlSize(.large)
 
+                Button {
+                    remoteSigner = PendingAgreement(.now())
+                } label: {
+                    Label("Use a signer app", systemImage: "qrcode")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.wispPrimary)
+                .controlSize(.large)
+
                 TermsAgreementNotice()
                     .padding(.top, 4)
 
@@ -146,6 +157,15 @@ struct LoginView: View {
                     onLogin(kp)
                 }
             }
+            .sheet(item: $remoteSigner) { pending in
+                Nip46LoginView(
+                    onLogin: { kp in
+                        remoteSigner = nil
+                        onLogin(kp)
+                    },
+                    acceptance: pending.acceptance
+                )
+            }
         }
         .presentationDetents([.large])
         // Paint the sheet's container background so the wisp color is in
@@ -155,6 +175,27 @@ struct LoginView: View {
         .presentationBackground(Color.wispBackground)
         .onAppear { nsecPasteAllowed = true }
         .onDisappear { nsecPasteAllowed = false }
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect
+    /// it inline (spinner while the user approves in their signer), with the
+    /// same friendly diagnosis the dedicated screen gives.
+    private func connectSignerURI(_ input: String, acceptance: TermsAcceptance) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                isLoading = false
+                onLogin(keypair)
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
+        }
     }
 
     private func handleScanned(_ value: String, acceptance: TermsAcceptance) {
@@ -179,7 +220,12 @@ struct LoginView: View {
             return
         }
 
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed, acceptance: acceptance)
+            return
+        }
+
+        error = "Unrecognized format. Scan an nsec, npub, nprofile, bunker link, or hex private key."
     }
 
     private func login() {
@@ -190,6 +236,10 @@ struct LoginView: View {
         // carry a trailing newline, which fails parseNsec on add-account
         // while the QR path and first-run login both trim and succeed.
         let input = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Nip46LoginViewModel.isSignerURI(input) {
+            connectSignerURI(input, acceptance: acceptance)
+            return
+        }
         Task {
             let result = NostrKey.parseNsec(input)
             isLoading = false

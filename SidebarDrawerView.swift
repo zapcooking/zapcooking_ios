@@ -119,8 +119,12 @@ struct SidebarDrawerView: View {
     }
 
     private func publishStatus(_ content: String) async {
-        guard let priv = Hex.decode(keypair.privkey) else { return }
-        guard let event = try? Nip38.buildStatus(privkey32: priv, pubkey: pubkey, content: content) else { return }
+        guard let event = try? await Signer.sign(
+            keypair: keypair,
+            kind: Nip38.kindUserStatus,
+            tags: Nip38.buildStatusTags(),
+            content: content
+        ) else { return }
         var relays = await RelayListRepository.shared.getWriteRelays(pubkey)
         if relays.isEmpty { relays = ["wss://relay.primal.net"] }
         _ = await RelayPool.publish(event: event, to: relays, timeout: 6)

@@ -164,7 +164,7 @@ final class NoteReviewViewModel {
         guard NoteReview.canPost(phase), let parent else { return }
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
-        if keypair.privkey.isEmpty {
+        if !Signer.canSign(keypair) {
             postError = NoteReview.signFailedLine
             return
         }
@@ -227,8 +227,8 @@ final class NoteReviewViewModel {
 
     private func run(_ mode: NoteReview.Mode, keypair: Keypair, showSigning: Bool) {
         // Defensive only — the trigger is hidden for watch-only accounts, so
-        // an empty privkey here is a wiring bug, surfaced in Cheffy voice.
-        if keypair.privkey.isEmpty {
+        // an account that can't sign here is a wiring bug, surfaced in Cheffy voice.
+        if !Signer.canSign(keypair) {
             phase = .error
             self.mode = mode
             message = NoteReview.signFailedLine

@@ -47,6 +47,12 @@
 		4CABCD030000000000F30040 /* CldrEmojiKeywords.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CABCD020000000000F30040 /* CldrEmojiKeywords.swift */; };
 		4CABCD040000000000F30041 /* cldr-emoji-keywords-en.json in Resources */ = {isa = PBXBuildFile; fileRef = 4CABCD020000000000F30041 /* cldr-emoji-keywords-en.json */; };
 		4CABCE0100000000000F4607 /* Signer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CABCE0000000000000F4607 /* Signer.swift */; };
+		4C46B000000000000000B001 /* Nip46.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A001 /* Nip46.swift */; };
+		4C46B000000000000000B002 /* Nip46Client.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A002 /* Nip46Client.swift */; };
+		4C46B000000000000000B003 /* Nip46Manager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A003 /* Nip46Manager.swift */; };
+		4C46B000000000000000B004 /* Nip46Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A004 /* Nip46Session.swift */; };
+		4C46B000000000000000B005 /* Nip46LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A005 /* Nip46LoginView.swift */; };
+		4C46B000000000000000B006 /* Nip46LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C46A100000000000000A006 /* Nip46LoginViewModel.swift */; };
 		4CDA87DA2F9C546F0079A1BA /* Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA87D92F9C546F0079A1BA /* Hex.swift */; };
 		4CDA87DC2F9C546F0079A1BA /* Bech32.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA87DB2F9C546F0079A1BA /* Bech32.swift */; };
 		4CDA87DE2F9C54700079A1BA /* Secp256k1.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDA87DD2F9C54700079A1BA /* Secp256k1.swift */; };
@@ -412,6 +418,12 @@
 		4CABCD020000000000F30040 /* CldrEmojiKeywords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CldrEmojiKeywords.swift; sourceTree = "<group>"; };
 		4CABCD020000000000F30041 /* cldr-emoji-keywords-en.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "cldr-emoji-keywords-en.json"; sourceTree = "<group>"; };
 		4CABCE0000000000000F4607 /* Signer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Signer.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A001 /* Nip46.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A002 /* Nip46Client.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46Client.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A003 /* Nip46Manager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46Manager.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A004 /* Nip46Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46Session.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A005 /* Nip46LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46LoginView.swift; sourceTree = "<group>"; };
+		4C46A100000000000000A006 /* Nip46LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Nip46LoginViewModel.swift; sourceTree = "<group>"; };
 		4CDA87AB2F9C4BC10079A1BA /* wisp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = wisp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4CDA87B82F9C4BC20079A1BA /* wispTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = wispTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4CDA87C22F9C4BC20079A1BA /* wispUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = wispUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1080,6 +1092,12 @@
 				4CABCD000000000000F30050 /* WispTopHeader.swift */,
 				4CABCD000000000000F2010 /* NewPostsPill.swift */,
 				4CABCE0000000000000F4607 /* Signer.swift */,
+				4C46A100000000000000A001 /* Nip46.swift */,
+				4C46A100000000000000A002 /* Nip46Client.swift */,
+				4C46A100000000000000A003 /* Nip46Manager.swift */,
+				4C46A100000000000000A004 /* Nip46Session.swift */,
+				4C46A100000000000000A005 /* Nip46LoginView.swift */,
+				4C46A100000000000000A006 /* Nip46LoginViewModel.swift */,
 				1F4DD3B138DB6F0CBF8B3653 /* Frameworks */,
 				98E664502F89AB4B1A0D93CD /* ShareExtension */,
 				A85D99D72ADD7AFCEFF789A6 /* PendingShareStore.swift */,
@@ -1605,6 +1623,12 @@
 				4CABCD010000000000F30051 /* AccountSwitcherSheet.swift in Sources */,
 				4CABCD010000000000F2010 /* NewPostsPill.swift in Sources */,
 				4CABCE0100000000000F4607 /* Signer.swift in Sources */,
+				4C46B000000000000000B001 /* Nip46.swift in Sources */,
+				4C46B000000000000000B002 /* Nip46Client.swift in Sources */,
+				4C46B000000000000000B003 /* Nip46Manager.swift in Sources */,
+				4C46B000000000000000B004 /* Nip46Session.swift in Sources */,
+				4C46B000000000000000B005 /* Nip46LoginView.swift in Sources */,
+				4C46B000000000000000B006 /* Nip46LoginViewModel.swift in Sources */,
 				9399A5358082EE4084A6797A /* PendingShareStore.swift in Sources */,
 				347CAC4DB369991D001F8634 /* ThreadReplyFolder.swift in Sources */,
 			);
