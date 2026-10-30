@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let accountSwitcherLog = Logger(subsystem: "wisp", category: "account-switcher")
 
 /// Modal sheet for switching between signed-in accounts, reordering them, or
 /// adding a new one. Replaces the old inline expand/collapse panel in
@@ -14,6 +17,13 @@ struct AccountSwitcherSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var accounts: [String] = []
+    /// Accounts whose keychain entry is gone (device restored from backup —
+    /// `ThisDeviceOnly` items never survive one — or a signing-identity
+    /// change). They still appear in `wisp_accounts`, but tapping them used
+    /// to fail silently: `switchAccount` returned nil and the sheet just
+    /// dismissed. Marked in the row and routed to sign-in instead, which
+    /// re-writes the entry and keeps the account's slot in the list.
+    @State private var unloadable: Set<String> = []
     /// Local mirror of `ProfileRepository`'s cache for the listed accounts.
     /// `ProfileRepository` isn't observable, so a row for an account whose
     /// kind-0 hasn't been fetched yet (e.g. a freshly imported key that has
@@ -65,6 +75,9 @@ struct AccountSwitcherSheet: View {
         .onAppear {
             accounts = initialAccounts
             profiles = ProfileRepository.shared.getAll(initialAccounts)
+            unloadable = Set(initialAccounts.filter { pubkey in
+                pubkey != activePubkey && NostrKey.loadAccount(pubkey: pubkey) == nil
+            })
         }
         .task {
             let fetched = await ProfileRepository.shared.ensure(initialAccounts)
@@ -74,18 +87,25 @@ struct AccountSwitcherSheet: View {
 
     private func accountRow(_ acctPubkey: String, index: Int) -> some View {
         let isActive = acctPubkey == activePubkey
+        let isUnloadable = unloadable.contains(acctPubkey)
         let acctProfile = isActive ? activeProfile : profiles[acctPubkey]
 
         return Button {
-            // `switchAccount` (not `loadAccount`) so the keychain's `active`
-            // slot and `cachedActive` are updated before the loading splash
-            // reads `NostrKey.load()` to pick the avatar — otherwise the
-            // splash renders the previous account's avatar through the
-            // entire transition.
-            if !isActive, let kp = NostrKey.switchAccount(pubkey: acctPubkey) {
+            if isUnloadable {
+                accountSwitcherLog.error("account \(acctPubkey, privacy: .public) is listed but has no keychain entry; routing to sign-in to restore it")
+                onAddAccount()
+                dismiss()
+            } else if !isActive, let kp = NostrKey.switchAccount(pubkey: acctPubkey) {
+                // `switchAccount` (not `loadAccount`) so the keychain's `active`
+                // slot and `cachedActive` are updated before the loading splash
+                // reads `NostrKey.load()` to pick the avatar — otherwise the
+                // splash renders the previous account's avatar through the
+                // entire transition.
                 onSwitchAccount(kp)
+                dismiss()
+            } else {
+                dismiss()
             }
-            dismiss()
         } label: {
             HStack(spacing: 12) {
                 CachedAvatarView(url: acctProfile?.picture, size: 40)
@@ -94,6 +114,12 @@ struct AccountSwitcherSheet: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer()
+                if isUnloadable {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("Sign in again to restore this account")
+                }
                 if NostrKey.isWatchOnly(pubkey: acctPubkey) {
                     Image(systemName: "eye")
                         .font(.system(size: 12, weight: .semibold))
