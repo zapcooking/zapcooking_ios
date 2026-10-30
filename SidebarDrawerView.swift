@@ -53,6 +53,7 @@ struct SidebarDrawerView: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(WalletStore.self) private var walletStore
+    @Environment(\.theme) private var theme
 
     @State private var settingsExpanded = false
     @State private var showAccountSwitcher = false
@@ -236,19 +237,28 @@ struct SidebarDrawerView: View {
 
     // MARK: - Header
 
+    /// Dark mode sinks the pill below the drawer surface — Tailwind gray-950
+    /// (`#030712`), a step darker than the palette's gray-900 background — so
+    /// the avatar reads as a punch-out. Light keeps the palette surface.
+    private var accountPillBackground: Color {
+        theme.isDark ? Color.hex(0xFF030712) : theme.palette.surfaceVariant
+    }
+
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 // Avatar + account count in one capsule: the whole pill is a
                 // single tap target that opens the account switcher (switch
                 // or add an account), with a "+N" badge counting the other
-                // accounts when more than one is signed in.
+                // accounts when more than one is signed in. The avatar runs
+                // the full height of the capsule and sits flush with the
+                // leading edge — its circle IS the capsule's left cap.
                 let otherCount = accounts.count - 1
                 Button {
                     showAccountSwitcher = true
                 } label: {
                     HStack(spacing: 8) {
-                        CachedAvatarView(url: profile?.picture, size: 44, alwaysLoad: true)
+                        CachedAvatarView(url: profile?.picture, size: 56, alwaysLoad: true)
                         Image(systemName: "person.2")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Color.secondary)
@@ -258,17 +268,14 @@ struct SidebarDrawerView: View {
                                 .foregroundStyle(Color.secondary)
                         }
                     }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.wispSurfaceVariant, in: Capsule())
+                    .padding(.trailing, 14)
+                    .background(accountPillBackground, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Switch account")
                 .accessibilityIdentifier("drawer-account-switcher")
 
                 Spacer()
-
                 HStack(spacing: 4) {
                     Button {
                         torEnabled.toggle()
