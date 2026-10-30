@@ -321,6 +321,25 @@ private struct AnimatedLogo: View {
 /// `SplashScreen.kt`): ostrich + title + body, nsec/npub field with
 /// show/hide + QR trailing icons, "Log In" primary button, divider,
 /// "Create new account" outlined button.
+/// Outlined-button accents for the login sheet, matching the Android
+/// SplashScreen.kt sheet (which hardcodes these hexes rather than theme
+/// tokens): signer in the zap orange, create in purple.
+enum NostrSheetAccent {
+    static let signer = Color.hex(0xFFFF7A3D)
+    static let createText = Color.hex(0xFFB98CFF)
+    static let createBorder = Color.hex(0xFF8E30EB)
+}
+
+/// Android's OutlinedButton look for the login sheet: transparent fill,
+/// 1pt capsule border, tinted label.
+func nostrSheetOutlinedCapsule(_ title: String, content: Color, border: Color) -> some View {
+    Text(title)
+        .font(.body.weight(.semibold))
+        .foregroundStyle(content)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .overlay(Capsule().strokeBorder(border, lineWidth: 1))
+}
+
 struct NostrLoginSheet: View {
     /// Given on the splash; recorded with whichever key this sheet stores.
     let acceptance: TermsAcceptance
@@ -346,7 +365,7 @@ struct NostrLoginSheet: View {
                 .foregroundStyle(Color.wispOnSurface)
                 .padding(.top, 12)
 
-            Text("Your key never leaves the device.")
+            Text("Enter your existing key, or create a new account. Your key never leaves the device.")
                 .font(.subheadline)
                 .foregroundStyle(Color.wispOnSurfaceVariant)
                 .multilineTextAlignment(.center)
@@ -411,6 +430,16 @@ struct NostrLoginSheet: View {
             .disabled(nsecInput.isEmpty || isLoading)
             .padding(.top, 12)
 
+            Button {
+                showRemoteSigner = true
+            } label: {
+                nostrSheetOutlinedCapsule("Login with Signer",
+                                          content: NostrSheetAccent.signer,
+                                          border: NostrSheetAccent.signer)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+
             HStack(spacing: 0) {
                 Rectangle()
                     .fill(Color.wispOutline.opacity(0.5))
@@ -419,25 +448,11 @@ struct NostrLoginSheet: View {
             .padding(.vertical, 20)
 
             Button(action: onCreateAccount) {
-                Text("Create new account")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 48)
+                nostrSheetOutlinedCapsule("Create new account",
+                                          content: NostrSheetAccent.createText,
+                                          border: NostrSheetAccent.createBorder)
             }
-            .buttonStyle(.bordered)
-            .tint(.wispPrimary)
-            .clipShape(Capsule())
-
-            Button {
-                showRemoteSigner = true
-            } label: {
-                Label("Use a signer app", systemImage: "qrcode")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 48)
-            }
-            .buttonStyle(.bordered)
-            .tint(.wispPrimary)
-            .clipShape(Capsule())
-            .padding(.top, 8)
+            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
         }
@@ -445,13 +460,11 @@ struct NostrLoginSheet: View {
         .padding(.bottom, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.wispBackground)
-        // Just a touch taller than `.medium`: the previous default left
-        // the ostrich crowded against the top edge, and the identity
-        // preview's 64pt reserved slot pushed the bottom controls under
-        // the safe-area inset. This bump fits both without covering the
-        // discovery grid above. `.large` is offered as a secondary
-        // detent for users who want more room.
-        .presentationDetents([.height(500), .large])
+        // Tall enough for the key field, the identity preview's reserved
+        // slot, and all three buttons (Log In / signer / create) without
+        // covering the discovery grid above. `.large` is offered as a
+        // secondary detent for users who want more room.
+        .presentationDetents([.height(600), .large])
         .presentationBackground(Color.wispBackground)
         .presentationDragIndicator(.visible)
         .fullScreenCover(isPresented: $showQRScanner) {

@@ -92,32 +92,29 @@ struct LoginView: View {
                 .controlSize(.large)
                 .disabled(nsecInput.isEmpty || isLoading)
 
-                HStack(spacing: 8) {
-                    Rectangle().fill(.tertiary).frame(height: 1)
-                    Text("OR").font(.caption.bold()).foregroundStyle(.tertiary)
-                    Rectangle().fill(.tertiary).frame(height: 1)
+                Button {
+                    remoteSigner = PendingAgreement(.now())
+                } label: {
+                    nostrSheetOutlinedCapsule("Login with Signer",
+                                              content: NostrSheetAccent.signer,
+                                              border: NostrSheetAccent.signer)
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+
+                Rectangle()
+                    .fill(Color.wispOutline.opacity(0.5))
+                    .frame(height: 1)
+                    .padding(.vertical, 16)
 
                 Button {
                     signUp = PendingAgreement(.now())
                 } label: {
-                    Label("Create a new account", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
+                    nostrSheetOutlinedCapsule("Create new account",
+                                              content: NostrSheetAccent.createText,
+                                              border: NostrSheetAccent.createBorder)
                 }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
-                .controlSize(.large)
-
-                Button {
-                    remoteSigner = PendingAgreement(.now())
-                } label: {
-                    Label("Use a signer app", systemImage: "qrcode")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
-                .controlSize(.large)
+                .buttonStyle(.plain)
 
                 TermsAgreementNotice()
                     .padding(.top, 4)
