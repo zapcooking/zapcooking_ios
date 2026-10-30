@@ -92,6 +92,24 @@ nonisolated enum Nip51Mute {
         return combined
     }
 
+    /// `decryptAndParse` for any account type — the private body is decrypted
+    /// through `Signer`, so remote-signer accounts read it via their signer.
+    static func decryptAndParse(event: NostrEvent, keypair: Keypair) async throws -> Lists {
+        guard event.kind == kindMuteList else { return .empty }
+        var combined = parsePublicTags(event: event)
+        guard !event.content.isEmpty else { return combined }
+        let plaintext = try await Signer.nip44Decrypt(
+            keypair: keypair,
+            peerPubkey: event.pubkey,
+            payload: event.content
+        )
+        let priv = parsePrivateBody(plaintext)
+        combined.pubkeys.formUnion(priv.pubkeys)
+        combined.words.formUnion(priv.words)
+        combined.threads.formUnion(priv.threads)
+        return combined
+    }
+
     static func parsePublicTags(event: NostrEvent) -> Lists {
         guard event.kind == kindMuteList else { return .empty }
         var lists = Lists()

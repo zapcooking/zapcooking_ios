@@ -329,6 +329,7 @@ struct NostrLoginSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nsecInput = ""
+    @State private var bunkerLoginTask: Task<Void, Never>?
     /// Only used when the key field holds an `ncryptsec1…` (NIP-49) backup —
     /// decryption needs the encryption password. Mirrors `LoginView`.
     @State private var ncryptsecPassword = ""
@@ -337,6 +338,7 @@ struct NostrLoginSheet: View {
     @State private var isLoading = false
     @State private var decryptTask: Task<Void, Never>?
     @State private var showQRScanner = false
+    @State private var showRemoteSigner = false
 
     private var isNcryptsec: Bool {
         nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -366,9 +368,9 @@ struct NostrLoginSheet: View {
             HStack(spacing: 8) {
                 Group {
                     if isSecure {
-                        SecureField("nsec, ncryptsec or npub…", text: $nsecInput)
+                        SecureField("nsec, ncryptsec, npub, or bunker://…", text: $nsecInput)
                     } else {
-                        TextField("nsec, ncryptsec or npub…", text: $nsecInput)
+                        TextField("nsec, ncryptsec, npub, or bunker://…", text: $nsecInput)
                     }
                 }
                 .textFieldStyle(.roundedBorder)
@@ -451,6 +453,18 @@ struct NostrLoginSheet: View {
             .tint(.wispPrimary)
             .clipShape(Capsule())
 
+            Button {
+                showRemoteSigner = true
+            } label: {
+                Label("Use a signer app", systemImage: "qrcode")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(.wispPrimary)
+            .clipShape(Capsule())
+            .padding(.top, 8)
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
@@ -464,6 +478,7 @@ struct NostrLoginSheet: View {
         // discovery grid above. `.large` is offered as a secondary
         // detent for users who want more room.
         .presentationDetents([.height(500), .large])
+            .onDisappear { bunkerLoginTask?.cancel() }
         .presentationBackground(Color.wispBackground)
         .presentationDragIndicator(.visible)
         .fullScreenCover(isPresented: $showQRScanner) {
@@ -472,6 +487,15 @@ struct NostrLoginSheet: View {
                 onCancel: { showQRScanner = false }
             )
             .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showRemoteSigner) {
+            Nip46LoginView(
+                onLogin: { kp in
+                    showRemoteSigner = false
+                    onLogin(kp)
+                },
+                acceptance: acceptance
+            )
         }
         .onAppear { nsecPasteAllowed = true }
         .onDisappear {
@@ -483,6 +507,11 @@ struct NostrLoginSheet: View {
     private func login() {
         error = nil
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed)
+            return
+        }
 
         if isNcryptsec {
             isLoading = true
@@ -558,7 +587,28 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, or hex private key."
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, bunker link, or hex private key."
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect it
+    /// inline — spinner while the user approves in their signer app.
+    private func connectSignerURI(_ input: String) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                isLoading = false
+                onLogin(keypair)
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
+        }
+>>>>>>> c25bd32 (feat(nip46): remote signing — bunker:// and nostrconnect:// login, whole-app Signer routing)
     }
 }
 

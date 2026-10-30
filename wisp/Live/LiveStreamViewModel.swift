@@ -256,15 +256,16 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Sign + publish a kind-1311 chat message. Optimistic — clears the input and adds the
     /// message to the local repo immediately, then publishes in a detached background task
     /// so the UI never blocks on slow/dead relays.
-    func sendMessage() {
+    func sendMessage() async {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        guard let privkey32 = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
 
         var tags: [[String]] = [
             ["a", aTagValue, chatRelays.first ?? ""],
             ["p", hostPubkey]
         ]
+        let replyId = replyTarget?.id
         if let reply = replyTarget {
             tags.append(["e", reply.id, "", "reply"])
         }
@@ -276,11 +277,9 @@ final class LiveStreamViewModel: EmojiComposing {
 
         let event: NostrEvent
         do {
-            event = try NostrEvent.sign(
-                privkey32: privkey32,
-                pubkey: keypair.pubkey,
+            event = try await Signer.sign(
+                keypair: keypair,
                 kind: Nip53.kindLiveChatMessage,
-                createdAt: NostrClock.now(),
                 tags: tags,
                 content: text
             )
@@ -289,10 +288,15 @@ final class LiveStreamViewModel: EmojiComposing {
             return
         }
 
-        // Optimistic: render immediately, clear input, dismiss reply.
+        // Optimistic: render immediately, clear input, dismiss reply. A remote
+        // signer can take a while to approve, so only clear what we just sent.
         LiveStreamRepository.shared.addChatMessage(event)
-        messageText = ""
-        replyTarget = nil
+        if messageText.trimmingCharacters(in: .whitespacesAndNewlines) == text {
+            messageText = ""
+        }
+        if replyTarget?.id == replyId {
+            replyTarget = nil
+        }
 
         // Fire-and-forget publish.
         let relays = chatRelays
@@ -304,7 +308,7 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Sign + publish a kind-7 reaction event targeting a chat message. Optimistically updates
     /// the local reaction map before the network round-trip.
     func sendReaction(messageId: String, targetPubkey: String, emoji: String) async {
-        guard let privkey32 = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         LiveStreamRepository.shared.addReaction(
             aTag: aTagValue,
             messageId: messageId,
@@ -324,11 +328,9 @@ final class LiveStreamViewModel: EmojiComposing {
 
         let event: NostrEvent
         do {
-            event = try NostrEvent.sign(
-                privkey32: privkey32,
-                pubkey: keypair.pubkey,
+            event = try await Signer.sign(
+                keypair: keypair,
                 kind: 7,
-                createdAt: NostrClock.now(),
                 tags: tags,
                 content: emoji
             )

@@ -118,7 +118,7 @@ enum ReportSender {
         publish: ((NostrEvent, [String]) async -> [String])? = nil,
         groupPublish: ((NostrEvent, String) async -> Bool)? = nil
     ) async -> ReportOutcome {
-        guard let keypair, !keypair.privkey.isEmpty,
+        guard let keypair, Signer.canSign(keypair),
               !NostrKey.isWatchOnly(pubkey: keypair.pubkey) else {
             return .needsKey
         }
