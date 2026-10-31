@@ -27,6 +27,26 @@ enum DmGiftWrapIngestor {
     private static var recentWrapTimestamps: [String: [Date]] = [:]
     private static let floodWindow: TimeInterval = 60
     private static let floodMaxWrapsPerWindow = 5
+    /// Timestamps of every wrap-decrypt attempt, for the global budget.
+    private static var wrapAttemptTimes: [Date] = []
+    private static let wrapBudgetWindow: TimeInterval = 60
+    private static let wrapBudgetMax = 30
+    /// Recent signer refusals, and the pause they trigger.
+    private static var refusalTimes: [Date] = []
+    private static var refusalCooldownUntil: Date?
+    private static let refusalWindow: TimeInterval = 60
+    private static let refusalCooldownMax = 3
+    private static let refusalCooldownDuration: TimeInterval = 300
+
+    private static func isOverWrapBudget() -> Bool {
+        let now = Date()
+        wrapAttemptTimes = wrapAttemptTimes.filter { now.timeIntervalSince($0) < wrapBudgetWindow }
+        return wrapAttemptTimes.count >= wrapBudgetMax
+    }
+
+    private static func recordWrapAttempt() {
+        wrapAttemptTimes.append(Date())
+    }
 
     /// True when this ephemeral pubkey has sent more than
     /// `floodMaxWrapsPerWindow` wraps inside `floodWindow`.
@@ -69,6 +89,17 @@ enum DmGiftWrapIngestor {
         // (`DmRepository.addMessage`), so a transient signer/decrypt failure is retried on
         // the next periodic REQ instead of being silently dropped for the session.
         guard !repo.isGiftWrapSeen(event.id) else { return nil }
+        // Refusal cooldown: a burst of signer refusals ("Invalid MAC") means
+        // an active spam wave — pause wrap decryption for a few minutes so
+        // the signer app isn't notified per wrap. Wraps stay unseen; real
+        // messages arrive when the cooldown lifts.
+        if let until = refusalCooldownUntil, Date() < until { return nil }
+        // Global budget: bounds wrap-decrypt attempts per minute so a firehose
+        // with rotating ephemeral keys can't churn the machine. Over-budget
+        // wraps stay unseen — retried on a later REQ once the window frees —
+        // so a legitimate burst is delayed, never dropped.
+        if isOverWrapBudget() { return nil }
+        recordWrapAttempt()
         // Flood control: a remote account pays a signer round-trip per wrap, so
         // a wrap firehose (spam bots reusing one ephemeral key) must not become
         // a signer-app notification flood. Legitimate senders never come close.
@@ -89,9 +120,22 @@ enum DmGiftWrapIngestor {
             // again. Only transport-level failures (signer offline, relay
             // unreachable, timeout) keep the bounded retry.
             let transient = isTransientDecryptFailure(error)
-            let gaveUp = transient
+            var gaveUp = transient
                 ? repo.recordDecryptFailure(event.id)
                 : repo.markGiftWrapSeen(event.id)
+            if !transient {
+                // A refusal can never succeed — remember it across launches
+                // and arm the cooldown if refusals are arriving in a burst.
+                repo.markGiftWrapRefused(event.id)
+                let now = Date()
+                refusalTimes = refusalTimes.filter { now.timeIntervalSince($0) < refusalWindow }
+                refusalTimes.append(now)
+                if refusalTimes.count >= refusalCooldownMax {
+                    refusalCooldownUntil = now.addingTimeInterval(refusalCooldownDuration)
+                    refusalTimes.removeAll()
+                    gaveUp = true
+                }
+            }
             log.error("DM gift-wrap decrypt failed (transient=\(transient, privacy: .public) gaveUp=\(gaveUp, privacy: .public)) id=\(event.id, privacy: .public) relay=\(relayUrl, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return nil
         }
