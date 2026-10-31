@@ -10,7 +10,7 @@ struct SparkSetupView: View {
     @State private var restoreEntry: String = ""
     @State private var restoreError: String?
     @State private var inFlight = false
-    @State private var showAdvancedOptions = false
+    @State private var showDefaultWalletHelp = false
 
     enum PickerMode { case pick, create, restoreSeed, restoreRelays }
 
@@ -91,10 +91,11 @@ struct SparkSetupView: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Option rows — default wallet is the recommended path, so it
-            // sits alone above the fold. Create / restore live under a
-            // disclosure so the screen leads with one obvious next step
-            // but power users can still get to seed and relay-backup flows.
+            // Option rows, all visible at once. The default wallet leads
+            // when the account can derive one; relay-backup restore
+            // decrypts with the local key, so it's only offered there too.
+            // A remote-signer account (no local key) gets a pointer to
+            // where the default wallet actually lives.
             VStack(spacing: 12) {
                 if store.canUseDefaultWallet {
                     optionRow(
@@ -112,50 +113,45 @@ struct SparkSetupView: View {
                     .shadow(color: Color.wispZapColor.opacity(0.35), radius: 28, x: 0, y: 6)
                 }
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showAdvancedOptions.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("More options")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(showAdvancedOptions ? 180 : 0))
-                    }
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if showAdvancedOptions {
-                    VStack(spacing: 12) {
-                        optionRow(
-                            icon: "plus.circle.fill",
-                            title: "Create new wallet",
-                            subtitle: "Generate a fresh 12-word seed phrase",
-                            action: { startCreate() }
-                        )
-                        optionRow(
-                            icon: "arrow.uturn.backward.circle.fill",
-                            title: "Restore from seed phrase",
-                            subtitle: "12 words from a Spark-based wallet",
-                            action: { mode = .restoreSeed }
-                        )
-                        optionRow(
-                            icon: "icloud.and.arrow.down.fill",
-                            title: "Restore from relays",
-                            subtitle: "Encrypted backup from another device",
-                            action: { mode = .restoreRelays; Task { await store.searchRelayBackup() } }
-                        )
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                optionRow(
+                    icon: "plus.circle.fill",
+                    title: "Create new wallet",
+                    subtitle: "Generate a fresh 12-word seed phrase",
+                    action: { startCreate() }
+                )
+                optionRow(
+                    icon: "arrow.uturn.backward.circle.fill",
+                    title: "Restore from seed phrase",
+                    subtitle: "12 words from a Spark-based wallet",
+                    action: { mode = .restoreSeed }
+                )
+                if store.canUseDefaultWallet {
+                    optionRow(
+                        icon: "icloud.and.arrow.down.fill",
+                        title: "Restore from relays",
+                        subtitle: "Encrypted backup from another device",
+                        action: { mode = .restoreRelays; Task { await store.searchRelayBackup() } }
+                    )
                 }
             }
+
+            if !store.canUseDefaultWallet {
+                Button {
+                    showDefaultWalletHelp = true
+                } label: {
+                    Text("Looking for the default wallet?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+            }
             Spacer(minLength: 24)
+        }
+        .alert("Looking for the default wallet?", isPresented: $showDefaultWalletHelp) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The default wallet is derived from your Nostr private key, so it only exists when you\u{2019}re signed in with an nsec on this device. Connected through a signer app? Create or restore a standalone wallet here instead.")
         }
     }
 
