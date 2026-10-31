@@ -92,10 +92,8 @@ struct SparkSetupView: View {
             .frame(maxWidth: .infinity)
 
             // Option rows, all visible at once. The default wallet leads
-            // when the account can derive one; relay-backup restore
-            // decrypts with the local key, so it's only offered there too.
-            // A remote-signer account (no local key) gets a pointer to
-            // where the default wallet actually lives.
+            // when the account can derive one; a remote-signer account
+            // (no local key) gets a pointer to where it actually lives.
             VStack(spacing: 12) {
                 if store.canUseDefaultWallet {
                     optionRow(
@@ -125,14 +123,12 @@ struct SparkSetupView: View {
                     subtitle: "12 words from a Spark-based wallet",
                     action: { mode = .restoreSeed }
                 )
-                if store.canUseDefaultWallet {
-                    optionRow(
-                        icon: "icloud.and.arrow.down.fill",
-                        title: "Restore from relays",
-                        subtitle: "Encrypted backup from another device",
-                        action: { mode = .restoreRelays; Task { await store.searchRelayBackup() } }
-                    )
-                }
+                optionRow(
+                    icon: "icloud.and.arrow.down.fill",
+                    title: "Restore from relays",
+                    subtitle: "Encrypted backup from another device",
+                    action: { mode = .restoreRelays; Task { await store.searchRelayBackup() } }
+                )
             }
 
             if !store.canUseDefaultWallet {
