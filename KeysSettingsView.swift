@@ -60,7 +60,7 @@ struct KeysSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Public Key")
                 .font(.subheadline.weight(.semibold))
-            Text("Share this freely — it's your Nostr identifier.")
+            Text("Share this freely. It's your Nostr identifier.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
