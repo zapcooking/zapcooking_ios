@@ -141,7 +141,7 @@ struct WalletSettingsView: View {
         .background(Color.wispBackground.ignoresSafeArea())
         .navigationTitle("Wallet Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Switch to a different wallet?", isPresented: $showDisconnectAlert) {
+        .alert("Remove wallet?", isPresented: $showDisconnectAlert) {
             Button("Remove", role: .destructive) {
                 store.resetToNoWallet()
                 dismiss()
@@ -152,7 +152,7 @@ struct WalletSettingsView: View {
         }
         .sheet(isPresented: $showSwitchSparkConfirm) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Switch to a different wallet?")
+                Text("Remove wallet?")
                     .font(.headline)
                 Text("This wallet will be removed from this device. Your funds stay safe — restore it anytime with its recovery phrase.")
                     .font(.subheadline)
@@ -186,7 +186,7 @@ struct WalletSettingsView: View {
             .presentationDetents([.height(280)])
             .presentationBackground(Color.wispBackground)
         }
-        .alert("Switch to a different wallet?", isPresented: $showSwitchAlert) {
+        .alert("Remove wallet?", isPresented: $showSwitchAlert) {
             Button("Remove", role: .destructive) {
                 WalletStore.setSkipAutoCreate(for: store.keypair.pubkey)
                 store.resetToNoWallet()
@@ -709,21 +709,20 @@ struct WalletSettingsView: View {
 
             VStack(spacing: 0) {
                 if store.mode == .nwc {
-                    // Matches the Breez/Spark "Switch to a different
-                    // wallet" affordance below — same icon, label, and
-                    // layout — so the wallet-settings danger row reads
-                    // identically across wallet providers. The underlying
-                    // alert still confirms the NWC-specific behavior
-                    // (removing the connection string).
+                    // Same icon, label, and layout as the Spark rows
+                    // below, so the danger row reads identically across
+                    // wallet providers. The underlying alert still
+                    // confirms the NWC-specific behavior (removing the
+                    // connection string).
                     Button {
                         showDisconnectAlert = true
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "arrow.triangle.swap")
+                            Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 15))
                                 .foregroundStyle(.red)
                                 .frame(width: 22)
-                            Text("Switch to a different wallet")
+                            Text("Remove wallet")
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
                             Spacer()
@@ -738,11 +737,11 @@ struct WalletSettingsView: View {
                         showSwitchAlert = true
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "arrow.triangle.swap")
+                            Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 15))
                                 .foregroundStyle(.red)
                                 .frame(width: 22)
-                            Text("Switch to a different wallet")
+                            Text("Remove wallet")
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
                             Spacer()
@@ -758,11 +757,11 @@ struct WalletSettingsView: View {
                         showSwitchSparkConfirm = true
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "arrow.left.arrow.right")
+                            Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 15))
                                 .foregroundStyle(.red)
                                 .frame(width: 22)
-                            Text("Switch wallet")
+                            Text("Remove wallet")
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
                             Spacer()
@@ -784,17 +783,17 @@ struct WalletSettingsView: View {
     }
 
     private var dangerSectionHeader: String {
-        "Switch Wallet"
+        "Remove Wallet"
     }
 
     private var dangerSectionFooter: String {
         if store.mode == .nwc {
-            return "Switching removes the NWC connection string. Your wallet provider is unaffected."
+            return "Removing forgets the NWC connection string. Your wallet provider is unaffected."
         }
         if store.isDefaultWallet {
             return "Your default wallet is linked to your key and can always be restored. Switching connects a different wallet instead."
         }
-        return "Switching removes this wallet from the device. Your funds stay safe — restore it anytime with its recovery phrase."
+        return "Removing this wallet from the device is safe — your funds stay put, and you can restore it anytime with its recovery phrase."
     }
 
     // MARK: - Powered-by footer
