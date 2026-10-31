@@ -60,12 +60,14 @@ enum RelayPool {
     /// response immediately. Returns `true` only when an AUTH event was actually signed
     /// and sent — `RelayConn` uses this to know whether to replay its active REQs.
     @discardableResult
+    /// Sign and send an AUTH response. Returns the auth event's id when the
+    /// AUTH was sent, or nil when signing failed (caller decides on retries).
     static func respondToAuthChallenge(challenge: String, urlString: String,
-                                       ws: URLSessionWebSocketTask) async -> Bool {
+                                       ws: URLSessionWebSocketTask) async -> String? {
         let autoApprove = UserDefaults.standard.object(forKey: "wisp_settings_auto_approve_relay_auth") as? Bool ?? true
         relayPoolLog.notice("AUTH challenge from \(urlString, privacy: .public), autoApprove=\(autoApprove, privacy: .public)")
         guard (autoApprove || authApprovalCheck?(urlString) == true),
-              let signer = authSigner else { return false }
+              let signer = authSigner else { return nil }
         let event: NostrEvent
         do {
             event = try await signer(urlString, challenge)
@@ -75,14 +77,14 @@ enum RelayPool {
             #if DEBUG
             relayPoolLog.log("NIP-42 AUTH signing failed for \(urlString, privacy: .public): \(String(describing: error), privacy: .public)")
             #endif
-            return false
+            return nil
         }
         let payload = "[\"AUTH\",\(event.toJSON())]"
         do {
             try await ws.send(.string(payload))
-            return true
+            return event.id
         } catch {
-            return false
+            return nil
         }
     }
 
@@ -325,9 +327,9 @@ enum RelayPool {
                                     return nil
                                 } else if type == "AUTH", arr.count >= 2, let challenge = arr[1] as? String {
                                     lastChallenge = challenge
-                                    let didAuth = await respondToAuthChallenge(challenge: challenge, urlString: urlString, ws: ws)
+                                    let authEventId = await respondToAuthChallenge(challenge: challenge, urlString: urlString, ws: ws)
                                     // AUTH-required relays drop the pre-auth EVENT. Replay once.
-                                    if didAuth, !didResendAfterAuth {
+                                    if authEventId != nil, !didResendAfterAuth {
                                         didResendAfterAuth = true
                                         try? await ws.send(.string(payload))
                                     }
@@ -533,6 +535,16 @@ actor RelayConn {
     /// Drives the circuit breaker so a dead relay stops being re-dialed.
     private var consecutiveFailures = 0
     private(set) var lastActive = Date()
+    /// NIP-42 state. One AUTH per connection: some relays (damus.io) send
+    /// a fresh challenge for every REQ, and signing each one floods a
+    /// remote signer with kind-22242 requests. After this connection has
+    /// authed, later challenges on the same socket just re-issue the REQs.
+    private var didAuthThisConnection = false
+    /// Auth event ids sent but not yet answered by the relay's OK frame.
+    private var pendingAuthEventIds: Set<String> = []
+    /// Recent AUTH sign timestamps for the per-relay rate limit.
+    private var authSignTimes: [Date] = []
+    private static let authSignMinInterval: TimeInterval = 10
 
     init(url: URL, session: URLSession) {
         self.url = url
@@ -599,6 +611,8 @@ actor RelayConn {
             ws = socket
             socket.resume()
             connected = true
+            didAuthThisConnection = false
+            pendingAuthEventIds.removeAll()
 
             // (Re)issue every active REQ on this fresh socket.
             for (_, sub) in subs { try? await socket.send(.string(sub.req)) }
@@ -674,23 +688,65 @@ actor RelayConn {
                 guard arr.count >= 2, let challenge = arr[1] as? String else { continue }
                 lastChallenge = challenge
                 for (_, sub) in subs { sub.sink.onAuth(urlString) }
-                // Sign off the receive loop: a remote (NIP-46) signer can take
-                // seconds, and frames for other subs must keep flowing meanwhile.
+                // One AUTH per connection (see field docs). If the relay keeps
+                // challenging after we authed, replaying the REQs is the right
+                // response; signing again would only flood the signer.
+                if didAuthThisConnection {
+                    await reissueAfterAuth(on: socket)
+                    continue
+                }
+                // Rate limit: at most one AUTH sign per relay per interval.
+                authSignTimes = authSignTimes.filter {
+                    Date().timeIntervalSince($0) > Self.authSignMinInterval
+                }
+                guard authSignTimes.isEmpty else { continue }
+                authSignTimes.append(Date())
+                didAuthThisConnection = true
                 let relayUrl = urlString
                 Task { [weak self] in
-                    let didAuth = await RelayPool.respondToAuthChallenge(
+                    let authEventId = await RelayPool.respondToAuthChallenge(
                         challenge: challenge, urlString: relayUrl, ws: socket
                     )
-                    if didAuth { await self?.reissueAfterAuth(on: socket) }
+                    await self?.noteAuthSent(authEventId)
+                    if authEventId != nil { await self?.reissueAfterAuth(on: socket) }
+                }
+
+            case "OK":
+                guard arr.count >= 3,
+                      let okEventId = arr[1] as? String,
+                      let accepted = arr[2] as? Bool else { continue }
+                if pendingAuthEventIds.remove(okEventId) != nil {
+                    if accepted {
+                        didAuthThisConnection = true
+                    } else {
+                        // The relay rejected the AUTH. Re-arm so a later
+                        // challenge can retry once, but the rate limit keeps
+                        // this from looping hot. Log the relay's reason.
+                        let reason = (arr.count >= 4 ? arr[3] as? String : nil) ?? ""
+                        didAuthThisConnection = false
+                        relayPoolLog.notice("AUTH rejected by \(self.urlString, privacy: .public): \(reason, privacy: .public)")
+                    }
                 }
 
             default:
-                // OK / NOTICE / EOSE-for-unknown-sub — ignored on the sub path.
+                // NOTICE / EOSE-for-unknown-sub — ignored on the sub path.
                 _ = lastChallenge
                 continue
             }
         }
         return false
+    }
+
+    /// Record the auth event id we just sent so the matching OK frame can
+    /// confirm or refute acceptance.
+    private func noteAuthSent(_ authEventId: String?) {
+        guard let authEventId else {
+            // Signing itself failed (no key, signer refused). Re-arm so a
+            // later challenge can retry after the rate-limit window.
+            didAuthThisConnection = false
+            return
+        }
+        pendingAuthEventIds.insert(authEventId)
     }
 
     /// Re-issue every REQ now that the connection is authed — but only if
