@@ -450,61 +450,60 @@ final class RelaySettingsRepository {
     // MARK: - Publish
 
     private func publishGeneral(keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let now = NostrClock.now()
         generalUpdatedAt = max(generalUpdatedAt + 1, now)
         let tags = Nip51Lists.buildGeneralRelayTags(generalRelays)
         publish(kind: Nip51Lists.kindRelayList, tags: tags,
-                createdAt: generalUpdatedAt, privkey: privkey, keypair: keypair)
+                createdAt: generalUpdatedAt, keypair: keypair)
         saveGeneral(pubkey: keypair.pubkey)
     }
 
     private func publishDm(keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let now = NostrClock.now()
         dmUpdatedAt = max(dmUpdatedAt + 1, now)
         let tags = Nip51Lists.buildRelaySetListTags(dmRelays)
         // Also send the announcement to the DM relays themselves, so peers querying any of
         // those inboxes can resolve the latest list (matches Android's sendToDmRelays).
         publish(kind: Nip51Lists.kindDmRelays, tags: tags,
-                createdAt: dmUpdatedAt, privkey: privkey, keypair: keypair,
+                createdAt: dmUpdatedAt, keypair: keypair,
                 extraRelays: dmRelays)
         saveDm(pubkey: keypair.pubkey)
     }
 
     private func publishSearch(keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let now = NostrClock.now()
         searchUpdatedAt = max(searchUpdatedAt + 1, now)
         let tags = Nip51Lists.buildRelaySetListTags(searchRelays)
         publish(kind: Nip51Lists.kindSearchRelays, tags: tags,
-                createdAt: searchUpdatedAt, privkey: privkey, keypair: keypair)
+                createdAt: searchUpdatedAt, keypair: keypair)
         saveSearch(pubkey: keypair.pubkey)
     }
 
     private func publishBlocked(keypair: Keypair) {
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         let now = NostrClock.now()
         blockedUpdatedAt = max(blockedUpdatedAt + 1, now)
         let tags = Nip51Lists.buildRelaySetListTags(blockedRelays)
         publish(kind: Nip51Lists.kindBlockedRelays, tags: tags,
-                createdAt: blockedUpdatedAt, privkey: privkey, keypair: keypair)
+                createdAt: blockedUpdatedAt, keypair: keypair)
         saveBlocked(pubkey: keypair.pubkey)
     }
 
     private func publish(kind: Int, tags: [[String]], createdAt: Int,
-                         privkey: Data, keypair: Keypair,
+                         keypair: Keypair,
                          extraRelays: [String] = []) {
         let pubkey = keypair.pubkey
         let relays = Array(Set(topWriteRelays(pubkey: pubkey) + Self.indexerRelays + extraRelays))
         Task.detached {
-            guard let event = try? NostrEvent.sign(
-                privkey32: privkey,
-                pubkey: pubkey,
+            guard let event = try? await Signer.sign(
+                keypair: keypair,
                 kind: kind,
-                createdAt: createdAt,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: createdAt
             ) else { return }
             _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
             await EventStore.shared.persist([event])

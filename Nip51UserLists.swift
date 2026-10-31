@@ -14,7 +14,7 @@ nonisolated enum Nip51UserLists {
 
     // MARK: - People list (kind 30000)
 
-    static func parsePeopleList(_ event: NostrEvent, keypair: Keypair) -> PeopleList? {
+    static func parsePeopleList(_ event: NostrEvent, keypair: Keypair) async -> PeopleList? {
         guard event.kind == kindPeopleList,
               event.pubkey == keypair.pubkey else { return nil }
 
@@ -36,12 +36,12 @@ nonisolated enum Nip51UserLists {
         }
         guard let dTag, !dTag.isEmpty else { return nil }
 
-        let privateMembers = decodePrivateTags(
+        guard let privateMembers = await decodePrivateTags(
             event: event,
             keypair: keypair,
             tagName: "p",
             validate: { isHexPubkey($0) }
-        )
+        ) else { return nil }
         // De-dupe across public/private (public wins).
         let publicSet = Set(publicMembers)
         let privateOnly = privateMembers.filter { !publicSet.contains($0) }
@@ -78,7 +78,7 @@ nonisolated enum Nip51UserLists {
 
     // MARK: - Note list (kind 30003)
 
-    static func parseNoteList(_ event: NostrEvent, keypair: Keypair) -> NoteList? {
+    static func parseNoteList(_ event: NostrEvent, keypair: Keypair) async -> NoteList? {
         guard event.kind == kindNoteList,
               event.pubkey == keypair.pubkey else { return nil }
 
@@ -100,12 +100,12 @@ nonisolated enum Nip51UserLists {
         }
         guard let dTag, !dTag.isEmpty else { return nil }
 
-        let privateNotes = decodePrivateTags(
+        guard let privateNotes = await decodePrivateTags(
             event: event,
             keypair: keypair,
             tagName: "e",
             validate: { isHexId($0) }
-        )
+        ) else { return nil }
         let publicSet = Set(publicNotes)
         let privateOnly = privateNotes.filter { !publicSet.contains($0) }
 
@@ -160,20 +160,25 @@ nonisolated enum Nip51UserLists {
     /// Decrypt `event.content` (NIP-44) and pull out values for `tagName`,
     /// keeping only entries that pass `validate`. Returns [] on any failure
     /// (empty content, decrypt error, malformed JSON) — silent so a partial
-    /// failure doesn't drop the public part of the list.
+    /// failure doesn't drop the public part of the list. Exception: a remote
+    /// signer that doesn't answer (offline, request declined) returns nil, so
+    /// the caller skips the event rather than adopting it with no private
+    /// members — the next edit would republish it that way and erase them.
     private static func decodePrivateTags(
         event: NostrEvent,
         keypair: Keypair,
         tagName: String,
         validate: (String) -> Bool
-    ) -> [String] {
+    ) async -> [String]? {
         let payload = event.content
         guard !payload.isEmpty else { return [] }
-        guard let privkey = Hex.decode(keypair.privkey),
-              let pubkeyBytes = Hex.decode(keypair.pubkey) else { return [] }
-        guard let convKey = try? Nip44.getConversationKey(privkey32: privkey, peerXonlyPubkey32: pubkeyBytes),
-              let plaintext = try? Nip44.decrypt(payload: payload, conversationKey: convKey),
-              let data = plaintext.data(using: .utf8),
+        let plaintext: String
+        do {
+            plaintext = try await Signer.nip44Decrypt(keypair: keypair, peerPubkey: keypair.pubkey, payload: payload)
+        } catch {
+            return keypair.isRemote ? nil : []
+        }
+        guard let data = plaintext.data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[Any]] else {
             return []
         }

@@ -59,7 +59,9 @@ nonisolated protocol LazarusRelayIO: Sendable {
 }
 
 actor LazarusRelayClient: LazarusRelayIO {
-    typealias AuthSigner = @Sendable (_ relayUrl: String, _ challenge: String) -> NostrEvent?
+    /// Async: a remote-signer (NIP-46) account signs over the network. Nil
+    /// means declined or signing failed.
+    typealias AuthSigner = @Sendable (_ relayUrl: String, _ challenge: String) async -> NostrEvent?
 
     private let transport: GroupRelayTransport
     private let authSigner: AuthSigner?
@@ -89,7 +91,7 @@ actor LazarusRelayClient: LazarusRelayIO {
             guard autoApprove || RelaySettingsRepository.isAuthApproved(relayUrl, pubkey: keypair.pubkey) else {
                 return nil
             }
-            return try? Nip42.buildAuthEvent(challenge: challenge, relayUrl: relayUrl, keypair: keypair)
+            return try? await Nip42.buildAuthEvent(challenge: challenge, relayUrl: relayUrl, keypair: keypair)
         }
     }
 
@@ -186,6 +188,8 @@ actor LazarusRelayConnection {
 
     private enum AuthState {
         case idle
+        /// Challenge handed to the signer; the AUTH frame isn't out yet.
+        case signing
         case sent(eventId: String)
         case authenticated
         case failed
@@ -406,7 +410,7 @@ actor LazarusRelayConnection {
         guard authSigner != nil else { return false }
         switch auth {
         case .failed, .unavailable: return false
-        case .idle, .sent, .authenticated: return true
+        case .idle, .signing, .sent, .authenticated: return true
         }
     }
 
@@ -431,17 +435,38 @@ actor LazarusRelayConnection {
                 }
                 return
             }
-            guard let event = authSigner?(urlString, challenge) else {
+            guard let authSigner else {
                 auth = .unavailable
                 failAwaitingAuth()
                 return
             }
-            auth = .sent(eventId: event.id)
-            socket?.send("[\"AUTH\",\(event.toJSON())]")
-            replayAwaitingAuth()
+            // A remote signer can take seconds; sign off the actor so frames
+            // keep flowing, and drop the result if the socket changed meanwhile.
+            auth = .signing
+            let current = generation
+            let relayUrl = urlString
+            Task { [weak self] in
+                let event = await authSigner(relayUrl, challenge)
+                await self?.authSigned(event, generation: current)
+            }
+        case .signing:
+            // Requests refused meanwhile replay once the signature lands.
+            break
         case .failed, .unavailable:
             failAwaitingAuth()
         }
+    }
+
+    private func authSigned(_ event: NostrEvent?, generation signed: Int) {
+        guard signed == generation, case .signing = auth else { return }
+        guard let event else {
+            auth = .unavailable
+            failAwaitingAuth()
+            return
+        }
+        auth = .sent(eventId: event.id)
+        socket?.send("[\"AUTH\",\(event.toJSON())]")
+        replayAwaitingAuth()
     }
 
     private func challengeGraceExpired(generation expired: Int) {

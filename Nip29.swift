@@ -163,10 +163,17 @@ nonisolated enum Nip29 {
     static func buildJoinRequest(privkey32: Data, pubkey: String, groupId: String,
                                  inviteCode: String? = nil, reason: String = "",
                                  createdAt: Int = NostrClock.now()) throws -> NostrEvent {
+        return try NostrEvent.sign(privkey32: privkey32, pubkey: pubkey, kind: kindJoinRequest,
+                                   createdAt: createdAt,
+                                   tags: buildJoinRequestTags(groupId: groupId, inviteCode: inviteCode),
+                                   content: reason)
+    }
+
+    /// Tags for a kind-9021 join request, for signing via `Signer`.
+    static func buildJoinRequestTags(groupId: String, inviteCode: String? = nil) -> [[String]] {
         var tags: [[String]] = [["h", groupId]]
         if let code = inviteCode, !code.isEmpty { tags.append(["code", code]) }
-        return try NostrEvent.sign(privkey32: privkey32, pubkey: pubkey, kind: kindJoinRequest,
-                                   createdAt: createdAt, tags: tags, content: reason)
+        return tags
     }
 
     static func buildLeaveRequest(privkey32: Data, pubkey: String, groupId: String,
@@ -206,6 +213,18 @@ nonisolated enum Nip29 {
                                   isPrivate: Bool? = nil, isClosed: Bool? = nil,
                                   isRestricted: Bool? = nil, isHidden: Bool? = nil,
                                   createdAt: Int = NostrClock.now()) throws -> NostrEvent {
+        let tags = buildEditMetadataTags(groupId: groupId, name: name, about: about, picture: picture,
+                                         isPrivate: isPrivate, isClosed: isClosed,
+                                         isRestricted: isRestricted, isHidden: isHidden)
+        return try NostrEvent.sign(privkey32: privkey32, pubkey: pubkey, kind: kindEditMetadata,
+                                   createdAt: createdAt, tags: tags, content: "")
+    }
+
+    /// Tags for a kind-9002 metadata edit (see `buildEditMetadata`), for signing via `Signer`.
+    static func buildEditMetadataTags(groupId: String,
+                                      name: String? = nil, about: String? = nil, picture: String? = nil,
+                                      isPrivate: Bool? = nil, isClosed: Bool? = nil,
+                                      isRestricted: Bool? = nil, isHidden: Bool? = nil) -> [[String]] {
         var tags: [[String]] = [["h", groupId]]
         if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             tags.append(["name", name])
@@ -220,8 +239,7 @@ nonisolated enum Nip29 {
         if let isClosed     { tags.append([isClosed     ? "closed"     : "open"]) }
         if let isRestricted { tags.append([isRestricted ? "restricted" : "unrestricted"]) }
         if let isHidden     { tags.append([isHidden     ? "hidden"     : "visible"]) }
-        return try NostrEvent.sign(privkey32: privkey32, pubkey: pubkey, kind: kindEditMetadata,
-                                   createdAt: createdAt, tags: tags, content: "")
+        return tags
     }
 
     static func buildPutUser(privkey32: Data, pubkey: String, groupId: String, targetPubkey: String,

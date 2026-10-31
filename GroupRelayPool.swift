@@ -575,23 +575,40 @@ actor GroupRelayPool {
             // terminal for the connection — reconnect retries with fresh state.
             return
         }
-        guard let keypair = state.keypair, !keypair.privkey.isEmpty else {
+        guard let keypair = state.keypair, Signer.canSign(keypair) else {
             settleAuth(state: state, outcome: .unavailable)
             return
         }
-        do {
-            let event = try Nip42.buildAuthEvent(challenge: challenge,
-                                                 relayUrl: state.url,
-                                                 keypair: keypair)
-            send(state: state, payload: "[\"AUTH\",\(event.toJSON())]")
-            // Sent is not accepted: hold .pending until the relay's OK for
-            // this event id arrives (issue #6 defect 3).
-            state.auth = .pending(authEventId: event.id)
-        } catch {
-            // Sign failed (empty or malformed key) — auth is unavailable on
-            // this connection; parked subs surface .authUnavailable.
-            settleAuth(state: state, outcome: .unavailable)
+        // Signing may be a NIP-46 round-trip (seconds), so it runs off the
+        // actor. Hold .pending with an empty id meanwhile: repeat challenges
+        // are ignored, waiters keep waiting, and no OK can match it.
+        state.auth = .pending(authEventId: "")
+        let socket = state.socket
+        let url = state.url
+        Task { [weak self, weak state] in
+            let event = try? await Nip42.buildAuthEvent(challenge: challenge,
+                                                        relayUrl: url,
+                                                        keypair: keypair)
+            guard let self, let state else { return }
+            await self.authSigned(state: state, socket: socket, event: event)
         }
+    }
+
+    private func authSigned(state: RelayState, socket: GroupRelaySocket?, event: NostrEvent?) {
+        // The connection dropped or the machine moved on while signing — this
+        // signature answers a challenge nobody is waiting on any more.
+        guard state.socket === socket, state.auth == .pending(authEventId: "") else { return }
+        guard let event else {
+            // Sign failed (malformed key, remote signer offline/rejected) —
+            // auth is unavailable on this connection; parked subs surface
+            // .authUnavailable.
+            settleAuth(state: state, outcome: .unavailable)
+            return
+        }
+        // Sent is not accepted: hold .pending until the relay's OK for
+        // this event id arrives (issue #6 defect 3).
+        state.auth = .pending(authEventId: event.id)
+        send(state: state, payload: "[\"AUTH\",\(event.toJSON())]")
     }
 
     /// Move the auth machine to a settled outcome, wake waiters, and act on

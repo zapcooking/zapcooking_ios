@@ -92,8 +92,9 @@ nonisolated enum Nip98 {
     /// Sign and encode a NIP-98 `Authorization` header for a single request.
     /// Returns the full header value (with the `Nostr ` prefix).
     ///
-    /// Throws `Error.signingKeyMissing` for watch-only / empty-privkey accounts
-    /// so callers can fail cleanly without a fatal abort.
+    /// Throws `Error.signingKeyMissing` for accounts that can't sign (watch-only,
+    /// no local key and no remote signer) so callers can fail cleanly without a
+    /// fatal abort.
     static func authHeader(
         keypair: Keypair,
         method: String,
@@ -121,23 +122,23 @@ nonisolated enum Nip98 {
     }
 }
 
-/// Minimal signing surface for NIP-98. Local-key only in production;
-/// tests inject a fake that stamps a dummy signature.
+/// Minimal signing surface for NIP-98. Production signs via `Signer` (local
+/// key or NIP-46 remote signer); tests inject a fake that stamps a dummy signature.
 protocol Nip98Signing: Sendable {
     var pubkeyHex: String { get }
     func signEvent(kind: Int, content: String, tags: [[String]]) async throws -> NostrEvent
 }
 
-/// Production signer: wraps a `Keypair` and refuses watch-only / empty keys.
-/// Watch-only accounts store an empty privkey sentinel — that is the gate.
+/// Production signer: wraps a `Keypair` and refuses accounts that can't sign.
+/// Watch-only accounts store an empty privkey sentinel with no remote signer —
+/// `Signer.canSign` is the gate.
 nonisolated struct LocalNip98Signer: Nip98Signing {
     let keypair: Keypair
 
     var pubkeyHex: String { keypair.pubkey }
 
     func signEvent(kind: Int, content: String, tags: [[String]]) async throws -> NostrEvent {
-        guard !keypair.privkey.isEmpty,
-              Hex.decode(keypair.privkey)?.count == 32 else {
+        guard Signer.canSign(keypair) else {
             throw Nip98.Error.signingKeyMissing
         }
         return try await Signer.sign(

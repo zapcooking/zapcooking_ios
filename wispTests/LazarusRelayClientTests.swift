@@ -48,7 +48,7 @@ struct LazarusRelayClientTests {
 
     private func signer() throws -> LazarusRelayClient.AuthSigner {
         let keypair = try LazarusFixture.keypair()
-        return { url, challenge in try? Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: keypair) }
+        return { url, challenge in try? await Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: keypair) }
     }
 
     // MARK: - Outcomes

@@ -44,8 +44,18 @@ final class PeopleListRepository {
             timeout: 8
         )
 
+        // Newest version per list only, and only if newer than what we hold:
+        // each private list costs a decrypt, which for a remote signer is a
+        // round-trip to the signer app.
+        var newest: [String: NostrEvent] = [:]
         for event in events {
-            ingest(event, keypair: keypair, persist: true)
+            guard let d = event.tags.first(where: { $0.count >= 2 && $0[0] == "d" })?[1] else { continue }
+            if let have = newest[d], have.createdAt >= event.createdAt { continue }
+            newest[d] = event
+        }
+        for (d, event) in newest {
+            if let existingTs = listUpdatedAt[d], event.createdAt <= existingTs { continue }
+            await ingest(event, keypair: keypair, persist: true)
         }
     }
 
@@ -160,8 +170,8 @@ final class PeopleListRepository {
 
     // MARK: - Ingest
 
-    private func ingest(_ event: NostrEvent, keypair: Keypair, persist: Bool) {
-        guard let parsed = Nip51UserLists.parsePeopleList(event, keypair: keypair) else { return }
+    private func ingest(_ event: NostrEvent, keypair: Keypair, persist: Bool) async {
+        guard let parsed = await Nip51UserLists.parsePeopleList(event, keypair: keypair) else { return }
         if let existingTs = listUpdatedAt[parsed.dTag], event.createdAt <= existingTs {
             return
         }

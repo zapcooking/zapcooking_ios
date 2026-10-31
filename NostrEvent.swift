@@ -103,6 +103,19 @@ nonisolated struct NostrEvent {
         return hash.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// True when `id` is the NIP-01 hash of this event's fields and `sig` is a
+    /// valid Schnorr signature over it by `pubkey`. Relay output is otherwise
+    /// unverified app-wide; this is for events a third party signed on our
+    /// behalf (a NIP-46 remote signer) before we publish them as the user.
+    func hasValidSignature() -> Bool {
+        let expected = Self.computeId(pubkey: pubkey, createdAt: createdAt, kind: kind, tags: tags, content: content)
+        guard expected == id.lowercased(),
+              let idBytes = Hex.decode(expected),
+              let sigBytes = Hex.decode(sig),
+              let pubBytes = Hex.decode(pubkey) else { return false }
+        return Schnorr.verify(sig64: sigBytes, messageId32: idBytes, xonlyPubkey32: pubBytes)
+    }
+
     /// Compute id, Schnorr-sign, return a fully-formed signed event.
     static func sign(privkey32: Data, pubkey: String, kind: Int, createdAt: Int, tags: [[String]], content: String) throws -> NostrEvent {
         let id = computeId(pubkey: pubkey, createdAt: createdAt, kind: kind, tags: tags, content: content)

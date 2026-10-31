@@ -119,8 +119,12 @@ struct SidebarDrawerView: View {
     }
 
     private func publishStatus(_ content: String) async {
-        guard let priv = Hex.decode(keypair.privkey) else { return }
-        guard let event = try? Nip38.buildStatus(privkey32: priv, pubkey: pubkey, content: content) else { return }
+        guard let event = try? await Signer.sign(
+            keypair: keypair,
+            kind: Nip38.kindUserStatus,
+            tags: Nip38.buildStatusTags(),
+            content: content
+        ) else { return }
         var relays = await RelayListRepository.shared.getWriteRelays(pubkey)
         if relays.isEmpty { relays = ["wss://relay.primal.net"] }
         _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
@@ -183,12 +187,17 @@ struct SidebarDrawerView: View {
             Button("Cancel", role: .cancel) {}
             Button("Logout", role: .destructive) { onLogout() }
         } message: {
-            if keypair.isWatchOnly {
+            if keypair.isRemote {
+                // The key never lived here, and logging out ends the signer
+                // session (endSession tells the signer, then the app key is
+                // deleted) — so the backup warnings below don't apply.
+                Text("Your private key stays in your signer app, and logging out ends the session there too. Sign back in with a fresh bunker link from your signer app anytime.")
+            } else if keypair.isWatchOnly {
                 Text("Sign back in with your npub anytime to resume watching this account.")
             } else if hasEmbeddedWallet {
-                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec), so back it up before logging out.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
             } else {
-                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec), so back it up before logging out.")
             }
         }
         .alert("Update Status", isPresented: $showStatusEditor) {

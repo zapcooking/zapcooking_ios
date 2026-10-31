@@ -128,9 +128,11 @@ nonisolated enum LazarusPrivateItems {
     }
 }
 
-/// Decrypts private items encrypted to the account's own key. Signing is
-/// local-key only in this app, so this is plain compute: no signer prompt,
-/// and no NIP-46 request cap. Self-encryption means one conversation key
+/// Decrypts private items encrypted to the account's own key. Local-key
+/// only, so this is plain compute: no signer prompt, and no NIP-46 request
+/// cap. A remote-signer account gets nil here on purpose — a scan can hold
+/// hundreds of encrypted versions, one signer approval each — and recovers
+/// with public-item ranking. Self-encryption means one conversation key
 /// (NIP-44) and one shared secret (NIP-04) serve every version.
 nonisolated struct LazarusDecryptor: Sendable {
     private let nip44Key: Data

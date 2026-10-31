@@ -63,7 +63,7 @@ final class MediaServersViewModel {
     }
 
     func publish(keypair: Keypair) async {
-        guard let privkeyBytes = Hex.decode(keypair.privkey) else {
+        guard Signer.canSign(keypair) else {
             publishState = .failed("Invalid signing key")
             return
         }
@@ -75,13 +75,12 @@ final class MediaServersViewModel {
 
         let signed: NostrEvent
         do {
-            signed = try NostrEvent.sign(
-                privkey32: Data(privkeyBytes),
-                pubkey: pubkeyHex,
+            signed = try await Signer.sign(
+                keypair: keypair,
                 kind: BlossomServerList.kindServerList,
-                createdAt: createdAt,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: createdAt
             )
         } catch {
             publishState = .failed("Signing failed: \(error.localizedDescription)")
