@@ -267,7 +267,7 @@ final class Nip46Manager {
             name: appName,
             appURL: appURL,
             image: Nip46.clientImage,
-            perms: Nip46.requestedPerms
+            perms: Nip46.nostrconnectPerms
         )
         return NostrConnectPending(uri: uri, appPriv: appPriv, appPubkey: appPubHex,
                                    secret: secret, relays: ordered, appName: appName)
