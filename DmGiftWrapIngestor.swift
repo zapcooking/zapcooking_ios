@@ -23,6 +23,38 @@ struct DmIngestResult {
 enum DmGiftWrapIngestor {
     static let log = Logger(subsystem: "wisp", category: "dm")
 
+    /// Wrap count per ephemeral sender pubkey, for the flood check.
+    private static var recentWrapTimestamps: [String: [Date]] = [:]
+    private static let floodWindow: TimeInterval = 60
+    private static let floodMaxWrapsPerWindow = 5
+
+    /// True when this ephemeral pubkey has sent more than
+    /// `floodMaxWrapsPerWindow` wraps inside `floodWindow`.
+    private static func isFlood(from wrapPubkey: String) -> Bool {
+        let now = Date()
+        var stamps = (recentWrapTimestamps[wrapPubkey] ?? []).filter {
+            now.timeIntervalSince($0) < floodWindow
+        }
+        stamps.append(now)
+        recentWrapTimestamps[wrapPubkey] = stamps
+        if recentWrapTimestamps.count > 500 {
+            recentWrapTimestamps = recentWrapTimestamps.filter { !$0.value.isEmpty }
+        }
+        return stamps.count > floodMaxWrapsPerWindow
+    }
+
+    /// Transport-level failures deserve the bounded retry; everything the
+    /// signer itself refused will reproduce identically on every attempt.
+    private static func isTransientDecryptFailure(_ error: Error) -> Bool {
+        guard let e = error as? Nip46.NipError else { return false }
+        switch e {
+        case .timeout, .notConnected, .relaysUnreachable:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Decrypt and ingest one gift wrap. Returns a `DmIngestResult` only when a
     /// chat/file message was materialized into the repository (so the caller can
     /// refresh that snapshot); returns `nil` when the wrap was a duplicate, a
@@ -37,16 +69,30 @@ enum DmGiftWrapIngestor {
         // (`DmRepository.addMessage`), so a transient signer/decrypt failure is retried on
         // the next periodic REQ instead of being silently dropped for the session.
         guard !repo.isGiftWrapSeen(event.id) else { return nil }
+        // Flood control: a remote account pays a signer round-trip per wrap, so
+        // a wrap firehose (spam bots reusing one ephemeral key) must not become
+        // a signer-app notification flood. Legitimate senders never come close.
+        if isFlood(from: event.pubkey) {
+            _ = repo.markGiftWrapSeen(event.id)
+            log.notice("gift-wrap flood from \(event.pubkey, privacy: .public): dropped without decrypt")
+            return nil
+        }
 
         let rumor: Rumor
         do {
             rumor = try await Nip17.unwrapGiftWrapWithSigner(keypair: keypair, giftWrap: event)
         } catch {
-            // Bounded retry: keep the wrap unseen so the next REQ re-delivers it, but give
-            // up after a few attempts (and mark it seen) so a permanently-bad wrap doesn't
-            // busy-loop. Not persisted — a fresh launch retries.
-            let gaveUp = repo.recordDecryptFailure(event.id)
-            log.error("DM gift-wrap decrypt failed (gaveUp=\(gaveUp, privacy: .public)) id=\(event.id, privacy: .public) relay=\(relayUrl, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            // Distinguish retry-worthy from deterministic. A signer refusal
+            // ("Invalid MAC" = the wrap was never encrypted to this key,
+            // "Invalid base64" = garbage) will fail identically every time,
+            // so mark the wrap seen now; retrying only spams the signer app
+            // again. Only transport-level failures (signer offline, relay
+            // unreachable, timeout) keep the bounded retry.
+            let transient = isTransientDecryptFailure(error)
+            let gaveUp = transient
+                ? repo.recordDecryptFailure(event.id)
+                : repo.markGiftWrapSeen(event.id)
+            log.error("DM gift-wrap decrypt failed (transient=\(transient, privacy: .public) gaveUp=\(gaveUp, privacy: .public)) id=\(event.id, privacy: .public) relay=\(relayUrl, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return nil
         }
 

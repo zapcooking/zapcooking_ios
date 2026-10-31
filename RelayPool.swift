@@ -63,6 +63,7 @@ enum RelayPool {
     static func respondToAuthChallenge(challenge: String, urlString: String,
                                        ws: URLSessionWebSocketTask) async -> Bool {
         let autoApprove = UserDefaults.standard.object(forKey: "wisp_settings_auto_approve_relay_auth") as? Bool ?? true
+        relayPoolLog.notice("AUTH challenge from \(urlString, privacy: .public), autoApprove=\(autoApprove, privacy: .public)")
         guard (autoApprove || authApprovalCheck?(urlString) == true),
               let signer = authSigner else { return false }
         let event: NostrEvent
