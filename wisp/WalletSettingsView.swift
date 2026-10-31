@@ -154,36 +154,34 @@ struct WalletSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Remove wallet?")
                     .font(.headline)
-                Text("This wallet will be removed from this device. Your funds stay safe — restore it anytime with its recovery phrase.")
+                Text("This wallet will be removed from this device. Your funds stay safe, and you can restore it anytime with its recovery phrase.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Toggle(isOn: $confirmedSeedBackedUp) {
                     Text("I\u{2019}ve written down my recovery phrase or confirmed a relay backup")
                         .font(.subheadline)
                 }
-                HStack(spacing: 12) {
-                    Button("Cancel") {
-                        showSwitchSparkConfirm = false
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.wispPrimary)
-                    .frame(maxWidth: .infinity)
-
-                    Button("Remove") {
-                        showSwitchSparkConfirm = false
-                        store.resetToNoWallet()
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .frame(maxWidth: .infinity)
-                    .disabled(!confirmedSeedBackedUp)
+                Button("Cancel") {
+                    showSwitchSparkConfirm = false
                 }
+                .buttonStyle(.bordered)
+                .tint(.wispPrimary)
+                .frame(maxWidth: .infinity)
                 .controlSize(.large)
-                .padding(.top, 4)
+
+                Button("Remove") {
+                    showSwitchSparkConfirm = false
+                    store.resetToNoWallet()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .frame(maxWidth: .infinity)
+                .controlSize(.large)
+                .disabled(!confirmedSeedBackedUp)
             }
             .padding(20)
-            .presentationDetents([.height(280)])
+            .presentationDetents([.height(340)])
             .presentationBackground(Color.wispBackground)
         }
         .alert("Remove wallet?", isPresented: $showSwitchAlert) {
@@ -194,7 +192,7 @@ struct WalletSettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Disconnect this wallet so you can use a different one. Your funds stay safe — they're tied to your Nostr key and the wallet remains active.")
+            Text("Disconnect this wallet so you can use a different one. Your funds stay safe. They're tied to your Nostr key and the wallet remains active.")
         }
         .alert("Remove lightning address?", isPresented: $showRemoveAddressAlert) {
             Button("Remove", role: .destructive) {
@@ -793,7 +791,7 @@ struct WalletSettingsView: View {
         if store.isDefaultWallet {
             return "Your default wallet is linked to your key and can always be restored. Switching connects a different wallet instead."
         }
-        return "Removing this wallet from the device is safe — your funds stay put, and you can restore it anytime with its recovery phrase."
+        return "Removing this wallet from the device is safe. Your funds stay put, and you can restore it anytime with its recovery phrase."
     }
 
     // MARK: - Powered-by footer
