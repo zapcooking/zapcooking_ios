@@ -81,7 +81,8 @@ struct WalletSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDisconnectAlert = false
-    @State private var showDeleteAlert = false
+    @State private var showSwitchSparkConfirm = false
+    @State private var confirmedSeedBackedUp = false
     @State private var showSwitchAlert = false
     @State private var showRemoveAddressAlert = false
     @State private var showNwcDetails = false
@@ -141,7 +142,7 @@ struct WalletSettingsView: View {
         .navigationTitle("Wallet Settings")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Switch to a different wallet?", isPresented: $showDisconnectAlert) {
-            Button("Switch", role: .destructive) {
+            Button("Remove", role: .destructive) {
                 store.resetToNoWallet()
                 dismiss()
             }
@@ -149,17 +150,44 @@ struct WalletSettingsView: View {
         } message: {
             Text("Your NWC connection will be removed. You can reconnect a different wallet at any time.")
         }
-        .alert("Delete wallet?", isPresented: $showDeleteAlert) {
-            Button("Delete", role: .destructive) {
-                store.resetToNoWallet()
-                dismiss()
+        .sheet(isPresented: $showSwitchSparkConfirm) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Switch to a different wallet?")
+                    .font(.headline)
+                Text("This wallet will be removed from this device. Your funds stay safe — restore it anytime with its recovery phrase.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Toggle(isOn: $confirmedSeedBackedUp) {
+                    Text("I\u{2019}ve written down my recovery phrase or confirmed a relay backup")
+                        .font(.subheadline)
+                }
+                HStack(spacing: 12) {
+                    Button("Cancel") {
+                        showSwitchSparkConfirm = false
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.wispPrimary)
+                    .frame(maxWidth: .infinity)
+
+                    Button("Remove") {
+                        showSwitchSparkConfirm = false
+                        store.resetToNoWallet()
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .frame(maxWidth: .infinity)
+                    .disabled(!confirmedSeedBackedUp)
+                }
+                .controlSize(.large)
+                .padding(.top, 4)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently delete your Spark wallet from this device. Make sure you have your recovery phrase before proceeding.")
+            .padding(20)
+            .presentationDetents([.height(280)])
+            .presentationBackground(Color.wispBackground)
         }
         .alert("Switch to a different wallet?", isPresented: $showSwitchAlert) {
-            Button("Switch", role: .destructive) {
+            Button("Remove", role: .destructive) {
                 WalletStore.setSkipAutoCreate(for: store.keypair.pubkey)
                 store.resetToNoWallet()
                 dismiss()
@@ -726,14 +754,15 @@ struct WalletSettingsView: View {
                     .buttonStyle(.plain)
                 } else {
                     Button {
-                        showDeleteAlert = true
+                        confirmedSeedBackedUp = false
+                        showSwitchSparkConfirm = true
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "trash")
+                            Image(systemName: "arrow.left.arrow.right")
                                 .font(.system(size: 15))
                                 .foregroundStyle(.red)
                                 .frame(width: 22)
-                            Text("Delete wallet")
+                            Text("Switch wallet")
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
                             Spacer()
@@ -755,10 +784,7 @@ struct WalletSettingsView: View {
     }
 
     private var dangerSectionHeader: String {
-        if store.mode == .nwc || store.isDefaultWallet {
-            return "Switch Wallet"
-        }
-        return "Delete Wallet"
+        "Switch Wallet"
     }
 
     private var dangerSectionFooter: String {
@@ -768,7 +794,7 @@ struct WalletSettingsView: View {
         if store.isDefaultWallet {
             return "Your default wallet is linked to your key and can always be restored. Switching connects a different wallet instead."
         }
-        return "Deleting removes the wallet from this device. You can restore it with your recovery phrase."
+        return "Switching removes this wallet from the device. Your funds stay safe — restore it anytime with its recovery phrase."
     }
 
     // MARK: - Powered-by footer
