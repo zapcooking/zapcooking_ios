@@ -15,12 +15,14 @@ enum Signer {
         case noActiveRemoteSigner
         case localKeyMissing
         case remoteSignerUnsupported
+        case malformedPayload
 
         var description: String {
             switch self {
             case .noActiveRemoteSigner: return "Remote signer is not connected"
             case .localKeyMissing: return "Missing local private key"
             case .remoteSignerUnsupported: return "Not available with a remote signer"
+            case .malformedPayload: return "Not a NIP-44-encrypted payload"
             }
         }
     }
@@ -98,6 +100,12 @@ enum Signer {
 
     nonisolated static func nip44Decrypt(keypair: Keypair, peerPubkey: String, payload: String) async throws -> String {
         if keypair.isRemote {
+            // Refuse non-NIP-44 payloads locally: legacy NIP-04 content and
+            // plaintext app data fail the shape check, and every remote
+            // refusal is a "Signing Failed" notification in the signer app.
+            guard Nip44.isV2Ciphertext(payload) else {
+                throw SignerError.malformedPayload
+            }
             let client = try await remoteClient(for: keypair)
             return try await client.nip44Decrypt(peerPubkeyHex: peerPubkey, ciphertext: payload)
         }

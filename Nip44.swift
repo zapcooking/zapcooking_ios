@@ -54,6 +54,16 @@ nonisolated enum Nip44 {
 
     // MARK: - Decrypt
 
+    /// Cheap shape check for a NIP-44 v2 payload: standard base64 with the
+    /// 0x02 version byte up front. Mirrors `decrypt`'s own decoding so a
+    /// `true` here means decrypt is worth attempting — used to refuse
+    /// legacy NIP-04 or plaintext content locally instead of paying a
+    /// remote-signer round-trip that fails in the signer app.
+    nonisolated static func isV2Ciphertext(_ payload: String) -> Bool {
+        guard let raw = Data(base64Encoded: payload), raw.count >= 99 else { return false }
+        return raw[raw.startIndex] == version
+    }
+
     static func decrypt(payload: String, conversationKey: Data) throws -> String {
         if payload.first == "#" { throw Error.invalidVersion }
         guard let raw = Data(base64Encoded: payload), raw.count >= 99 else { throw Error.invalidPayload }
