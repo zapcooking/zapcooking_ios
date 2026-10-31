@@ -69,6 +69,13 @@ nonisolated enum Nip46 {
         return json
     }
 
+    /// Compact permission set for the nostrconnect:// URI. The full
+    /// per-kind list (requestedPerms) makes the URI so long the QR renders
+    /// unreadably dense; URI perms are display hints — signers apply their
+    /// own trust model regardless. The full list still rides the bunker
+    /// `connect` params, which don't affect QR size.
+    static let nostrconnectPerms = ["sign_event", "nip44_encrypt", "nip44_decrypt"]
+
     /// Permissions requested up front so a signer can offer "always allow"
     /// for what the app actually does, instead of prompting per event. Every
     /// kind the app signs as the user: profile/contacts/notes/reposts/

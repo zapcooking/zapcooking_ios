@@ -42,19 +42,10 @@ struct Nip46LoginView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    Image(systemName: "link.badge.plus")
-                        .font(.system(size: 44))
-                        .foregroundStyle(Color.wispPrimary)
-                        .padding(.top, 8)
-
-                    Text("Remote Signer")
-                        .font(.title2.bold())
-
-                    Text("Sign in with a remote signer (Clave, Amber, Primal). Your private key never leaves the signer app.")
-                        .font(.footnote)
+                    Text("Your private key stays in your signer app (Clave, Amber, Primal).")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal)
 
                     Picker("Mode", selection: modeBinding) {
                         ForEach(Nip46LoginViewModel.Mode.allCases) { mode in
@@ -86,7 +77,7 @@ struct Nip46LoginView: View {
                 .padding()
             }
             .background(Color.wispBackground)
-            .navigationTitle("Connect")
+            .navigationTitle("Sign in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -195,67 +186,59 @@ struct Nip46LoginView: View {
 
     @ViewBuilder
     private var nostrConnectSection: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             if let uri = vm.pendingURI {
-                Text("Open your signer and add a new account by scanning this code, or paste the URI.")
+                Text("Scan with your signer app, or copy the code and paste it there.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
 
-                QRCodeImage(payload: uri, sideLength: 240, correctionLevel: "M")
-                    .padding(8)
+                QRCodeImage(payload: uri, sideLength: 210, correctionLevel: "M")
+                    .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 12).fill(.white)
                     )
 
-                Button {
-                    vm.copyURIToPasteboard()
-                    copiedAcknowledgement = true
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(1.4))
-                        copiedAcknowledgement = false
+                HStack(spacing: 12) {
+                    Button {
+                        vm.copyURIToPasteboard()
+                        copiedAcknowledgement = true
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(1.4))
+                            copiedAcknowledgement = false
+                        }
+                    } label: {
+                        Label(copiedAcknowledgement ? "Copied" : "Copy code",
+                              systemImage: copiedAcknowledgement ? "checkmark" : "doc.on.doc")
+                            .frame(maxWidth: .infinity)
                     }
-                } label: {
-                    Label(copiedAcknowledgement ? "Copied" : "Copy URI",
-                          systemImage: copiedAcknowledgement ? "checkmark" : "doc.on.doc")
-                        .font(.footnote)
-                }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
+                    .buttonStyle(.bordered)
+                    .tint(.wispPrimary)
 
-                Text(uri)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .padding(.horizontal)
-
-                Button {
-                    Task {
-                        signerAppHint = nil
-                        if await vm.openInSignerApp() { return }
-                        signerAppHint = "No signer app on this device can open that link — scan the code with your signer instead."
+                    Button {
+                        Task {
+                            signerAppHint = nil
+                            if await vm.openInSignerApp() { return }
+                            signerAppHint = "No signer app on this device can open that link. Scan the code instead."
+                        }
+                    } label: {
+                        Label("Open signer app", systemImage: "arrow.up.forward.app")
+                            .frame(maxWidth: .infinity)
                     }
-                } label: {
-                    Label("Open in signer app", systemImage: "arrow.up.forward.app")
-                        .frame(maxWidth: .infinity)
+                    .buttonStyle(.bordered)
+                    .tint(.wispPrimary)
                 }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
 
                 if let signerAppHint {
                     Text(signerAppHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal)
                 }
 
-                ProgressView("Waiting for signer to approve…")
-                    .padding(.top, 4)
+                ProgressView("Waiting for your signer to approve…")
             } else {
-                Text("Show a code your signer app (Clave, Amber, Primal, …) can scan or open to connect.")
+                Text("Your signer app scans a one-time code to connect — no key ever touches this device.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -264,7 +247,7 @@ struct Nip46LoginView: View {
                 Button {
                     vm.startNostrConnect()
                 } label: {
-                    Text("Generate QR Code").bold().frame(maxWidth: .infinity)
+                    Text("Show connection code").bold().frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.wispPrimary)
