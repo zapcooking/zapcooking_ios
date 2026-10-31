@@ -161,27 +161,34 @@ struct WalletSettingsView: View {
                     Text("I\u{2019}ve written down my recovery phrase or confirmed a relay backup")
                         .font(.subheadline)
                 }
-                Button("Cancel") {
-                    showSwitchSparkConfirm = false
-                }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
-                .frame(maxWidth: .infinity)
-                .controlSize(.large)
+                HStack(spacing: 12) {
+                    Button {
+                        showSwitchSparkConfirm = false
+                    } label: {
+                        Text("Cancel")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.wispPrimary)
+                    .controlSize(.large)
 
-                Button("Remove") {
-                    showSwitchSparkConfirm = false
-                    store.resetToNoWallet()
-                    dismiss()
+                    Button {
+                        showSwitchSparkConfirm = false
+                        store.resetToNoWallet()
+                        dismiss()
+                    } label: {
+                        Text("Remove")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.large)
+                    .disabled(!confirmedSeedBackedUp)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .frame(maxWidth: .infinity)
-                .controlSize(.large)
-                .disabled(!confirmedSeedBackedUp)
+                .padding(.top, 4)
             }
             .padding(20)
-            .presentationDetents([.height(340)])
+            .presentationDetents([.height(300)])
             .presentationBackground(Color.wispBackground)
         }
         .alert("Remove wallet?", isPresented: $showSwitchAlert) {
