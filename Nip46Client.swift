@@ -1,4 +1,5 @@
 import Foundation
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -12,6 +13,9 @@ import UIKit
 /// don't need ad-hoc locks. The actual relay sockets run on detached tasks and
 /// hop back into actor context via `handleResponse(...)`.
 actor Nip46Client {
+
+    /// Per-RPC trace (debug level): useful when attributing signer traffic.
+    private static let rpcLog = Logger(subsystem: "cooking.zap.app", category: "nip46-rpc")
 
     // MARK: - Config
 
@@ -163,6 +167,7 @@ actor Nip46Client {
 
     /// Send a single RPC and wait for the matching response. Encrypts with NIP-44 v2.
     func sendRequest(method: String, params: [String], timeout: TimeInterval = Nip46.rpcTimeoutSeconds) async throws -> String {
+        Self.rpcLog.debug("RPC out: \(method, privacy: .public)")
         if isClosed { throw Nip46.NipError.notConnected }
         if !isSubscribed {
             openSockets()
