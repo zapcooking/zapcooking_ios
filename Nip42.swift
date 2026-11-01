@@ -7,15 +7,16 @@ nonisolated enum Nip42 {
     static let kindAuth = 22242
 
     /// Build a signed kind-22242 AUTH event in response to a relay's
-    /// `["AUTH", challenge]` frame.
+    /// `["AUTH", challenge]` frame. Routes through `Signer`, so remote-signer
+    /// (NIP-46) accounts work too — which means a network round-trip that may
+    /// be slow or throw.
     static func buildAuthEvent(challenge: String, relayUrl: String, keypair: Keypair,
-                               createdAt: Int = NostrClock.now()) throws -> NostrEvent {
+                               createdAt: Int = NostrClock.now()) async throws -> NostrEvent {
         let tags: [[String]] = [
             ["relay", relayUrl],
             ["challenge", challenge]
         ]
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        return try NostrEvent.sign(privkey32: priv, pubkey: keypair.pubkey, kind: kindAuth,
-                                   createdAt: createdAt, tags: tags, content: "")
+        return try await Signer.sign(keypair: keypair, kind: kindAuth, tags: tags,
+                                     content: "", createdAt: createdAt)
     }
 }

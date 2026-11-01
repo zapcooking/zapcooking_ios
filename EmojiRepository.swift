@@ -435,7 +435,7 @@ final class EmojiRepository {
     }
 
     private func publishKind10030(directEmojis: [CustomEmoji], packAddrs: [String], keypair: Keypair) async throws {
-        guard let privkey32 = Hex.decode(keypair.privkey) else {
+        guard Signer.canSign(keypair) else {
             throw PublishError.missingKey
         }
         let createdAt = max(NostrClock.now(), userListCreatedAt + 1)
@@ -447,13 +447,12 @@ final class EmojiRepository {
             tags.append(["a", addr])
         }
 
-        let event = try NostrEvent.sign(
-            privkey32: privkey32,
-            pubkey: keypair.pubkey,
+        let event = try await Signer.sign(
+            keypair: keypair,
             kind: 10030,
-            createdAt: createdAt,
             tags: tags,
-            content: ""
+            content: "",
+            createdAt: createdAt
         )
 
         let relays = topWriteRelays(for: keypair.pubkey)

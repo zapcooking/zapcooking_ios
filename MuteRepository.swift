@@ -211,10 +211,9 @@ final class MuteRepository {
 
     /// Open a long-lived subscription for our own kind:10000 and merge any newer event we see.
     /// Also kicks one immediate `RelayPool.query` for fast hydration on launch.
-    func startSync(privkey32: Data) {
-        guard let pk = activePubkey else { return }
+    func startSync(keypair: Keypair) {
+        guard let pk = activePubkey, keypair.pubkey == pk else { return }
         unbindSync()
-        let priv = privkey32
         let pubkey = pk
 
         Task { [weak self] in
@@ -234,7 +233,7 @@ final class MuteRepository {
             // Quick hydration first.
             let initial = await RelayPool.query(relays: relays, filter: filter, timeout: 6)
             for event in initial {
-                await self?.merge(event: event, privkey32: priv)
+                await self?.merge(event: event, keypair: keypair)
             }
             await MainActor.run {
                 guard let self else { return }
@@ -242,7 +241,7 @@ final class MuteRepository {
                 self.syncSubscription = sub
                 self.syncListener = Task { [weak self] in
                     for await (event, _) in sub.events {
-                        await self?.merge(event: event, privkey32: priv)
+                        await self?.merge(event: event, keypair: keypair)
                     }
                 }
             }
@@ -251,13 +250,25 @@ final class MuteRepository {
 
     /// Apply an inbound kind:10000 if it's newer than our local state. Merges decrypted
     /// private body with any public tags (some clients still publish public ["p", x]).
-    func merge(event: NostrEvent, privkey32: Data) async {
+    func merge(event: NostrEvent, keypair: Keypair) async {
         guard event.kind == Nip51Mute.kindMuteList,
               event.pubkey == activePubkey,
               event.createdAt > lastUpdatedAt else { return }
 
-        let parsed = (try? Nip51Mute.decryptAndParse(event: event, privkey32: privkey32))
-            ?? Nip51Mute.parsePublicTags(event: event)
+        let parsed: Nip51Mute.Lists
+        do {
+            parsed = try await Nip51Mute.decryptAndParse(event: event, keypair: keypair)
+        } catch {
+            // A remote signer that didn't answer is a transient failure:
+            // adopting the public tags alone would drop the private entries,
+            // and the next mute would republish the list without them. Keep
+            // local state; a later sync event retries.
+            if keypair.isRemote { return }
+            parsed = Nip51Mute.parsePublicTags(event: event)
+        }
+        // Re-check after the (possibly slow, remote) decrypt: a newer event or
+        // a local edit may have landed meanwhile.
+        guard event.createdAt > lastUpdatedAt else { return }
 
         await apply(parsed, updatedAt: event.createdAt)
     }

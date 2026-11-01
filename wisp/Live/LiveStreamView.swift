@@ -656,7 +656,7 @@ private struct LiveChatInputBar: View {
 
     private func send() {
         hideKeyboard()
-        vm.sendMessage()
+        Task { await vm.sendMessage() }
     }
 }
 
