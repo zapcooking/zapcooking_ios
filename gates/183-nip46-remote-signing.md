@@ -31,3 +31,13 @@ Upstream note for the Lazarus spec (feat/lazarus-spec-0.6.2): recovery
 over a NIP-46 remote signer is bounded by the signer's request size cap;
 restore flows should treat ~48 KB of serialized event as the practical
 per-publish limit and surface it before attempting.
+
+## Standing rule: no damus.io in hardcoded relay sets
+
+The AUTH-loop above made the damus relay operator post a public warning
+about excessive requests. Standing rule after that incident: never add
+`wss://relay.damus.io` to any hardcoded relay set (handshake defaults,
+`RelayDefaults.indexers`/`onboarding`/`fallbacks`, DM relays, backup
+relays). It lives in `AGENTS.md` ("Never hardcode the damus relay") and
+as a comment above `RelayDefaults.indexers`. A user may still keep damus
+in their own saved relay settings; we simply never dial it by default.
