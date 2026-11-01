@@ -231,10 +231,13 @@ final class Nip46Manager {
     /// Clave. Other signers ignore relays they don't recognize, so this is a
     /// strict reliability win. Compatible signers we test against today: Clave,
     /// Primal iOS, Amber.
+    ///
+    /// damus.io is deliberately absent: it rate-limits aggressively (it sent
+    /// the operator's block warning mid-testing; see issue #185), so we avoid
+    /// dialing it wherever we control the relay set.
     static let defaultNostrConnectRelays: [String] = [
         "wss://relay.primal.net",
         "wss://relay.powr.build",
-        "wss://relay.damus.io",
         "wss://nos.lol"
     ]
 
