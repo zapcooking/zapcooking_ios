@@ -70,11 +70,12 @@ final class LiveStreamViewModel: EmojiComposing {
     }
 
     func start() async {
-        guard !started else { return }
+        guard !started, AppSettings.shared.showsLiveContent else { return }
         started = true
         LiveStreamRepository.shared.setCurrent(aTagValue)
 
         await resolveChatRelays()
+        guard started, !Task.isCancelled else { return }
         if chatRelays.isEmpty {
             chatRelays = ["wss://nos.lol", "wss://relay.primal.net"]
         }
@@ -87,6 +88,9 @@ final class LiveStreamViewModel: EmojiComposing {
             filter: NostrFilter(kinds: [Nip53.kindLiveChatMessage], aTags: [aTagValue], limit: Self.chatPageSize),
             timeout: 8
         )
+        // Leaving the stream during the fetch ran `cleanup()` already; don't
+        // install subscriptions for a dismissed view.
+        guard started, !Task.isCancelled else { return }
         for event in initial.sorted(by: { $0.createdAt < $1.createdAt }) {
             LiveStreamRepository.shared.addChatMessage(event)
         }
@@ -164,10 +168,12 @@ final class LiveStreamViewModel: EmojiComposing {
             filter: NostrFilter(kinds: [9735], aTags: [aTagValue], limit: Self.zapScanPageSize),
             timeout: 12
         )
-        guard !events.isEmpty else { return }
-        for event in events.sorted(by: { $0.createdAt < $1.createdAt }) {
-            LiveStreamRepository.shared.addStreamZap(event, aTag: aTagValue)
-        }
+        guard !events.isEmpty, started, !Task.isCancelled else { return }
+        // Announcements only for receipts as recent as the loaded chat; older
+        // ones count toward the total without occupying the chat buffer.
+        let loaded = LiveStreamRepository.shared.messages(for: aTagValue)
+        let announceFrom = loaded.first(where: { !$0.isZapAnnouncement })?.createdAt ?? 0
+        LiveStreamRepository.shared.addArchivedZaps(events, aTag: aTagValue, announceFrom: announceFrom)
         if events.count >= Self.zapScanPageSize || responded < relays.count {
             LiveStreamRepository.shared.zapTotalsUncertain.insert(aTagValue)
         }
@@ -176,6 +182,12 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Loads one older page of chat (scroll-back). Pages by count from the
     /// oldest loaded chat message; `until` is inclusive so boundary-second
     /// messages aren't skipped, and the repository dedupes the overlap.
+    ///
+    /// - A page that adds nothing new while full means more messages share the
+    ///   boundary second than the limit: the limit grows (within the buffer
+    ///   cap) until that second is drained, rather than moving the cursor.
+    /// - A short page only ends history when every queried relay answered; a
+    ///   timeout leaves paging retryable.
     func loadOlderMessages() async {
         guard !isLoadingOlder, !reachedOldestHistory, !chatRelays.isEmpty else { return }
         let existing = LiveStreamRepository.shared.messages(for: aTagValue)
@@ -183,22 +195,44 @@ final class LiveStreamViewModel: EmojiComposing {
         isLoadingOlder = true
         defer { isLoadingOlder = false }
 
-        let page = await RelayPool.query(
-            relays: chatRelays,
-            filter: NostrFilter(
-                kinds: [Nip53.kindLiveChatMessage],
-                aTags: [aTagValue],
-                limit: Self.chatPageSize,
-                until: oldest
-            ),
-            timeout: 8
-        )
-        for event in page.sorted(by: { $0.createdAt < $1.createdAt }) {
-            LiveStreamRepository.shared.addChatMessage(event)
-        }
-        if page.count < Self.chatPageSize
-            || LiveStreamRepository.shared.messages(for: aTagValue).count >= LiveStreamRepository.maxChatMessages {
-            reachedOldestHistory = true
+        var limit = Self.chatPageSize
+        while true {
+            let (page, responded) = await RelayPool.queryDetailed(
+                relays: chatRelays,
+                filter: NostrFilter(
+                    kinds: [Nip53.kindLiveChatMessage],
+                    aTags: [aTagValue],
+                    limit: limit,
+                    until: oldest
+                ),
+                timeout: 8
+            )
+            guard started, !Task.isCancelled else { return }
+            var added = 0
+            for event in page.sorted(by: { $0.createdAt < $1.createdAt })
+            where LiveStreamRepository.shared.addChatMessage(event) {
+                added += 1
+            }
+            let allAnswered = responded >= chatRelays.count
+            if LiveStreamRepository.shared.messages(for: aTagValue).count >= LiveStreamRepository.maxChatMessages {
+                reachedOldestHistory = true
+                return
+            }
+            if added > 0 {
+                if page.count < limit && allAnswered { reachedOldestHistory = true }
+                return
+            }
+            if page.count >= limit {
+                // A full page of already-loaded messages: widen and retry.
+                guard limit < LiveStreamRepository.maxChatMessages else {
+                    reachedOldestHistory = true
+                    return
+                }
+                limit = min(limit * 2, LiveStreamRepository.maxChatMessages)
+                continue
+            }
+            if allAnswered { reachedOldestHistory = true }
+            return
         }
     }
 

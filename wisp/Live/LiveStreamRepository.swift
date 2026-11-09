@@ -125,10 +125,12 @@ final class LiveStreamRepository {
     }
 
     /// Per-stream: store full chat content + bump chatter set + bump lastChatAt.
-    func addChatMessage(_ event: NostrEvent) {
+    /// Returns true when the message was new (not a duplicate or malformed).
+    @discardableResult
+    func addChatMessage(_ event: NostrEvent) -> Bool {
         guard event.kind == Nip53.kindLiveChatMessage,
-              let aTag = Nip53.getChatActivityRef(event) else { return }
-        guard seenChatIds.insert(event.id).inserted else { return }
+              let aTag = Nip53.getChatActivityRef(event) else { return false }
+        guard seenChatIds.insert(event.id).inserted else { return false }
 
         let replyToId = event.tags.first(where: { tag in
             guard tag.count >= 2, tag[0] == "e" else { return false }
@@ -163,6 +165,7 @@ final class LiveStreamRepository {
         } else {
             pendingFollowChatters[aTag, default: []].insert(event.pubkey)
         }
+        return true
     }
 
     /// Add a reactor's emoji to a chat message's reaction map. No-op if message not in our list.
@@ -205,6 +208,21 @@ final class LiveStreamRepository {
         messagesByStream[aTag] = list
 
         streamZapTotalsSats[aTag, default: 0] += amount
+    }
+
+    /// Archive receipts from the one-shot total scan: summed into the stream's
+    /// zap total and deduplicated, but kept out of the chat buffer so a scan
+    /// of old receipts can't fill the window that chat paging relies on.
+    /// Recent receipts (`announceFrom` or newer) take the normal chat path.
+    func addArchivedZaps(_ events: [NostrEvent], aTag: String, announceFrom: Int) {
+        for event in events {
+            guard event.kind == 9735 else { continue }
+            if event.createdAt >= announceFrom {
+                addStreamZap(event, aTag: aTag)
+            } else if seenZapIds.insert(event.id).inserted {
+                streamZapTotalsSats[aTag, default: 0] += Nip57.zapAmountSats(receipt: event)
+            }
+        }
     }
 
     // MARK: - Lifecycle

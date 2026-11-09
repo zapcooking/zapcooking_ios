@@ -37,13 +37,14 @@ struct LiveStreamView: View {
                     url: vm.activity?.streamingUrl,
                     onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) },
                     onStartPiP: {
-                        if LivePlayerStore.shared.startPictureInPicture(
-                            onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) }
-                        ) {
-                            // The floating window takes over; the stream view
-                            // pops and the player outlives it in the store.
-                            dismiss()
-                        }
+                        // The floating window takes over only once PiP has
+                        // actually started: the stream view then pops and the
+                        // player outlives it in the store. On a failed start
+                        // the inline view stays open.
+                        LivePlayerStore.shared.startPictureInPicture(
+                            onRestore: { VideoPiPCoordinator.shared.requestRestore(.liveStream(route)) },
+                            onStarted: { dismiss() }
+                        )
                     }
                 )
                 StreamInfoBar(
@@ -150,11 +151,15 @@ final class LivePlayerStore {
 
     /// Start PiP from the stream view's own button. `AVPlayerViewController`
     /// exposes no programmatic PiP trigger, so this drives an offscreen
-    /// `AVPlayerLayer`-based controller rendering the same player. The stream
-    /// view dismisses itself on success; the floating window continues, and
-    /// the layer's restore button routes back through the coordinator.
+    /// `AVPlayerLayer`-based controller rendering the same player. Startup is
+    /// asynchronous: the controller must report `isPictureInPicturePossible`
+    /// first, and only the did-start callback sets `pipActive`, hands the
+    /// player to the coordinator and calls `onStarted` (the stream view
+    /// dismisses itself there). A failed or timed-out start tears the layer
+    /// down and leaves ownership untouched, so the inline view keeps playing.
+    /// Returns false when PiP can't be attempted at all.
     @discardableResult
-    func startPictureInPicture(onRestore: @escaping () -> Void) -> Bool {
+    func startPictureInPicture(onRestore: @escaping () -> Void, onStarted: @escaping () -> Void) -> Bool {
         guard let player,
               AVPictureInPictureController.isPictureInPictureSupported() else { return false }
         // Stop a prior manual session first — one PiP at a time.
@@ -164,30 +169,57 @@ final class LivePlayerStore {
         layer.player = player
         layer.frame = UIScreen.main.bounds
         layer.isHidden = true
+        var controllerRef: AVPictureInPictureController?
         let delegate = ManualLivePipDelegate(
+            onStarted: { [weak self] in
+                guard let self, let controller = controllerRef,
+                      self.manualPipController === controller,
+                      let delegate = self.manualPipDelegate else { return }
+                self.pipActive = true
+                VideoPiPCoordinator.shared.begin(player: player, retaining: [controller, delegate, layer])
+                onStarted()
+            },
+            onFailed: { [weak self] in
+                guard let self, self.manualPipController === controllerRef else { return }
+                self.stopManualPictureInPicture()
+            },
             onStopped: { [weak self] in self?.stopManualPictureInPicture() },
             onRestore: onRestore
         )
         guard let controller = AVPictureInPictureController(playerLayer: layer) else {
             return false
         }
+        controllerRef = controller
         controller.delegate = delegate
         manualPipLayer = layer
         manualPipController = controller
         manualPipDelegate = delegate
-        pipActive = true
-        VideoPiPCoordinator.shared.begin(player: player, retaining: [controller, delegate, layer])
         if let window = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
             window.layer.addSublayer(layer)
         }
-        controller.startPictureInPicture()
+        // Wait (briefly) for the new layer to become eligible, then start.
+        Task { [weak self, weak controller] in
+            for _ in 0..<30 {
+                guard let controller, self?.manualPipController === controller else { return }
+                if controller.isPictureInPicturePossible {
+                    controller.startPictureInPicture()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard let controller, self?.manualPipController === controller, !controller.isPictureInPictureActive else { return }
+            self?.stopManualPictureInPicture()
+        }
         return true
     }
 
     /// Tear the manual layer-PiP session down (PiP stopped, or a new session
     /// replacing it). Ends coordinator ownership; playback continues inline.
     func stopManualPictureInPicture() {
+        if manualPipController?.isPictureInPictureActive == true {
+            manualPipController?.stopPictureInPicture()
+        }
         manualPipLayer?.removeFromSuperlayer()
         manualPipLayer = nil
         manualPipController = nil
@@ -240,6 +272,7 @@ final class LivePlayerStore {
     }
 
     func releaseAll() {
+        stopManualPictureInPicture()
         player?.pause()
         if let player {
             ScreenKeepAwake.untrack(player)
@@ -253,12 +286,28 @@ final class LivePlayerStore {
 /// Delegate for the stream view's manual PiP session. PiP delegates are held
 /// weakly by AVFoundation, so the store retains this for the session's life.
 private final class ManualLivePipDelegate: NSObject, AVPictureInPictureControllerDelegate {
+    private let onStarted: () -> Void
+    private let onFailed: () -> Void
     private let onStopped: () -> Void
     private let onRestore: () -> Void
 
-    init(onStopped: @escaping () -> Void, onRestore: @escaping () -> Void) {
+    init(onStarted: @escaping () -> Void, onFailed: @escaping () -> Void,
+         onStopped: @escaping () -> Void, onRestore: @escaping () -> Void) {
+        self.onStarted = onStarted
+        self.onFailed = onFailed
         self.onStopped = onStopped
         self.onRestore = onRestore
+    }
+
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        onStarted()
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        onFailed()
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {

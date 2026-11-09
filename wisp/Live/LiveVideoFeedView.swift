@@ -8,6 +8,8 @@ import SwiftUI
 struct LiveVideoFeedView: View {
     /// Presents the stream view. Re-kicks discovery, honoring the "Show live
     /// streams" switch.
+    /// False while another feed body is showing (the body stays mounted).
+    var isActive: Bool = true
     let onSelect: (LiveStream) -> Void
     let onRefresh: () -> Void
 
@@ -26,14 +28,16 @@ struct LiveVideoFeedView: View {
                 state(
                     icon: "dot.radiowaves.left.and.right",
                     title: "No one is streaming right now",
-                    detail: "Live streams on your relays appear here the moment they start."
+                    detail: "Live streams on your relays appear here the moment they start.",
+                    retry: true
                 )
             } else {
                 list
             }
         }
-        .onAppear { onRefresh() }
-        .refreshable { onRefresh(); try? await Task.sleep(for: .seconds(1.2)) }
+        .onAppear { if isActive { onRefresh() } }
+        .onChange(of: isActive) { _, active in if active { onRefresh() } }
+        .onChange(of: settings.showsLiveContent) { _, on in if on && isActive { onRefresh() } }
         .background(Color.wispBackground.ignoresSafeArea())
         .accessibilityIdentifier("live-video-feed")
     }
@@ -48,6 +52,12 @@ struct LiveVideoFeedView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
+        .refreshable { await refresh() }
+    }
+
+    private func refresh() async {
+        onRefresh()
+        try? await Task.sleep(for: .seconds(1.2))
     }
 
     private func row(_ stream: LiveStream) -> some View {
@@ -97,7 +107,20 @@ struct LiveVideoFeedView: View {
         .accessibilityIdentifier("live-video-row")
     }
 
-    private func state(icon: String, title: String, detail: String) -> some View {
+    /// A state screen inside a scroll container, so pull-to-refresh still
+    /// works when discovery came back empty or failed. `retry` also adds an
+    /// explicit button.
+    private func state(icon: String, title: String, detail: String, retry: Bool = false) -> some View {
+        GeometryReader { geo in
+            ScrollView {
+                stateContent(icon: icon, title: title, detail: detail, retry: retry)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .refreshable { await refresh() }
+        }
+    }
+
+    private func stateContent(icon: String, title: String, detail: String, retry: Bool) -> some View {
         VStack(spacing: 10) {
             Spacer()
             Image(systemName: icon)
@@ -111,6 +134,12 @@ struct LiveVideoFeedView: View {
                 .foregroundStyle(Color.wispOnSurfaceVariant)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            if retry {
+                Button("Refresh") { onRefresh() }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 6)
+                    .accessibilityIdentifier("live-video-refresh")
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

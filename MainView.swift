@@ -1570,8 +1570,17 @@ struct MainView: View {
     /// scrolled to the top.
     @ViewBuilder
     private var feedContent: some View {
-        if FeedTabRouting.body(for: viewModel.currentKind) == .liveVideo {
+        let active = FeedTabRouting.body(for: viewModel.currentKind)
+        KeptMountedFeedBodies(active: active) {
+            onlyFoodBody
+        } general: {
+            VStack(spacing: 0) {
+                relayFeedStatusBanner
+                feedBody
+            }
+        } live: {
             LiveVideoFeedView(
+                isActive: active == .liveVideo,
                 onSelect: { stream in
                     feedPath.append(LiveStreamRoute(
                         aTagValue: stream.aTagValue,
@@ -1580,17 +1589,8 @@ struct MainView: View {
                         relayHints: stream.activity.relayHints
                     ))
                 },
-                onRefresh: { viewModel.liveContentSettingChanged(true) }
+                onRefresh: { viewModel.refreshLiveDiscovery() }
             )
-        } else {
-            KeptMountedFeedBodies(showOnlyFood: FeedTabRouting.body(for: viewModel.currentKind) == .onlyFood) {
-                onlyFoodBody
-            } general: {
-                VStack(spacing: 0) {
-                    relayFeedStatusBanner
-                    feedBody
-                }
-            }
         }
     }
 

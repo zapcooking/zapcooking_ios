@@ -1181,6 +1181,8 @@ final class FeedViewModel {
                let board = RelayScoreBoard.load(pubkey: pubkey) {
                 relays = board.scoredRelays.prefix(10).map(\.url)
             }
+            // The relay lookup suspends: the switch may have gone off meanwhile.
+            guard AppSettings.shared.showsLiveContent else { return }
             LiveStreamCoordinator.shared.startDiscovery(myPubkey: pubkey, readRelays: relays)
         }
     }
@@ -1192,7 +1194,20 @@ final class FeedViewModel {
             startLiveDiscovery()
         } else {
             LiveStreamCoordinator.shared.stopDiscovery()
+            // Nothing live may keep playing or sit in memory with the switch
+            // off: end any inline/PiP playback and drop the discovered streams.
+            LivePlayerStore.shared.releaseAll()
+            LiveStreamRepository.shared.clear()
         }
+    }
+
+    /// Re-issue discovery for the Live Video feed (appear / pull-to-refresh).
+    /// `startDiscovery` is a no-op while its subscriptions are open, so a
+    /// refresh restarts them to actually resend the requests.
+    func refreshLiveDiscovery() {
+        guard AppSettings.shared.showsLiveContent else { return }
+        LiveStreamCoordinator.shared.stopDiscovery()
+        startLiveDiscovery()
     }
 
     func requestProfileIfNeeded(_ pubkey: String) async {
