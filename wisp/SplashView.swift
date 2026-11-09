@@ -335,6 +335,7 @@ struct NostrLoginSheet: View {
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
+    @State private var decryptTask: Task<Void, Never>?
     @State private var showQRScanner = false
 
     private var isNcryptsec: Bool {
@@ -438,7 +439,10 @@ struct NostrLoginSheet: View {
             }
             .padding(.vertical, 20)
 
-            Button(action: onCreateAccount) {
+            Button(action: {
+                decryptTask?.cancel()
+                onCreateAccount()
+            }) {
                 Text("Create new account")
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -470,7 +474,10 @@ struct NostrLoginSheet: View {
             .ignoresSafeArea()
         }
         .onAppear { nsecPasteAllowed = true }
-        .onDisappear { nsecPasteAllowed = false }
+        .onDisappear {
+            nsecPasteAllowed = false
+            decryptTask?.cancel()
+        }
     }
 
     private func login() {
@@ -480,13 +487,16 @@ struct NostrLoginSheet: View {
         if isNcryptsec {
             isLoading = true
             let password = ncryptsecPassword
-            Task {
+            decryptTask?.cancel()
+            decryptTask = Task {
                 do {
                     // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
                     // of CPU — keep it off the main actor so the spinner spins.
                     let privkey = try await Task.detached(priority: .userInitiated) {
                         try Nip49.decrypt(trimmed, password: password)
                     }.value
+                    // Dismissed (or superseded) while scrypt ran: don't save or switch accounts.
+                    guard !Task.isCancelled else { return }
                     guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
                         error = "That ncryptsec decrypted to an invalid private key."
                         isLoading = false
@@ -497,9 +507,11 @@ struct NostrLoginSheet: View {
                     isLoading = false
                     onLogin(keypair)
                 } catch Nip49.CryptoError.wrongPassword {
+                    guard !Task.isCancelled else { return }
                     error = "Wrong password for that ncryptsec key."
                     isLoading = false
                 } catch {
+                    guard !Task.isCancelled else { return }
                     self.error = "Couldn't read that ncryptsec key. Check the password and try again."
                     isLoading = false
                 }

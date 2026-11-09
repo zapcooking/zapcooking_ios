@@ -40,6 +40,26 @@ struct Nip49Tests {
         }
     }
 
+    @Test func decryptNormalizesCompatibilityPassword() throws {
+        // Full-width "ｎｏｓｔｒ" NFKC-normalizes to "nostr", so it must open the
+        // spec vector. Fails if normalization is removed from Nip49.decrypt.
+        let ncryptsec = "ncryptsec1qgg9947rlpvqu76pj5ecreduf9jxhselq2nae2kghhvd5g7dgjtcxfqtd67p9m0w57lspw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p"
+        let key = try Nip49.decrypt(ncryptsec, password: "\u{FF4E}\u{FF4F}\u{FF53}\u{FF54}\u{FF52}")
+        #expect(key.map { String(format: "%02x", $0) }.joined()
+            == "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683")
+    }
+
+    @Test func excessiveLogNIsRejectedBeforeScrypt() {
+        // Valid bech32 + checksum with log_n = 22 (4 GiB): must throw, not allocate.
+        var payload = [UInt8](repeating: 0, count: 91)
+        payload[0] = 0x02
+        payload[1] = 22
+        let s = Bech32.encode(hrp: "ncryptsec", data: Data(payload))
+        #expect(throws: Nip49.CryptoError.invalidLogN) {
+            try Nip49.decrypt(s, password: "x")
+        }
+    }
+
     @Test func passwordIsNFKCNormalized() {
         // NIP-49 §Test Data: the decomposed spelling U+212B U+2126 U+1E9B U+0323
         // must NFKC-normalize to the composed U+00C5 U+03A9 U+1E69

@@ -11,6 +11,7 @@ struct LoginView: View {
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
+    @State private var decryptTask: Task<Void, Never>?
     /// The QR scanner and Create a new account, each presented on the
     /// agreement its tap gave (Log In takes its own at the tap). This screen
     /// is the account switcher's entry point, so it gates like the splash
@@ -174,7 +175,10 @@ struct LoginView: View {
         // to jump as the background settles in around them.
         .presentationBackground(Color.wispBackground)
         .onAppear { nsecPasteAllowed = true }
-        .onDisappear { nsecPasteAllowed = false }
+        .onDisappear {
+            nsecPasteAllowed = false
+            decryptTask?.cancel()
+        }
     }
 
     private func handleScanned(_ value: String, acceptance: TermsAcceptance) {
@@ -221,13 +225,16 @@ struct LoginView: View {
 
         if isNcryptsec {
             let password = ncryptsecPassword
-            Task {
+            decryptTask?.cancel()
+            decryptTask = Task {
                 do {
                     // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
                     // of CPU — keep it off the main actor so the spinner spins.
                     let privkey = try await Task.detached(priority: .userInitiated) {
                         try Nip49.decrypt(input, password: password)
                     }.value
+                    // Dismissed (or superseded) while scrypt ran: don't save or switch accounts.
+                    guard !Task.isCancelled else { return }
                     guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
                         error = "That ncryptsec decrypted to an invalid private key."
                         isLoading = false
@@ -238,9 +245,11 @@ struct LoginView: View {
                     isLoading = false
                     onLogin(keypair)
                 } catch Nip49.CryptoError.wrongPassword {
+                    guard !Task.isCancelled else { return }
                     error = "Wrong password for that ncryptsec key."
                     isLoading = false
                 } catch {
+                    guard !Task.isCancelled else { return }
                     self.error = "Couldn't read that ncryptsec key. Check the password and try again."
                     isLoading = false
                 }

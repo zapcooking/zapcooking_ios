@@ -20,6 +20,10 @@ nonisolated enum Nip49 {
         case kdfFailed
     }
 
+    /// Highest supported scrypt work factor: 2^18 · 1 KiB = 256 MiB.
+    /// (Typical NIP-49 keys use log_n 16–20; the spec default is 16.)
+    static let maxLogN = 18
+
     /// Decrypts an `ncryptsec1…` string with its password and returns the
     /// 32-byte private key.
     static func decrypt(_ ncryptsec: String, password: String) throws -> [UInt8] {
@@ -31,7 +35,10 @@ nonisolated enum Nip49 {
         let bytes = [UInt8](data)
         guard bytes[0] == 0x02 else { throw CryptoError.unsupportedVersion }
         let logN = Int(bytes[1])
-        guard (1...22).contains(logN) else { throw CryptoError.invalidLogN }
+        // log_n is unauthenticated input. scrypt needs 128·r·N = 1 KiB · 2^log_n
+        // of working memory, so log_n 22 would ask for 4 GiB before the password
+        // is ever checked. Reject anything past the mobile budget up front.
+        guard (1...maxLogN).contains(logN) else { throw CryptoError.invalidLogN }
         let salt = Array(bytes[2..<18])
         let nonce = Array(bytes[18..<42])
         let keySecurity = bytes[42]
@@ -331,6 +338,6 @@ private extension Array where Element == UInt32 {
 }
 
 @inline(__always)
-private func rotl(_ value: UInt32, _ shift: UInt32) -> UInt32 {
+nonisolated private func rotl(_ value: UInt32, _ shift: UInt32) -> UInt32 {
     (value << shift) | (value >> (32 - shift))
 }
