@@ -35,6 +35,21 @@ struct ComposeToolbarTests {
         )
     }
 
+    /// The per-post Proof of Work override survives a local-draft restore,
+    /// including an override opposite to the Settings default.
+    @Test func powOverrideRoundTripsThroughAutosave() {
+        let kp = freshKeypair()
+        let key = "compose_autosave_new_\(kp.pubkey)"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let first = ComposeViewModel(keypair: kp, mode: .new, suggestedHashtags: [])
+        first.content = "draft with an override"
+        first.powEnabled = !PowPreferences.snapshot().noteEnabled
+        first.writeLocalAutosave()
+        let reopened = ComposeViewModel(keypair: kp, mode: .new, suggestedHashtags: [])
+        #expect(reopened.powEnabled == first.powEnabled)
+    }
+
     // MARK: - The row: core actions inline, the rest behind "…"
 
     @Test func newPostRow_isCoreActionsPlusMore() {
