@@ -244,7 +244,8 @@ final class ComposeViewModel {
         guard !trimmed.isEmpty || !uploaded.isEmpty else { return nil }
         var payload: [String: Any] = [
             "content": content,
-            "explicit": explicit
+            "explicit": explicit,
+            "powEnabled": powEnabled
         ]
         if let ts = scheduleAt?.timeIntervalSince1970 {
             payload["scheduleAt"] = ts
@@ -347,8 +348,8 @@ final class ComposeViewModel {
         attachments = restored
         mentions = restoredMentions
         explicit = payload["explicit"] as? Bool ?? false
-        // An older autosave may carry "powEnabled" from the removed shield;
-        // it is ignored so a restored draft can't mine with no visible control.
+        // The per-post override; an autosave without it keeps the Settings default.
+        if let pow = payload["powEnabled"] as? Bool { powEnabled = pow }
         if let ts = payload["scheduleAt"] as? TimeInterval {
             scheduleAt = Date(timeIntervalSince1970: ts)
         }
@@ -423,6 +424,11 @@ final class ComposeViewModel {
     }
 
     func toggleNsfw() { explicit.toggle() }
+
+    /// Per-compose Proof of Work: seeded from the Settings default
+    /// (`PowPreferences.snapshot().noteEnabled`), toggled here for this post
+    /// only — the difficulty always comes from settings.
+    func togglePow() { powEnabled.toggle() }
     /// Toggle the "Private" reply state. No-op when locked (replying to a
     /// rumor that's already private) — the chain stays encrypted end-to-end.
     func togglePrivate() {
