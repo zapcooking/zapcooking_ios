@@ -49,6 +49,9 @@ struct LazarusSpec062Tests {
         #expect(n("wss://relay.example/a//b///") == "wss://relay.example/a/b")
         #expect(n(" wss://relay.example/path?q=1 ") == "wss://relay.example/path?q=1")
         #expect(n("wss://relay.example/path/") == "wss://relay.example/path")
+        // An encoded `?` in the path is not a query separator.
+        #expect(n("wss://relay.example/relay%3Ftenant%3Da") != n("wss://relay.example/relay?tenant=a"))
+        #expect(n("wss://relay.example/relay%3Ftenant%3Da") == "wss://relay.example/relay%3Ftenant%3Da")
         // Not parseable: compares as written, on both sides.
         #expect(n("not a url") == "not a url")
     }

@@ -162,9 +162,11 @@ final class LazarusRecoveryViewModel {
             guard token == self.generation, !Task.isCancelled else { return }
             // Queries may authenticate only to the user's own relays
             // (spec 0.6.2): the lookup ran without any, the scan gets the
-            // list's read and write relays now.
+            // list's relays now. Without a found list, `write` holds default
+            // stand-ins, which are publish targets but not the user's own.
             if let client = io as? LazarusRelayClient {
-                await client.setQueryAuthRelays(Set(plan.user.read + plan.user.write))
+                let own = plan.user.status == .found ? plan.user.read + plan.user.write : plan.user.read
+                await client.setQueryAuthRelays(Set(own))
             }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: plan.relays)
             let prepared = await Task.detached(priority: .userInitiated) {
