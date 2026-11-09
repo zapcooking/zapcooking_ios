@@ -6,7 +6,7 @@ import AVFoundation
 /// to whole segments: a few seconds more latency, but uninterrupted playback.
 ///
 /// Adapted from tkhumush/nostrTV (MIT License), PR #39.
-enum HLSPlaylistRewriter {
+nonisolated enum HLSPlaylistRewriter {
     private static let schemePrefix = "wisp-"
     /// `#EXT-X-PART` also matches `#EXT-X-PART-INF`.
     private static let lowLatencyTags = ["#EXT-X-PART", "#EXT-X-PRELOAD-HINT", "#EXT-X-RENDITION-REPORT", "#EXT-X-SERVER-CONTROL", "#EXT-X-SKIP"]
@@ -53,7 +53,7 @@ enum HLSPlaylistRewriter {
 
 /// Fetches playlists requested through the loader scheme and hands AVPlayer the
 /// rewritten text. Media segments never pass through here.
-final class HLSPlaylistLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
+nonisolated final class HLSPlaylistLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
     static let shared = HLSPlaylistLoader()
     let queue = DispatchQueue(label: "wisp.hls.playlist-loader")
     private let session: URLSession = {
