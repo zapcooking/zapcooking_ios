@@ -176,6 +176,7 @@ struct LazarusRelayClientTests {
     @Test func answersAuthRequiredWithOneSignedChallengeAndOneReplay() async throws {
         let transport = FakeGroupTransport()
         let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        await client.setQueryAuthRelays([relay])
         async let answer = client.query(relay: relay, filter: filter, timeout: 5)
         let socket = try #require(await eventually { transport.latest })
         let sub = try #require(await eventually { subId(of: socket) })
@@ -191,6 +192,7 @@ struct LazarusRelayClientTests {
     @Test func waitsForTheChallengeThatFollowsAnAuthRequiredRefusal() async throws {
         let transport = FakeGroupTransport()
         let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        await client.setQueryAuthRelays([relay])
         async let answer = client.query(relay: relay, filter: filter, timeout: 5)
         let socket = try #require(await eventually { transport.latest })
         let sub = try #require(await eventually { subId(of: socket) })
@@ -205,6 +207,7 @@ struct LazarusRelayClientTests {
     @Test func failsARequestRefusedAgainAfterItsReplay() async throws {
         let transport = FakeGroupTransport()
         let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        await client.setQueryAuthRelays([relay])
         async let answer = client.query(relay: relay, filter: filter, timeout: 5)
         let socket = try #require(await eventually { transport.latest })
         let sub = try #require(await eventually { subId(of: socket) })
@@ -231,6 +234,7 @@ struct LazarusRelayClientTests {
     @Test func failsAnAuthRequiredRefusalThatNoChallengeFollows() async throws {
         let transport = FakeGroupTransport()
         let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        await client.setQueryAuthRelays([relay])
         async let answer = client.query(relay: relay, filter: filter, timeout: 10)
         let socket = try #require(await eventually { transport.latest })
         let sub = try #require(await eventually { subId(of: socket) })
@@ -239,6 +243,51 @@ struct LazarusRelayClientTests {
         #expect(await answer.outcome == .failed)
         // After the grace, well before the request's own timeout.
         #expect(Date().timeIntervalSince(started) < 5)
+    }
+
+    /// Spec 0.6.2: scans don't authenticate to relays outside the user's
+    /// relay list. Until the scan's lookup names the user's relays, no query
+    /// authenticates, and a refused one fails outright — no challenge grace,
+    /// no signed proof that this account is asking.
+    @Test func aQueryOutsideTheUsersRelayListNeverAuthenticates() async throws {
+        let transport = FakeGroupTransport()
+        let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        async let answer = client.query(relay: relay, filter: filter, timeout: 10)
+        let socket = try #require(await eventually { transport.latest })
+        let sub = try #require(await eventually { subId(of: socket) })
+        socket.feed("[\"AUTH\",\"challenge-6\"]")
+        socket.feed("[\"CLOSED\",\"\(sub)\",\"auth-required: sign in first\"]")
+        let started = Date()
+        #expect(await answer.outcome == .failed)
+        #expect(frames(socket, prefix: "[\"AUTH\"").isEmpty)
+        // Fails outright, without waiting out the challenge grace.
+        #expect(Date().timeIntervalSince(started) < 1)
+        // And allowlisting the relay after the fact lets a later query sign in.
+        await client.setQueryAuthRelays([relay])
+        async let second = client.query(relay: relay, filter: filter, timeout: 10)
+        let sub2 = try #require(await eventually { subId(of: socket, index: 1) })
+        socket.feed("[\"AUTH\",\"challenge-7\"]")
+        socket.feed("[\"CLOSED\",\"\(sub2)\",\"auth-required: sign in first\"]")
+        try #require(await waitUntil { socket.reqCount(subId: sub2) == 2 })
+        socket.feed("[\"EOSE\",\"\(sub2)\"]")
+        #expect(await second.outcome == .answered)
+    }
+
+    /// Publishes are the user's explicit action: they authenticate to the
+    /// write relay even when the query allowlist hasn't been set.
+    @Test func aPublishAuthenticatesRegardlessOfTheQueryList() async throws {
+        let transport = FakeGroupTransport()
+        let client = LazarusRelayClient(transport: transport, authSigner: try signer())
+        let keypair = try LazarusFixture.keypair()
+        let event = try LazarusFixture.signed(keypair, kind: 3, createdAt: 1000, tags: [["p", "a"]])
+        async let outcome = client.publish(event: event, relay: relay, timeout: 5)
+        let socket = try #require(await eventually { transport.latest })
+        try #require(await waitUntil { frames(socket, prefix: "[\"EVENT\"").count == 1 })
+        socket.feed("[\"AUTH\",\"challenge-8\"]")
+        socket.feed("[\"OK\",\"\(event.id)\",false,\"auth-required: members only\"]")
+        try #require(await waitUntil { frames(socket, prefix: "[\"EVENT\"").count == 2 })
+        socket.feed("[\"OK\",\"\(event.id)\",true,\"\"]")
+        #expect(await outcome == .accepted)
     }
 
     // MARK: - Publish
