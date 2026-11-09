@@ -120,7 +120,7 @@ final class LiveStreamViewModel: EmojiComposing {
         let aTag = aTagValue
         consumerTasks.append(Task {
             for await (event, _) in chat.events {
-                await MainActor.run { LiveStreamRepository.shared.addChatMessage(event) }
+                await MainActor.run { _ = LiveStreamRepository.shared.addChatMessage(event) }
             }
         })
         consumerTasks.append(Task {
