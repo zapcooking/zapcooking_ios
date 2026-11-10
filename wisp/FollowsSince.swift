@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The `since` the Follows feed sends with a load (#188). Pure, so the
 /// decision can be tested without a view model or a socket.
@@ -92,28 +93,56 @@ nonisolated enum FollowsSyncCursor {
 ///
 /// Nothing is recorded if the follow list changed while the load ran: its
 /// REQs named the old authors.
+///
+/// Each load writes one log line (`FollowsLoadReport`), at whichever comes
+/// first: it settles, or it ends unsettled (`end()`: replaced by the next
+/// load, the feed switched away, or the view model stopped).
 nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Sendable {
     private let pubkey: String
     private let askedRelays: Set<String>
     private let followListStamp: Int
     private let now: @Sendable () -> Int
     private let defaults: UserDefaults
+    private let uptime: @Sendable () -> TimeInterval
+    private let startedAt: TimeInterval
+    private let report: @Sendable (String) -> Void
 
     private let lock = NSLock()
     private var answeredRelays: Set<String> = []
     private var newest: Int?
     private var settled = false
+    private var reported = false
 
     /// `askedRelays` are the socket URLs the load was sent to, as the
     /// connection pool reports them (`RelayPool.wsURL(_:)?.absoluteString`).
     init(pubkey: String, askedRelays: Set<String>,
          now: @escaping @Sendable () -> Int = { Int(Date().timeIntervalSince1970) },
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard,
+         uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         report: @escaping @Sendable (String) -> Void = FollowsLoadReport.log) {
         self.pubkey = pubkey
         self.askedRelays = askedRelays
         self.followListStamp = FollowsCache.shared.storedCreatedAt(for: pubkey)
         self.now = now
         self.defaults = defaults
+        self.uptime = uptime
+        self.startedAt = uptime()
+        self.report = report
+    }
+
+    /// The load is over without having settled (replaced, feed switched,
+    /// view model stopped). Writes its log line unless settling already did.
+    func end() {
+        lock.lock()
+        guard !reported else {
+            lock.unlock()
+            return
+        }
+        reported = true
+        let answered = answeredRelays.count
+        lock.unlock()
+        report(FollowsLoadReport.line(asked: askedRelays.count, answered: answered,
+                                      settledAfter: nil))
     }
 
     func delivered(_ event: NostrEvent, from relayUrl: String) {
@@ -135,10 +164,34 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
         }
         settled = true
         let newest = self.newest
+        let firstReport = !reported
+        reported = true
         lock.unlock()
+
+        if firstReport {
+            report(FollowsLoadReport.line(asked: askedRelays.count, answered: askedRelays.count,
+                                          settledAfter: uptime() - startedAt))
+        }
 
         guard let newest,
               FollowsCache.shared.storedCreatedAt(for: pubkey) == followListStamp else { return }
         FollowsSyncCursor.record(newest, pubkey: pubkey, now: now(), defaults: defaults)
+    }
+}
+
+/// The one log line per Follows load: how many relays it asked, how many
+/// ended their backlog, whether that was all of them, and how long it took.
+/// Counts and a duration only; no relay URLs, authors or account.
+nonisolated enum FollowsLoadReport {
+    static let logger = Logger(subsystem: "wisp", category: "follows-sync")
+
+    static func line(asked: Int, answered: Int, settledAfter: TimeInterval?) -> String {
+        let seconds = settledAfter.map { String(format: "%.1f", max(0, $0)) } ?? "-"
+        return "Follows load: relays asked \(asked), answered \(answered), "
+            + "settled \(settledAfter == nil ? "no" : "yes"), seconds to settle \(seconds)"
+    }
+
+    static func log(_ line: String) {
+        logger.notice("\(line, privacy: .public)")
     }
 }

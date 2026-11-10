@@ -150,6 +150,8 @@ final class FeedViewModel {
     /// Follows list.
     @ObservationIgnored private(set) var didStart = false
     @ObservationIgnored private var liveSubscription: RelaySubscription?
+    /// The running Follows load, ended (and logged) when it is replaced.
+    @ObservationIgnored private var followsLoad: FollowsLoadSettle?
     @ObservationIgnored private var liveConsumer: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var firstEventDeadline: Task<Void, Never>?
@@ -762,6 +764,8 @@ final class FeedViewModel {
     }
 
     private func cancelLiveSubscription() {
+        followsLoad?.end()
+        followsLoad = nil
         liveSubscription?.cancel()
         liveSubscription = nil
         liveConsumer?.cancel()
@@ -1351,6 +1355,7 @@ final class FeedViewModel {
         )
         let sub = services.openFollowsSubscription(queries, subId, settle)
         liveSubscription = sub
+        followsLoad = settle
 
         liveConsumer = Task { [weak self] in
             for await (event, _) in sub.events {
