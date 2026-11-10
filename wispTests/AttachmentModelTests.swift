@@ -326,7 +326,7 @@ struct AttachmentModelTests {
 
     // MARK: - Paste-attach offers
 
-    @Test func candidates_offerEveryUrlOnAUrlOnlyLine_duplicatesIncluded() {
+    @Test func candidates_offerEveryMediaUrlOnAUrlOnlyLine_duplicatesIncluded() {
         let candidates = AttachmentModel.attachableUrlCandidates(
             "https://x/a.jpg\nhttps://x/b.jpg https://x/a.jpg"
         )
@@ -400,6 +400,50 @@ struct AttachmentModelTests {
     }
 
     // MARK: - attachUrl (VM): consume occurrence, add slot, guard double-tap
+
+    @Test func normalLinks_stayAsText_evenWhenAttachIsCalledDirectly() {
+        let links = [
+            "https://zap.cooking/recipes/soup",
+            "https://example.com/page?image=photo.jpg",
+            "https://example.com/page#video.mp4",
+            "https://photo.jpg",
+            "https://example.com/file.pdf",
+            "https://example.com/audio.mp3",
+            "https://image.nostr.build/about",
+            "https://example.com/photo.jpg.html",
+        ]
+        let vm = composer()
+        let text = links.joined(separator: "\n")
+        vm.updateContent(text)
+        #expect(vm.attachOffers.isEmpty)
+        for link in links { vm.attachUrl(link) }
+        #expect(vm.attachments.isEmpty)
+        #expect(vm.content == text)
+        #expect(vm.previewContent == text)
+    }
+
+    @Test func candidates_mediaPathsSupportQueriesFragmentsAndCase() {
+        let links = [
+            "https://example.com/photo.JPG?width=800#preview",
+            "https://example.com/photo.heic",
+            "https://example.com/animation.gif",
+            "https://example.com/video.MP4?token=abc",
+            "http://example.com/video.mov#preview",
+            "https://example.com/video.webm",
+            "https://example.com/live.m3u8",
+        ]
+        #expect(AttachmentModel.attachableUrlCandidates(links.joined(separator: "\n")) == links)
+    }
+
+    @Test func attachUrl_mixedLine_preservesNormalLink() {
+        let vm = composer()
+        vm.updateContent("https://example.com/recipe https://x/a.jpg")
+        #expect(vm.attachOffers == ["https://x/a.jpg"])
+        vm.attachUrl("https://x/a.jpg")
+        #expect(vm.content == "https://example.com/recipe")
+        #expect(vm.attachments.map(\.url) == ["https://x/a.jpg"])
+        #expect(vm.attachOffers.isEmpty)
+    }
 
     @Test func attachUrl_consumesOccurrence_addsSlot() {
         let vm = composer()
