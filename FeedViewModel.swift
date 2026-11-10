@@ -234,6 +234,12 @@ final class FeedViewModel {
         var bootstrapRelaySets: @MainActor (Keypair) async -> Void
         var pruneEventStore: @MainActor (_ protectedPubkey: String) async -> Void
         var queryIndexers: @MainActor (NostrFilter) async -> [NostrEvent]
+        /// Opens the Follows feed's persistent subscription (`loadFeed`).
+        /// Injectable so `FollowsSinceTests` can read the `since` a load
+        /// sends without a socket (#188).
+        var openFollowsSubscription: @MainActor (
+            _ queries: [RelayQuery], _ id: String, _ observer: RelayBacklogObserver?
+        ) -> RelaySubscription
 
         static var live: StartupServices {
             StartupServices(
@@ -244,6 +250,9 @@ final class FeedViewModel {
                 pruneEventStore: { await EventStore.shared.prune(protectedPubkey: $0) },
                 queryIndexers: {
                     await RelayPool.query(relays: FeedViewModel.indexerRelays, filter: $0, waitForAllRelays: true)
+                },
+                openFollowsSubscription: { queries, id, observer in
+                    RelayPool.subscribe(queries: queries, id: id, observer: observer)
                 }
             )
         }
@@ -472,7 +481,8 @@ final class FeedViewModel {
         // freshly-published intro note, `since` would clamp to "intro_ts - 5m"
         // and hide every older note from follows on the first feed load.
         let newestStored = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
-        let since = calculateSince(newestStored: newestStored, followCount: follows.count)
+        let since = FollowsSince.coldStart(anchor: newestStored, followCount: follows.count,
+                                           now: Int(Date().timeIntervalSince1970))
 
         // 3. Open relay sockets immediately, then fetch profiles concurrently.
         //    loadFeed fires tasks and returns — no need to gate it on profile fetch.
@@ -504,12 +514,16 @@ final class FeedViewModel {
         let follows = FollowsCache.shared.follows(for: keypair.pubkey)
         let scoreBoard = RelayScoreBoard.load(pubkey: keypair.pubkey)
 
-        let since: Int?
-        if let newest = events.first {
-            since = newest.createdAt - 60
-        } else {
-            since = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
+        var anchor: Int?
+        if events.isEmpty {
+            anchor = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
         }
+        let since = FollowsSince.refresh(
+            listNewest: events.first?.createdAt,
+            anchor: anchor,
+            followCount: follows.count,
+            now: Int(Date().timeIntervalSince1970)
+        )
 
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
         MissingProfileWatcher.shared.observe(events)
@@ -1225,30 +1239,6 @@ final class FeedViewModel {
         }
     }
 
-    // MARK: - Since Calculation
-
-    private func calculateSince(newestStored: Int?, followCount: Int) -> Int? {
-        let now = Int(Date().timeIntervalSince1970)
-
-        let defaultWindow: Int
-        switch followCount {
-        case ...10:  defaultWindow = 7 * 24 * 3600
-        case ...30:  defaultWindow = 5 * 24 * 3600
-        case ...75:  defaultWindow = 3 * 24 * 3600
-        case ...150: defaultWindow = 2 * 24 * 3600
-        case ...300: defaultWindow = 36 * 3600
-        default:     defaultWindow = 24 * 3600
-        }
-
-        let defaultSince = now - defaultWindow
-
-        if let stored = newestStored, stored > 0 {
-            return max(stored - 5 * 60, defaultSince)
-        }
-
-        return defaultSince
-    }
-
     // MARK: - Private
 
     private func loadUserProfile() async {
@@ -1364,7 +1354,7 @@ final class FeedViewModel {
         //    after EOSE — matches Android's SharedFlow behavior.
         cancelLiveSubscription()
         let subId = "follows-feed-\(UUID().uuidString.prefix(8).lowercased())"
-        let sub = RelayPool.subscribe(queries: queries, id: subId)
+        let sub = services.openFollowsSubscription(queries, subId, nil)
         liveSubscription = sub
 
         liveConsumer = Task { [weak self] in

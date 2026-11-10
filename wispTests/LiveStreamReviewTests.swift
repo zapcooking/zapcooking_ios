@@ -88,7 +88,8 @@ struct LiveStreamReviewTests {
             unregisterSweepSource: { _ in },
             bootstrapRelaySets: { _ in },
             pruneEventStore: { _ in },
-            queryIndexers: { _ in [] }
+            queryIndexers: { _ in [] },
+            openFollowsSubscription: { _, id, _ in RelaySubscription(id: id) }
         )
         let kp = Keypair(privkey: String(repeating: "1", count: 64), pubkey: Self.host)
         return (FeedViewModel(keypair: kp, services: services), { calls.discovery })

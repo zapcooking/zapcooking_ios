@@ -228,7 +228,12 @@ enum RelayPool {
     /// Persistent outbox-routed subscription: one multi-filter REQ per relay (so a
     /// relay with >200 routed authors gets one connection and one REQ). The home
     /// feed uses this.
-    static func subscribe(queries: [RelayQuery], id: String) -> RelaySubscription {
+    ///
+    /// `observer` hears this subscription's deliveries and backlog ends
+    /// (`RelayBacklogObserver`). The Follows feed uses it to know when a
+    /// load has settled (#188).
+    static func subscribe(queries: [RelayQuery], id: String,
+                          observer: RelayBacklogObserver? = nil) -> RelaySubscription {
         let sub = RelaySubscription(id: id)
         var relayReqs: [(url: URL, req: String)] = []
         for query in queries {
@@ -236,9 +241,14 @@ enum RelayPool {
             let joined = query.filters.map { $0.toJSON() }.joined(separator: ",")
             relayReqs.append((url, "[\"REQ\",\"\(id)\",\(joined)]"))
         }
-        let sink = RelaySink(onEvent: { [weak sub] event, relay in
-            sub?.deliver(event: event, relayUrl: relay)
-        })
+        let sink = RelaySink(
+            onEvent: { [weak sub] event, relay in
+                observer?.delivered(event, from: relay)
+                sub?.deliver(event: event, relayUrl: relay)
+            },
+            onEose: { relay in observer?.answered(relayUrl: relay) },
+            onClosed: { relay, _ in observer?.answered(relayUrl: relay) }
+        )
         Task { await RelayConnectionPool.shared.register(subId: id, relays: relayReqs, sink: sink) }
         return sub
     }
@@ -358,6 +368,18 @@ struct RelayQuery: Sendable {
         self.relayUrl = relayUrl
         self.filters = [filter]
     }
+}
+
+/// Hears one persistent subscription from the relays' receive loops: off the
+/// main actor, synchronously, and in wire order per relay, so every event a
+/// relay sent before its `EOSE` is reported before that relay's `answered`.
+nonisolated protocol RelayBacklogObserver: Sendable {
+    /// Every event a relay sent for the subscription, duplicates included.
+    func delivered(_ event: NostrEvent, from relayUrl: String)
+    /// The relay ended the backlog: `EOSE`, or a `CLOSED` that ended the
+    /// request. May repeat (a reconnect re-issues the REQ). A relay that
+    /// never connects never answers.
+    func answered(relayUrl: String)
 }
 
 // MARK: - RelaySubscription
