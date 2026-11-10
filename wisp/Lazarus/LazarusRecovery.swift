@@ -217,7 +217,7 @@ nonisolated enum Lazarus {
               let scheme = url.scheme?.lowercased(), !scheme.isEmpty,
               let host = url.host?.lowercased(), !host.isEmpty else { return value }
         // Percent-encoded, so `%3F` stays distinct from a literal `?`.
-        var path = url.percentEncodedPath
+        var path = URLComponents(url: url, resolvingAgainstBaseURL: true)?.percentEncodedPath ?? ""
         while path.contains("//") { path = path.replacingOccurrences(of: "//", with: "/") }
         while path.hasSuffix("/") { path.removeLast() }
         let defaultPort: Int?
