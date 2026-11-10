@@ -11,7 +11,7 @@ struct GifSearchTests {
     // MARK: - Fixtures
 
     private func preview(animated: Any?, still: Any?) -> [String: Any] {
-        ["width": 240, "height": 135, "animated": animated, "still": still]
+        ["width": 240, "height": 135, "animated": animated as Any, "still": still as Any]
     }
 
     private func item(overrides: [String: Any?] = [:]) -> [String: Any?] {
@@ -98,6 +98,8 @@ struct GifSearchTests {
             item(overrides: ["format": "mp4"]),
             item(overrides: ["width": 0]),
             item(overrides: ["height": "tall"]),
+            item(overrides: ["width": "inf"]),
+            item(overrides: ["height": "nan"]),
             item(overrides: ["previews": nil]),
             item(overrides: ["previews": ["w240": preview(animated: "http://p/x.webp", still: nil)] as [String: Any]]),
             nil,
@@ -156,7 +158,7 @@ struct GifSearchTests {
         let body: [String: Any] = [
             "terms": [
                 ["term": " gm "], ["term": "gm"], ["term": ""],
-                ["nope": 1], Optional<Any>.none,
+                ["nope": 1], Optional<Any>.none as Any,
                 ["term": "gn"], ["term": "good"], ["term": "great"],
                 ["term": "gg"], ["term": "go"], ["term": "gl"],
             ] as [Any],

@@ -15,7 +15,7 @@ import UIKit
 /// so picking a GIF attaches its URL and nothing is uploaded. The URL goes
 /// into a published note, so results that cannot be published as-is (http
 /// links, mp4 renditions, unknown shapes) are dropped rather than shown.
-enum GifSearch {
+nonisolated enum GifSearch {
     static let apiBase = URL(string: "https://gifs.nostr.build/api/v1")!
 
     static let pageSize = 24
@@ -168,14 +168,15 @@ enum GifSearch {
     }
 
     /// Numbers come back as NSNumber but junk as strings/bools/null; only a
-    /// real number (or a string holding one) has a width to lay out with.
+    /// real, finite number (or a string holding one) has a width to lay out with.
     static func toNumber(_ value: Any?) -> Double? {
         switch value {
         case let n as NSNumber:
             if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
-            return n.doubleValue
+            return n.doubleValue.isFinite ? n.doubleValue : nil
         case let s as String:
-            return Double(s)
+            // `Double("inf")` and `Double("nan")` parse; neither is a size.
+            return Double(s).flatMap { $0.isFinite ? $0 : nil }
         default:
             return nil
         }
@@ -183,7 +184,7 @@ enum GifSearch {
 }
 
 /// One publishable search result, deduplicated by `url`.
-struct Gif: Hashable, Identifiable {
+nonisolated struct Gif: Hashable, Identifiable {
     let url: String
     /// The w240 (or medium) preview URL the grid shows.
     let preview: String
@@ -200,7 +201,7 @@ struct Gif: Hashable, Identifiable {
     var previewURL: URL? { URL(string: preview) }
 }
 
-struct GifPage {
+nonisolated struct GifPage {
     let gifs: [Gif]
     let next: Int?
 }
@@ -210,7 +211,7 @@ struct GifPage {
 /// `.example` sibling and paste the key of the registered "zapcooking-ios"
 /// client from the gifs.nostr.build dashboard). Empty when unconfigured: the
 /// picker still opens and maps the API's 401/403 to "search isn't available".
-enum GifsNostrBuildConfig {
+nonisolated enum GifsNostrBuildConfig {
     static let apiKey: String = {
         guard let url = Bundle.main.url(forResource: "gifs-nostr-build-api-key", withExtension: "txt"),
               let raw = try? String(contentsOf: url, encoding: .utf8) else { return "" }
@@ -242,11 +243,21 @@ protocol GifSearchClient {
 /// `GifSearchError.failed` carrying `GifSearch.errorMessage` so the picker
 /// never shows a raw HTTP code.
 struct GifsNostrBuildClient: GifSearchClient {
-    var session: URLSession = {
+    /// One session for every client. `GifPickerView` holds its model in
+    /// `@State`, whose default is rebuilt on every init of the view even
+    /// though only the first is kept — a session per client would leave a
+    /// never-invalidated URLSession behind each time.
+    nonisolated static let sharedSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         return URLSession(configuration: config)
     }()
+
+    let session: URLSession
+
+    nonisolated init(session: URLSession? = nil) {
+        self.session = session ?? Self.sharedSession
+    }
 
     func search(query: String, offset: Int = 0) async throws -> GifPage {
         guard let url = GifSearch.searchURL(query: query, offset: offset) else {
