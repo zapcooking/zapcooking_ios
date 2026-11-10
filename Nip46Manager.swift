@@ -27,6 +27,9 @@ final class Nip46Manager {
     /// In-flight restore, so concurrent `client(for:)` callers (a feed load
     /// firing several signs at once on cold launch) share one set of sockets.
     private var restoreTask: (pubkey: String, task: Task<Nip46Client?, Never>)?
+    /// Bumped by clearActive / a newer restore; an in-flight restore whose
+    /// captured generation no longer matches must not install its client.
+    private var restoreGeneration = 0
 
     /// The live client for `pubkey`, restoring its saved session if needed.
     /// Returns nil when the account has no saved session.
@@ -54,13 +57,24 @@ final class Nip46Manager {
               let priv = Hex.decode(session.appPrivkeyHex), priv.count == 32 else {
             return false
         }
+        // Generation guard: an external clearActive() (logout) or a newer
+        // restore invalidates this one mid-flight, so its client is closed
+        // instead of being installed over the newer state.
+        restoreGeneration += 1
+        let generation = restoreGeneration
         let task = Task<Nip46Client?, Never> { @MainActor in
-            await self.clearActive()
+            if let old = activeClient { await old.close() }
+            activeClient = nil
+            activeSession = nil
             let client = Self.makeClient(appPriv: priv, appPubkey: session.appPubkey,
                                          signerPubkey: session.signerPubkey, relays: session.relays)
             await client.startListening()
-            self.activeClient = client
-            self.activeSession = session
+            guard restoreGeneration == generation else {
+                await client.close()
+                return nil
+            }
+            activeClient = client
+            activeSession = session
             return client
         }
         restoreTask = (pubkey, task)
@@ -110,6 +124,7 @@ final class Nip46Manager {
     /// Tear down the active session (e.g. on logout). Does NOT delete the
     /// persisted session — call `Nip46SessionStore.delete(pubkey:)` for that.
     func clearActive() async {
+        restoreGeneration += 1
         restoreTask = nil
         if let client = activeClient { await client.close() }
         activeClient = nil
@@ -279,6 +294,14 @@ final class Nip46Manager {
     /// Wait for the signer to scan the URI and respond. Returns the user's
     /// pubkey on success and installs the client + persists the session.
     func awaitNostrConnectHandshake(_ pending: NostrConnectPending) async throws -> String {
+        // "Open signer app" backgrounds us while the human approves. The
+        // per-request assertion in Nip46Client doesn't cover the initial
+        // connect response (it arrives on raw handshake sockets), so hold
+        // one for the whole handshake or iOS suspends us mid-approval and
+        // the ephemeral response is lost.
+        await Nip46BackgroundAssertion.begin()
+        defer { Task { await Nip46BackgroundAssertion.end() } }
+
         // Tear down any prior session before opening fresh sockets — see
         // `connectBunker` for the rationale (orphaned per-relay loops eat
         // the connection budget and the next handshake silently times out).
@@ -314,6 +337,12 @@ final class Nip46Manager {
             bunkerURI: Nip46.buildBunkerURI(signerPubkey: signerPubkey, relays: relays),
             createdAt: Int(Date().timeIntervalSince1970)
         )
+        // A dismissed login sheet cancels its task. An abandoned handshake
+        // must neither persist a session nor install its client.
+        do { try Task.checkCancellation() } catch {
+            await client.close()
+            throw error
+        }
         Nip46SessionStore.save(session)
         self.activeClient = client
         self.activeSession = session

@@ -172,7 +172,12 @@ final class NoteListRepository {
     // MARK: - Ingest
 
     private func ingest(_ event: NostrEvent, keypair: Keypair, persist: Bool) async {
+        // The parse below can await a remote-signer decrypt; another account
+        // bootstrapping meanwhile swaps `loadedFor`. Re-check after the await
+        // so a stale ingest never mutates the wrong account's lists.
+        let bootstrappedFor = loadedFor
         guard let parsed = await Nip51UserLists.parseNoteList(event, keypair: keypair) else { return }
+        guard loadedFor == bootstrappedFor, event.pubkey == loadedFor else { return }
         if let existingTs = listUpdatedAt[parsed.dTag], event.createdAt <= existingTs {
             return
         }

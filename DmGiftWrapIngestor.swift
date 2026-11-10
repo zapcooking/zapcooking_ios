@@ -66,6 +66,11 @@ enum DmGiftWrapIngestor {
     /// Transport-level failures deserve the bounded retry; everything the
     /// signer itself refused will reproduce identically on every attempt.
     private static func isTransientDecryptFailure(_ error: Error) -> Bool {
+        // Nip17.unwrapGiftWrapWithSigner wraps both decrypt RPC errors in
+        // Nip17.Error.decryptFailed; look through it at the cause.
+        if case Nip17.Error.decryptFailed(let underlying?) = error {
+            return isTransientDecryptFailure(underlying)
+        }
         guard let e = error as? Nip46.NipError else { return false }
         switch e {
         case .timeout, .notConnected, .relaysUnreachable:

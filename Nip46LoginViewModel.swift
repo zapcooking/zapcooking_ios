@@ -51,6 +51,7 @@ final class Nip46LoginViewModel {
 
     private var pendingHandshake: Nip46Manager.NostrConnectPending?
     private var handshakeTask: Task<Void, Never>?
+    private var bunkerLoginTask: Task<Void, Never>?
 
     init(acceptance: TermsAcceptance, initialBunkerURI: String? = nil) {
         self.acceptance = acceptance
@@ -75,19 +76,33 @@ final class Nip46LoginViewModel {
     /// Submit the pasted bunker URI. Triggers `connect` + `get_public_key`
     /// against the signer; on success, persists the session, marks the
     /// active account as remote, and sets `status = .connected(pubkey:)`.
-    func submitBunker() async {
+    func submitBunker() {
         let trimmed = bunkerURIInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if let problem = Self.bunkerInputProblem(trimmed) {
             status = .error(problem)
             return
         }
+        bunkerLoginTask = Task { await runBunkerLogin(trimmed) }
+    }
+
+    private func runBunkerLogin(_ trimmed: String) async {
         status = .connecting("Approve the connection in your signer app…")
         do {
             let keypair = try await Self.logIn(bunkerURI: trimmed, acceptance: acceptance)
             status = .connected(pubkey: keypair.pubkey)
+        } catch is CancellationError {
+            // The sheet was dismissed mid-handshake; nothing to report.
+            status = .idle
         } catch {
             status = .error(Self.message(for: error))
         }
+    }
+
+    /// The sheet was dismissed: stop an in-flight bunker handshake so a
+    /// later signer approval can't save an abandoned login.
+    func cancelBunkerLogin() {
+        bunkerLoginTask?.cancel()
+        bunkerLoginTask = nil
     }
 
     // MARK: - Nostrconnect

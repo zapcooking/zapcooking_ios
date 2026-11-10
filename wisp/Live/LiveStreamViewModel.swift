@@ -256,10 +256,17 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Sign + publish a kind-1311 chat message. Optimistic — clears the input and adds the
     /// message to the local repo immediately, then publishes in a detached background task
     /// so the UI never blocks on slow/dead relays.
+    private(set) var isSending = false
+
     func sendMessage() async {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard Signer.canSign(keypair) else { return }
+        // One in-flight send: a remote signer can take seconds to approve,
+        // and re-taps would request duplicate signatures for the same draft.
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
 
         var tags: [[String]] = [
             ["a", aTagValue, chatRelays.first ?? ""],

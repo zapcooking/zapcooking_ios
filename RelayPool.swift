@@ -217,8 +217,11 @@ enum RelayPool {
     /// delivery; the connection pool re-issues the REQ automatically on reconnect
     /// and after NIP-42 AUTH. Cancel via `RelaySubscription.cancel()`.
     static func subscribe(relays: [String], filter: NostrFilter, id: String,
-                          bypassConnectionCap: Bool = false) -> RelaySubscription {
-        subscribe(relays: relays, filters: [filter], id: id, bypassConnectionCap: bypassConnectionCap)
+                          bypassConnectionCap: Bool = false,
+                          dedupeBeforeYield: Bool = true) -> RelaySubscription {
+        subscribe(relays: relays, filters: [filter], id: id,
+                  bypassConnectionCap: bypassConnectionCap,
+                  dedupeBeforeYield: dedupeBeforeYield)
     }
 
     /// Multi-filter variant: one REQ per relay carrying every filter, which
@@ -227,8 +230,9 @@ enum RelayPool {
     /// scope) — combining both tag filters into one filter would AND them and
     /// match nothing but top-level comments.
     static func subscribe(relays: [String], filters: [NostrFilter], id: String,
-                          bypassConnectionCap: Bool = false) -> RelaySubscription {
-        let sub = RelaySubscription(id: id)
+                          bypassConnectionCap: Bool = false,
+                          dedupeBeforeYield: Bool = true) -> RelaySubscription {
+        let sub = RelaySubscription(id: id, dedupeBeforeYield: dedupeBeforeYield)
         let joined = filters.map { $0.toJSON() }.joined(separator: ",")
         let reqFrame = "[\"REQ\",\"\(id)\",\(joined)]"
         sub.setREQ(reqFrame)
@@ -390,8 +394,13 @@ final class RelaySubscription: @unchecked Sendable {
     private var seen = Set<String>()
     private var reqText = ""
     private var cancelled = false
+    /// When false, ids are recorded only AFTER yielding, so a consumer that
+    /// skips an event (DmGiftWrapIngestor budget/cooldown) sees it again on
+    /// the next REQ; its own seen/refused sets own the retry decision.
+    private let dedupeBeforeYield: Bool
 
-    init(id: String) {
+    init(id: String, dedupeBeforeYield: Bool = true) {
+        self.dedupeBeforeYield = dedupeBeforeYield
         self.id = id
         var cont: AsyncStream<(event: NostrEvent, relayUrl: String)>.Continuation!
         self.events = AsyncStream { c in cont = c }
@@ -409,10 +418,17 @@ final class RelaySubscription: @unchecked Sendable {
     /// pool's receive loop can call it directly without spawning a task per event.
     func deliver(event: NostrEvent, relayUrl: String) {
         lock.lock()
-        let isNew = seen.insert(event.id).inserted
+        let isNew = dedupeBeforeYield ? seen.insert(event.id).inserted : true
         let live = !cancelled
         lock.unlock()
-        if isNew && live { continuation.yield((event, relayUrl)) }
+        if !live { return }
+        if isNew || !dedupeBeforeYield {
+            continuation.yield((event, relayUrl))
+            if !dedupeBeforeYield {
+                // Record after yield (see dedupeBeforeYield).
+                lock.lock(); seen.insert(event.id); lock.unlock()
+            }
+        }
     }
 
     /// Re-broadcast the REQ on every live socket — defeats silent server-side
@@ -692,12 +708,15 @@ actor RelayConn {
                 // challenging after we authed, replaying the REQs is the right
                 // response; signing again would only flood the signer.
                 if didAuthThisConnection {
-                    await reissueAfterAuth(on: socket)
+                    // REQs were already replayed when the first AUTH landed;
+                    // re-replaying on every later challenge is a feedback
+                    // loop on relays that challenge per REQ.
                     continue
                 }
                 // Rate limit: at most one AUTH sign per relay per interval.
+                // Keep only stamps INSIDE the window; a recent sign blocks.
                 authSignTimes = authSignTimes.filter {
-                    Date().timeIntervalSince($0) > Self.authSignMinInterval
+                    Date().timeIntervalSince($0) <= Self.authSignMinInterval
                 }
                 guard authSignTimes.isEmpty else { continue }
                 authSignTimes.append(Date())

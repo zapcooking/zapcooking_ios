@@ -20,6 +20,7 @@ struct Nip46LoginView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var vm: Nip46LoginViewModel
     @State private var copiedAcknowledgement = false
+    @State private var submitTask: Task<Void, Never>?
     /// Set when no installed app claims the `nostrconnect://` scheme.
     @State private var signerAppHint: String?
 
@@ -78,6 +79,10 @@ struct Nip46LoginView: View {
             }
             .background(Color.wispBackground)
             .navigationTitle("Sign in")
+            .onDisappear {
+                vm.cancelBunkerLogin()
+                vm.cancelPendingHandshake()
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -157,7 +162,7 @@ struct Nip46LoginView: View {
                 Spacer()
 
                 Button {
-                    Task { await vm.submitBunker() }
+                    vm.submitBunker()
                 } label: {
                     if vm.isWorking {
                         ProgressView()

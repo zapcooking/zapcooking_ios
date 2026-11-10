@@ -254,6 +254,10 @@ final class MuteRepository {
         guard event.kind == Nip51Mute.kindMuteList,
               event.pubkey == activePubkey,
               event.createdAt > lastUpdatedAt else { return }
+        // The decrypt below can await a remote signer for seconds; `bind` may
+        // swap accounts underneath it. Re-check after the await so an
+        // old-account list never lands in the new account's state.
+        let requestPubkey = activePubkey
 
         let parsed: Nip51Mute.Lists
         do {
@@ -266,9 +270,10 @@ final class MuteRepository {
             if keypair.isRemote { return }
             parsed = Nip51Mute.parsePublicTags(event: event)
         }
-        // Re-check after the (possibly slow, remote) decrypt: a newer event or
-        // a local edit may have landed meanwhile.
-        guard event.createdAt > lastUpdatedAt else { return }
+        // Re-check after the (possibly slow, remote) decrypt: a newer event,
+        // a local edit, or an account switch may have landed meanwhile.
+        guard event.pubkey == requestPubkey, requestPubkey == activePubkey,
+              event.createdAt > lastUpdatedAt else { return }
 
         await apply(parsed, updatedAt: event.createdAt)
     }

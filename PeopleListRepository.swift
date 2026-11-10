@@ -171,7 +171,10 @@ final class PeopleListRepository {
     // MARK: - Ingest
 
     private func ingest(_ event: NostrEvent, keypair: Keypair, persist: Bool) async {
+        // Same account-switch re-check as NoteListRepository (see above).
+        let bootstrappedFor = loadedFor
         guard let parsed = await Nip51UserLists.parsePeopleList(event, keypair: keypair) else { return }
+        guard loadedFor == bootstrappedFor, event.pubkey == loadedFor else { return }
         if let existingTs = listUpdatedAt[parsed.dTag], event.createdAt <= existingTs {
             return
         }

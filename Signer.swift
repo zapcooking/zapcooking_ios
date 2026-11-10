@@ -57,6 +57,7 @@ enum Signer {
             // or whose signature doesn't verify.
             guard event.pubkey.lowercased() == keypair.pubkey.lowercased(),
                   event.kind == kind,
+                  event.createdAt == createdAt,
                   event.content == content,
                   event.tags == tags,
                   event.hasValidSignature() else {
