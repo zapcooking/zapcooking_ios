@@ -569,6 +569,8 @@ Gate 0-G is moot.
 - `profiles`: `purplepag.es`
 - `articles` (**recipes**): `relay.primal.net`, `nos.lol`, `nostr.wine`,
   `eden.nostr.land`, `relay.noswhere.com`
+- `feed` (**Fresh**): `wss://feed.zap.cooking` — read-only, curated, its own
+  socket, never authenticated. See "Fresh feed relay" below.
 
 **Recipes live on the public article relays, not on Pantry.** Adding Pantry as
 the members relay is correct; replacing the aggregators breaks recipe loading.
@@ -604,6 +606,140 @@ not evidence. For *origination* — the sign-up fallback path — the fallback
 set is run through the same kind-20242 write probe RelayProber uses and only
 passers are published (`RelayProber.probedFallback`), so no constant is ever
 signed into a public relay list unprobed.
+
+### Fresh feed relay (`wss://feed.zap.cooking`) — contract as measured
+
+**Probed 2026-11-10 00:51–01:38 UTC** from a plain WebSocket (python
+`websockets` 16.1.1), no key, read-only: only `REQ` and `CLOSE` were sent,
+never `AUTH`, never `EVENT`. Everything below is what the relay did on that
+date, not what `frontend/src/lib/freshFeed/relay.ts` says it does; where the
+two differ it is marked **≠ web**. Re-probe before relying on a number.
+
+**Role.** A new relay role, `feed`, alongside §2's `default` / `members` /
+`discovery` / `profiles` / `articles`. It is read-only (`restricted_writes:
+true`) and is never a publish target, a relay hint, or a member of any other
+set. iOS reads it over its own socket and **never answers AUTH on it**
+(Cook+ tier is off on iOS, Guideline 2.1(b); a login also tells the relay
+who is reading).
+
+**NIP-11** (`GET https://feed.zap.cooking`, `Accept: application/nostr+json`,
+~7 KB):
+
+- `limitation`: `max_limit: 500`, `auth_required: false`,
+  `payment_required: false`, `restricted_writes: true`.
+  `supported_nips`: 1, 9, 11, 42, 50, 86, 98, 32.
+- `topics.namespace`: `"cooking.zap.topic"`.
+- `topics.parents[]`: 10 groups `{slug, name, count_14d, topics[]}`; each
+  topic `{slug, name, count_14d}` (3–5 per group, 44 topics). A group's
+  `count_14d` is not the sum of its topics (posts carry several labels).
+  Zero counts occur (`sauerkraut`, `canning`, `foraging`).
+- `topics.featured_topics[]`: 7 × `{slug, label}`; a slug may be a group
+  (`meat-seafood`) or a topic (`pasta`).
+- `topics.suggested[]`: 8 × `{slug, label, blurb, count_14d, image,
+  image_post}`. `image` is a third-party media URL (blossom / nostr.build);
+  `image_post` is the event id the picture came from.
+- The description also advertises `POST /trust {"pubkeys": […]}`. iOS does
+  not call it: it would send the reader's pubkey to the relay.
+
+**AUTH.** `["AUTH", <challenge>]` arrives unprompted within the first frame
+after connect, before any `REQ`. The same challenge is **sent again
+immediately before every `CLOSED auth-required:`** on that connection
+(**≠ web**, which assumes one challenge at connect). A client that signs
+whatever challenge it sees would therefore log in on connect *and* on every
+refused request. The Fresh client drops `AUTH` frames unread.
+
+**Free window (no AUTH).**
+
+| Request | Relay's answer |
+|---|---|
+| `{kinds:[1,30023,1068], since: now−14d, limit: 30}` | 30 events, newest first, `EOSE` in 25–70 ms |
+| same, `until` = oldest of previous page (inclusive) | 30 events, exactly 1 repeat (the boundary post); repeat until a short page |
+| last page | short page (7), then the same request again returns the 1 boundary post |
+| `until` < relay's `now − 14d` (any `since`, any kinds except a 30023-only filter) | `AUTH` frame, then `CLOSED "auth-required: posts older than 14 days are for Zap Cooking members; log in with NIP-42"`. Exact to the second: `until = floor − 1` closes, `until = floor` is `EOSE` |
+| `since` older than the floor | not refused; kind 1 is silently clamped to the window |
+| mixed kinds with **no `since`** and `until` ≥ floor | `EOSE`, but long-form older than the floor is included (366 of 500 in one probe). This is why every feed request carries `since` |
+| no `limit` | 100 events |
+| `limit` > 500 | 500 |
+
+Window on probe day: 616 events (534 kind 1, 82 kind 30023, 0 kind 1068),
+119 authors, 22 pages of 30. At most 2 posts shared a second. The floor is
+the relay's clock: a page request whose `until` has aged past the floor
+while the reader sat on the feed, or on a device whose clock runs slow,
+gets the `auth-required` close. **Treat `auth-required` on a feed page as
+"the floor", never as an error and never as a prompt.**
+
+73 of the 82 long-form events in the window came from one author and carry
+a `published_at` older than the floor (some by decades). Web's `isOldEdit`
+drops these from the newest-first feed; without that rule they are 12% of
+the window.
+
+**Long-form at any age.** `{kinds:[30023], "#t":["zapcooking","nostrcooking"]}`
+with no `since` is answered without AUTH: 620 events (1.8 MB), 2 pages at
+`limit: 500`, oldest 2023-09. `until` older than the floor works here.
+**≠ web / NIP-11 wording:** the exemption is by *kind*, not by recipe tag —
+`{kinds:[30023]}` with no `#t` also returns everything, including long-form
+with no recipe tag (45 of the newest 500; blog posts among them). Only the
+`#t` filter makes it "recipes".
+
+**Topic preview** (`search: "topic:<slug>"`, group or topic slug):
+
+- Returns the newest ≤ 5 posts in the window. `limit: 30` still returns 5;
+  omitting `since` still returns 5 (not refused); omitting `kinds` works.
+- Any `until` → `AUTH`, then `CLOSED "auth-required: topic: search beyond
+  the preview is for Zap Cooking members; log in with NIP-42"`. A preview
+  cannot page.
+- A topic with nothing in the window → `EOSE`, 0 events.
+- Unknown slug → `CLOSED "invalid: unknown topic <slug>"` (**≠ web**:
+  `stateOf()` maps this to "unavailable"; it is a permanent answer, not a
+  connection failure — don't retry it).
+- Ten previews back to back on one socket: all answered in ~25 ms, no
+  throttle observed.
+
+**Live tail.** `{kinds:[…], since: now}` → `EOSE`, then the subscription
+stays open for an unauthenticated socket. Held 45 minutes with no client
+frames after the `REQ`: the relay sent a WebSocket ping every 30 s (90 of
+them, each answered by the client library's automatic pong) and never
+closed it; the probe closed it. Two live subscriptions and a page request
+ran concurrently on one socket.
+
+Two posts arrived during the hold. One was delivered 13 s after its
+`created_at`; the other **827 s (about 14 minutes) after** (**≠ web**,
+whose `revive()` resubscribes from `newest seen + 1`). The relay admits
+posts some time after they are written, so a post can arrive with a
+`created_at` older than one already shown. A client that resumes a lost
+tail from the newest timestamp it has seen will miss those; resume with an
+overlap and de-duplicate by id.
+
+**Kinds on the relay.** Kind 6: none, at any age. Kind 1068: none, at any
+age. Kind 35000: exactly one event (2026-02, older than the window). Kind 0
+and kind 5 are served but only when created inside the window (2 of 21
+page-1 authors had a kind 0): **profiles do not come from this relay**.
+Kinds 7 / 9735 / 1 replies by `#e`: none — engagement does not come from
+this relay either. Kind 1985 (topic labels) → `CLOSED "auth-required: topic
+labels is for Zap Cooking members; …"`. Kinds 3 / 10002: none.
+
+**Not measured** (needs a member login, which iOS never performs): the
+`restricted:` close, full topic feeds, history, labels.
+
+**iOS rules that follow (Seth, 2026-11-09).**
+
+- Free tier only: no login to this relay, and no membership copy, pitch,
+  floor card or link-out. `FeatureFlags.feedRelayLoginEnabled` is `false`
+  and `Nip42.buildAuthEvent` refuses the host (both land with PR #189).
+- Its own connection, never the shared pool. `AUTH` frames are dropped.
+- Kinds `[1, 30023, 1068]`. Kind 35000 is not requested. Polls are tested
+  from fixtures, since the relay has none.
+- Every feed request carries `since` = now − 14 days. Recipes are the one
+  request without it, and always carry the `#t` filter.
+- Event id and signature are verified in the Fresh client (web's
+  nostr-tools does; the rest of the iOS app does not).
+- Web's `isOldEdit` rule is ported unchanged.
+- v1 has no topic chip row and no topic screen: topic previews feed
+  spotlight cards only.
+- Nothing about viewing leaves the device.
+
+The probe's raw frames were not committed. To re-measure, open a plain
+WebSocket with no key and send the requests in the tables above.
 
 ---
 
