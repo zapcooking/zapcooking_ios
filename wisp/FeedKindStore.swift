@@ -34,6 +34,7 @@ enum FeedKindStore {
         case extendedNetwork = "EXTENDED_FOLLOWS"
         case relay = "RELAY"
         case relaySet = "RELAY_SET"
+        case liveVideo = "LIVE_VIDEO"
 
         init(_ kind: FeedKind) {
             switch kind {
@@ -42,6 +43,7 @@ enum FeedKindStore {
             case .extendedNetwork: self = .extendedNetwork
             case .relay: self = .relay
             case .relaySet: self = .relaySet
+            case .liveVideo: self = .liveVideo
             }
         }
     }
@@ -60,7 +62,7 @@ enum FeedKindStore {
         case .relaySet(let set):
             defaults.set(set.dTag, forKey: relaySetKey(pubkey))
             defaults.removeObject(forKey: relayUrlKey(pubkey))
-        case .onlyFood, .follows, .extendedNetwork:
+        case .onlyFood, .follows, .extendedNetwork, .liveVideo:
             break
         }
     }
@@ -97,6 +99,8 @@ enum FeedKindStore {
                 return defaultKind
             }
             return .relaySet(set)
+        case .liveVideo:
+            return .liveVideo
         }
     }
 }
