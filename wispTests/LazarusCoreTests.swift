@@ -7,7 +7,7 @@ import Testing
 /// grouping, delta identity, profile fields, the pre-sign re-read decision,
 /// the recovery draft, relay-list and publish-relay rules, validation).
 /// Ported from the spec's reference implementation suite and the zap.cooking
-/// web suite (`src/lib/lazarus/recovery.test.ts`), spec 0.6.1-draft.
+/// web suite (`src/lib/lazarus/recovery.test.ts`), spec 0.6.2-draft.
 /// https://github.com/dmnyc/lazarus/blob/main/SPEC.md
 
 // MARK: - Fixtures

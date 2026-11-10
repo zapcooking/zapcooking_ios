@@ -202,6 +202,21 @@ nonisolated enum Nip22 {
             || rootEventIds.contains(where: targets.contains)
     }
 
+    /// True when `event` is a comment whose root scope is a nostr event
+    /// (uppercase `E`/`A`) rather than an external identifier (`I`).
+    ///
+    /// These are the comments that live inside nostr threads — including
+    /// mixed threads that began as kind-1 NIP-10 and switched to comments
+    /// partway down. Profile surfaces group them with kind-1 replies; the
+    /// lowercase `e` can't be the test, because a nested comment on an
+    /// external item carries one too (pointing at the parent comment).
+    static func isEventRootedComment(_ event: NostrEvent) -> Bool {
+        guard isComment(event) else { return false }
+        return event.tags.contains { tag in
+            tag.count >= 2 && (tag[0] == "E" || tag[0] == "A") && !tag[1].isEmpty
+        }
+    }
+
     /// True when `event` is a kind-1 note replying to a kind-1111 comment.
     ///
     /// Comment threads are a 1111-only namespace: a kind 1 whose reply target

@@ -12,12 +12,16 @@ enum FeedTabRouting {
         case onlyFood
         /// `FeedViewModel`'s list (follows / relay / relay set / extended).
         case general
+        /// Discovered NIP-53 streams (`LiveStreamRepository`), Sidecar-style.
+        case liveVideo
     }
 
     static func body(for kind: FeedKind) -> Body {
         switch kind {
         case .onlyFood:
             return .onlyFood
+        case .liveVideo:
+            return .liveVideo
         case .follows, .relay, .relaySet, .extendedNetwork:
             return .general
         }
@@ -67,19 +71,8 @@ enum FeedTabRouting {
         guard tracker.observe(kind) else { return nil }
         switch body(for: kind) {
         case .general: return .general
-        case .onlyFood: return nil
+        case .onlyFood, .liveVideo: return nil
         }
-    }
-
-    /// Whether the body for `kind` renders `FeedLiveNowSection` above its
-    /// first post. Spec §2.3 gated the rail off OnlyFood on the grounds that
-    /// live streams are not food-specific; that is reversed (feed/onlyfood-
-    /// polish): OnlyFood models the general feed and shows the rail, so this
-    /// is `true` for every kind. Kept as a seam so the gate states it and a
-    /// future exception is one edit here, not a scattered `!= .onlyFood`.
-    static func showsLiveRail(for kind: FeedKind) -> Bool {
-        _ = kind
-        return true
     }
 
     /// Memories teaser (`MemoriesCard`) in the top slot of BOTH feed bodies,
@@ -100,7 +93,7 @@ enum FeedTabRouting {
         switch kind {
         case .onlyFood:
             return OnlyFoodCompose.suggestedTags
-        case .follows, .relay, .relaySet, .extendedNetwork:
+        case .follows, .relay, .relaySet, .extendedNetwork, .liveVideo:
             return []
         }
     }

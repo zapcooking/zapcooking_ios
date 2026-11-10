@@ -156,6 +156,7 @@ struct ComposerMoreSheet: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 0) {
             Text("More options")
                 .font(.system(size: 17, weight: .semibold))
@@ -176,7 +177,11 @@ struct ComposerMoreSheet: View {
                 dismiss()
                 onPaste()
             }
-            .accessibilityAction { onPaste() }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                dismiss()
+                onPaste()
+            }
 
             Divider()
 
@@ -185,7 +190,7 @@ struct ComposerMoreSheet: View {
                 title: explicit ? "Unmark as sensitive" : "Mark as sensitive",
                 subtitle: explicit ? ComposeActionsRow.sensitiveBannerText : nil
             ) {
-                Toggle("", isOn: Binding(
+                Toggle(explicit ? "Unmark as sensitive" : "Mark as sensitive", isOn: Binding(
                     get: { explicit },
                     set: { _ in onToggleExplicit() }
                 ))
@@ -200,7 +205,7 @@ struct ComposerMoreSheet: View {
                 title: "Proof of work",
                 subtitle: "Default and difficulty live in Settings → Proof of Work."
             ) {
-                Toggle("", isOn: Binding(
+                Toggle("Proof of work", isOn: Binding(
                     get: { powEnabled },
                     set: { _ in onTogglePow() }
                 ))
@@ -220,8 +225,9 @@ struct ComposerMoreSheet: View {
                     .foregroundStyle(.tertiary)
             }
             .disabled(scheduleUnavailable)
-            .onTapGesture { onSchedule() }
-            .accessibilityAction { onSchedule() }
+            .onTapGesture { if !scheduleUnavailable { onSchedule() } }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { if !scheduleUnavailable { onSchedule() } }
 
             if privateReplyVisible {
                 Divider()
@@ -231,7 +237,7 @@ struct ComposerMoreSheet: View {
                     title: privateReplyEnabled ? "Private reply on" : "Send privately",
                     subtitle: privateReplyEnabled ? "The reply arrives gift-wrapped." : nil
                 ) {
-                    Toggle("", isOn: Binding(
+                    Toggle(privateReplyEnabled ? "Private reply on" : "Send privately", isOn: Binding(
                         get: { privateReplyEnabled },
                         set: { _ in onTogglePrivateReply() }
                     ))
@@ -242,6 +248,7 @@ struct ComposerMoreSheet: View {
             }
         }
         .padding(.bottom, 16)
+        }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -272,5 +279,8 @@ struct ComposerMoreSheet: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+        // Title, subtitle and any switch read as one element; the switch
+        // keeps its own label so VoiceOver announces what it controls.
+        .accessibilityElement(children: .combine)
     }
 }
