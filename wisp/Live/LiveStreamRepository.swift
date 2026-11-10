@@ -30,10 +30,16 @@ struct LiveChatMessage: Identifiable, Hashable {
 @MainActor
 final class LiveStreamRepository {
     static let shared = LiveStreamRepository()
+    /// Chat + zap-announcement rows kept per stream. Long-running radio streams
+    /// carry months of kind-1311; history pages in on demand and stops here.
+    static let maxChatMessages = 1000
 
     var streams: [String: LiveStream] = [:]
     var messagesByStream: [String: [LiveChatMessage]] = [:]
     var streamZapTotalsSats: [String: Int64] = [:]
+    /// Zap totals computed from a bounded relay scan that may have missed older
+    /// receipts — rendered with a trailing "+", sidecar-style.
+    var zapTotalsUncertain: Set<String> = []
     var currentATag: String?
     /// Host/streamer kind-0 profiles keyed by pubkey, for the live pill row.
     /// Fed by `LiveStreamCoordinator`'s batched fetch and `FeedLiveNowSection`'s
@@ -46,10 +52,15 @@ final class LiveStreamRepository {
     @ObservationIgnored private var seenZapIds = Set<String>()
     @ObservationIgnored private var pendingFollowChatters: [String: Set<String>] = [:]
 
-    /// Streams that have at least one active chatter and are reported live, sorted by chatter count desc.
+    /// Show every discovered live stream by default, like Android — requiring a
+    /// recent chatter hid streams whose kind-1311 chat lives on relays this
+    /// account doesn't read. Staleness is handled by the sidecar freshness rule
+    /// instead (event republished within the last hour), not by chat activity.
     var liveNowSorted: [LiveStream] {
-        streams.values
-            .filter { !$0.chatters.isEmpty && ($0.activity.status?.lowercased() == "live") }
+        let now = Date().timeIntervalSince1970
+        return streams.values
+            .filter { $0.activity.status?.lowercased() == "live"
+                && now - TimeInterval($0.activity.createdAt) < 3600 }
             .sorted { lhs, rhs in
                 if lhs.chatters.count != rhs.chatters.count {
                     return lhs.chatters.count > rhs.chatters.count
@@ -70,12 +81,20 @@ final class LiveStreamRepository {
     // MARK: - Ingestion
 
     /// Upsert a kind-30311 live activity. Drops streams that flip to non-"live" status.
+    ///
+    /// Liveness follows sidecar's rule: status "live" alone is not enough — the
+    /// event must have been republished within the last hour and carry a
+    /// streaming URL. Real streams republish every few minutes; abandoned or
+    /// test events stay stuck on "live" forever and would otherwise haunt the
+    /// LIVE row indefinitely.
     func addActivity(_ event: NostrEvent) {
         guard event.kind == Nip53.kindLiveActivity,
               let activity = Nip53.parseLiveActivity(event) else { return }
         let aTag = Nip53.aTagValue(host: activity.hostPubkey, dTag: activity.dTag)
 
         let isLive = activity.status?.lowercased() == "live"
+            && activity.streamingUrl?.isEmpty == false
+            && Date().timeIntervalSince1970 - TimeInterval(event.createdAt) < 3600
         if !isLive {
             streams.removeValue(forKey: aTag)
             return
@@ -106,10 +125,12 @@ final class LiveStreamRepository {
     }
 
     /// Per-stream: store full chat content + bump chatter set + bump lastChatAt.
-    func addChatMessage(_ event: NostrEvent) {
+    /// Returns true when the message was new (not a duplicate or malformed).
+    @discardableResult
+    func addChatMessage(_ event: NostrEvent) -> Bool {
         guard event.kind == Nip53.kindLiveChatMessage,
-              let aTag = Nip53.getChatActivityRef(event) else { return }
-        guard seenChatIds.insert(event.id).inserted else { return }
+              let aTag = Nip53.getChatActivityRef(event) else { return false }
+        guard seenChatIds.insert(event.id).inserted else { return false }
 
         let replyToId = event.tags.first(where: { tag in
             guard tag.count >= 2, tag[0] == "e" else { return false }
@@ -132,6 +153,9 @@ final class LiveStreamRepository {
         var list = messagesByStream[aTag] ?? []
         list.append(msg)
         list.sort { $0.createdAt < $1.createdAt }
+        if list.count > Self.maxChatMessages {
+            list.removeFirst(list.count - Self.maxChatMessages)
+        }
         messagesByStream[aTag] = list
 
         if var stream = streams[aTag] {
@@ -141,6 +165,7 @@ final class LiveStreamRepository {
         } else {
             pendingFollowChatters[aTag, default: []].insert(event.pubkey)
         }
+        return true
     }
 
     /// Add a reactor's emoji to a chat message's reaction map. No-op if message not in our list.
@@ -177,9 +202,27 @@ final class LiveStreamRepository {
         var list = messagesByStream[aTag] ?? []
         list.append(msg)
         list.sort { $0.createdAt < $1.createdAt }
+        if list.count > Self.maxChatMessages {
+            list.removeFirst(list.count - Self.maxChatMessages)
+        }
         messagesByStream[aTag] = list
 
         streamZapTotalsSats[aTag, default: 0] += amount
+    }
+
+    /// Archive receipts from the one-shot total scan: summed into the stream's
+    /// zap total and deduplicated, but kept out of the chat buffer so a scan
+    /// of old receipts can't fill the window that chat paging relies on.
+    /// Recent receipts (`announceFrom` or newer) take the normal chat path.
+    func addArchivedZaps(_ events: [NostrEvent], aTag: String, announceFrom: Int) {
+        for event in events {
+            guard event.kind == 9735 else { continue }
+            if event.createdAt >= announceFrom {
+                addStreamZap(event, aTag: aTag)
+            } else if seenZapIds.insert(event.id).inserted {
+                streamZapTotalsSats[aTag, default: 0] += Nip57.zapAmountSats(receipt: event)
+            }
+        }
     }
 
     // MARK: - Lifecycle
@@ -192,6 +235,7 @@ final class LiveStreamRepository {
         streams.removeAll()
         messagesByStream.removeAll()
         streamZapTotalsSats.removeAll()
+        zapTotalsUncertain.removeAll()
         hostProfiles.removeAll()
         seenChatIds.removeAll()
         seenZapIds.removeAll()

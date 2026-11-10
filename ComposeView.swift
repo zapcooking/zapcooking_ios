@@ -25,6 +25,8 @@ struct ComposeView: View {
 
     @FocusState private var contentFocused: Bool
     @State private var showScheduleSheet = false
+    @State private var showMoreSheet = false
+    @State private var pendingSchedulePresentation = false
     @State private var showCancelConfirm = false
     @State private var showGifPicker = false
     @State private var showDraftsSheet = false
@@ -246,6 +248,16 @@ struct ComposeView: View {
 
     private var sheetHost: some View {
         lifecycleHost
+        .sheet(isPresented: $showMoreSheet, onDismiss: {
+            // The schedule row can't stack the schedule sheet on this one;
+            // the More sheet hands the presentation off as it dismisses.
+            if pendingSchedulePresentation {
+                pendingSchedulePresentation = false
+                showScheduleSheet = true
+            }
+        }) {
+            moreSheet
+        }
         .sheet(isPresented: $showScheduleSheet) {
             ScheduleSheet(
                 initialDate: viewModel.scheduleAt,
@@ -271,20 +283,24 @@ struct ComposeView: View {
             ) { savedText in
                 viewModel.setAltText(savedText ?? "", for: target.attachmentID)
             }
-            .presentationDetents([.medium, .large])
+            // Large only: the editor's content doesn't fit medium (the AI
+            // action clipped and the title rode over the preview), and it
+            // opens pre-filled on GIF picks, so it's read-to-edit more often
+            // than glance-and-go.
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        // GIF picker is presented as a true UIKit modal via a hidden
-        // representable rather than a SwiftUI .sheet / .fullScreenCover.
-        // Embedding `GiphyViewController` as a child view (which is what
-        // SwiftUI's modal hosts do) breaks its internal layout — the
-        // bottom search bar collides with the trending-suggestions
-        // carousel because Giphy assumes it owns its modal context.
-        .background(
-            GifPickerPresenter(isPresented: $showGifPicker) { gifUrl in
-                appendGifUrl(gifUrl)
+        // GIF picker: a plain SwiftUI sheet over gifs.nostr.build (search,
+        // tap, the already-hosted URL is attached — nothing uploads). The
+        // old GIPHY SDK needed a headless UIKit-modal presenter because its
+        // view controller only laid out as its own modal; this one doesn't.
+        .sheet(isPresented: $showGifPicker) {
+            GifPickerView { gif in
+                appendGif(gif)
             }
-        )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var autosaveHost: some View {
@@ -1240,20 +1256,44 @@ struct ComposeView: View {
         ComposeActionsRow(
             viewModel: viewModel,
             onPickPhotos: { presentPhotoPicker(max: 4) },
-            onPasteImage: { pasteImageFromClipboard() },
             onPickGif: {
-                // Resign the compose text field before presenting so the
-                // keyboard animation finishes ahead of the modal. Without
-                // the hop, the keyboard collapse mid-present can cancel
-                // the in-flight UIKit modal and SwiftUI flips
-                // `showGifPicker` back to false — same shape as the
-                // drafts-sheet keyboard race.
+                // Drop the keyboard before the sheet comes up so the picker
+                // opens onto the grid, not the compose editor's focus.
                 contentFocused = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    showGifPicker = true
-                }
+                showGifPicker = true
             },
-            onSchedule: { showScheduleSheet = true }
+            onMore: { showMoreSheet = true }
+        )
+    }
+
+    /// The "…" panel. Tapping the schedule row presents the schedule sheet,
+    /// which can't stack on this one — the More sheet's `onDismiss` opens it.
+    /// Paste closes the sheet first, so the attachment lands on the composer.
+    private var moreSheet: some View {
+        ComposerMoreSheet(
+            onPaste: {
+                pasteImageFromClipboard()
+            },
+            explicit: viewModel.explicit,
+            onToggleExplicit: { viewModel.toggleNsfw() },
+            powEnabled: viewModel.powEnabled,
+            onTogglePow: { viewModel.togglePow() },
+            scheduleEnabled: viewModel.scheduleEnabled,
+            scheduleSummary: viewModel.scheduleAt.map {
+                "Scheduled for " + $0.formatted(date: .abbreviated, time: .shortened)
+            },
+            scheduleUnavailable: viewModel.isPrivate,
+            onSchedule: {
+                pendingSchedulePresentation = true
+                showMoreSheet = false
+            },
+            privateReplyVisible: {
+                if case .reply = viewModel.mode { return true }
+                return false
+            }(),
+            privateReplyEnabled: viewModel.isPrivate,
+            privateReplyLocked: viewModel.isPrivateLocked,
+            onTogglePrivateReply: { viewModel.togglePrivate() }
         )
     }
 
@@ -1460,12 +1500,12 @@ struct ComposeView: View {
         return hasText || hasAttachments
     }
 
-    /// Hand off a Giphy CDN URL to the view model, which re-hosts the bytes on
-    /// the user's Blossom servers (so the published note doesn't depend on
-    /// Giphy's rate-limited anonymous CDN) and appends the resulting URL to
-    /// the post body.
-    private func appendGifUrl(_ url: String) {
-        Task { await viewModel.attachGifFromGiphy(url) }
+    /// Hand the picked GIF to the view model, which appends its already-
+    /// hosted URL as an attachment with the GIF's title seeded as alt text.
+    /// Nothing uploads — every gifs.nostr.build result lives on a Nostr
+    /// media host already.
+    private func appendGif(_ gif: Gif) {
+        viewModel.attachPickedGif(gif)
     }
 
     /// Hand the system pasteboard's image item providers to the view model,

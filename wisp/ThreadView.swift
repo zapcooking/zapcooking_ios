@@ -674,18 +674,18 @@ struct ThreadView: View {
         return false
     }
 
-    /// The sticky reply bar's target: the topmost currently-visible reply
-    /// (via `visibleRowIds`, in rendered order), falling back to the
-    /// thread's default parent when no reply row is on screen yet (e.g.
-    /// scrolled to the very top) — the bar follows what you're scrolled to
-    /// instead of always targeting the root.
+    /// The sticky reply bar's target. The note the user opened the thread on
+    /// (`composerDefaultParent`), falling back to the focal — the wisp model.
+    /// An earlier take targeted the topmost currently-visible reply instead,
+    /// "so the bar follows what you're scrolled to", but visibility is not
+    /// intent: scrolling through a thread leaves arbitrary rows topmost, so a
+    /// reply meant for the note being read went to whatever happened to be at
+    /// the top of the viewport — the wrong parent, wrong `e`/`p` tags, wrong
+    /// notification for the person it actually concerned. Replying to a
+    /// specific row still works through that row's own affordances; the bar's
+    /// default is the thread's entry note.
     private var focusedReplyTarget: NostrEvent? {
-        for item in groupedNestedReplies {
-            if case .single(let row, _) = item, visibleRowIds.contains(row.id) {
-                return row.row.event
-            }
-        }
-        return viewModel.composerDefaultParent ?? viewModel.focal?.event
+        viewModel.composerDefaultParent ?? viewModel.focal?.event
     }
 
     private var composer: some View {

@@ -55,6 +55,7 @@ struct LazarusRecoveryView: View {
                 } else if model.phase == .done, let scan = model.scan {
                     results(scan)
                 }
+                footer
                 Spacer(minLength: 40)
             }
             .padding(20)
@@ -74,7 +75,7 @@ struct LazarusRecoveryView: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Restore a follow list, mute list, profile or other list that a client overwrote. Scanning asks your relays, and relays known to keep old versions, for every version that survives.")
+            Text("Restore a follow list, mute list, bookmarks, profile or other list that a client overwrote. Scanning asks your relays — and relays known to keep old versions — for every version that survives.")
                 .font(.system(size: 14))
                 .foregroundStyle(theme.palette.onSurface)
             Text("Nothing is restored without your tap, and every restore is signed by your own account.")
@@ -145,6 +146,28 @@ struct LazarusRecoveryView: View {
             .disabled(model.isBusy)
             .accessibilityIdentifier("lazarus-scan")
         }
+    }
+
+    /// Quiet end-of-screen line: the spec disclosure this screen's behavior
+    /// follows, and the Lazarus wordmark under it — grey, understated.
+    private var footer: some View {
+        VStack(spacing: 16) {
+            Link(destination: URL(string: Lazarus.specURL)!) {
+                Text("Uses the Lazarus spec \(Lazarus.specVersion)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.onSurfaceVariant)
+                    .underline()
+            }
+            Image("LazarusWordmark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 88)
+                .foregroundStyle(theme.palette.onSurfaceVariant.opacity(0.55))
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
 
     // MARK: - Failed scan
@@ -388,9 +411,10 @@ struct LazarusRecoveryView: View {
     private func privateNote(for candidate: LazarusCandidate) -> String? {
         guard LazarusPrivateItems.encryption(of: candidate.event.content) != nil,
               profile.privateItemTypes != nil else { return nil }
-        if let decrypted = model.privateTags[candidate.id] {
-            let count = LazarusPrivateItems.countItemTags(decrypted, types: profile.privateItemTypes ?? [])
-            return count == 0 ? nil : "incl. \(count.formatted()) private"
+        // The row's own count: exact once decrypted, and already deduplicated
+        // against the public tags (an item listed both ways is one item).
+        if let privateCount = candidate.itemCount.privateCount {
+            return privateCount == 0 ? nil : "incl. \(privateCount.formatted()) private"
         }
         if model.undecryptable.contains(candidate.id) { return "private items couldn't be decrypted" }
         return model.canSign ? nil : "private items estimated"

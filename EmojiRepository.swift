@@ -391,8 +391,11 @@ final class EmojiRepository {
         let key = Self.defaultsKey(for: pubkey)
         if let data = UserDefaults.standard.data(forKey: key),
            let state = try? JSONDecoder().decode(PersistedState.self, from: data) {
-            quickReactions = state.quickReactions
+            quickReactions = EmojiData.upgradingPriorDefault(state.quickReactions)
             frequency = state.frequency
+            if quickReactions != state.quickReactions {
+                persist()
+            }
         } else {
             quickReactions = EmojiData.defaultQuickReactions
             frequency = [:]

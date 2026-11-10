@@ -62,6 +62,17 @@ struct PollOptionsEditor: View {
             }
             .pickerStyle(.segmented)
 
+            // Polls publish as a dedicated kind (1068 / zap poll), which
+            // clients without poll support hide from feeds entirely.
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("On clients that don't display polls, this post won't be visible.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             VStack(spacing: 8) {
                 ForEach(viewModel.pollOptions.indices, id: \.self) { idx in
                     HStack(spacing: 8) {
