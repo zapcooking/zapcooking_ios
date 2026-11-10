@@ -238,24 +238,19 @@ private struct FoodPhotoTile: View {
     let alpha: Double
     let size: CGFloat
 
-    @State private var displayURL: String?
+    @State private var displayImage: UIImage?
 
     var body: some View {
         RoundedRectangle(cornerRadius: tileRadius, style: .continuous)
             .fill(Color.white.opacity(alpha))
             .frame(width: size, height: size)
             .overlay {
-                if let displayURL, let url = URL(string: displayURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Color.clear
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: tileRadius, style: .continuous))
-                    .transition(.opacity)
+                if let displayImage {
+                    Image(uiImage: displayImage)
+                        .resizable()
+                        .scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: tileRadius, style: .continuous))
+                        .transition(.opacity)
                 }
             }
             .clipped()
@@ -263,11 +258,26 @@ private struct FoodPhotoTile: View {
             .task(id: photos) { await cycle() }
     }
 
+    /// Decorative, so a plain dataTask + UIImage(data:). Deliberately NOT
+    /// AsyncImage: it stages every fetch as a CFNetworkDownload_*.tmp file
+    /// in tmp and never cleans them up — the tiles cycle every few seconds
+    /// for the whole app lifetime, which piled up 38k files / 59 GB on a
+    /// dev install.
+    private func loadPhoto(_ urlString: String) async -> UIImage? {
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            return UIImage(data: data)
+        } catch {
+            return nil
+        }
+    }
+
     private func cycle() async {
-        guard !photos.isEmpty else { displayURL = nil; return }
+        guard !photos.isEmpty else { displayImage = nil; return }
         // Spread starting photos so adjacent tiles don't share an image.
         let start = (tileIndex * 7 + (tileIndex / max(1, numCols)) * 13) % photos.count
-        displayURL = photos[start]
+        displayImage = await loadPhoto(photos[start])
         guard photos.count > 1 else { return }
         var idx = start
         // Stagger the first swap so tiles don't all flip at once.
@@ -276,7 +286,8 @@ private struct FoodPhotoTile: View {
             try? await Task.sleep(for: .milliseconds(2500 + (tileIndex * 197) % 3500))
             if Task.isCancelled { break }
             idx = (idx + 1) % photos.count
-            withAnimation(.easeInOut(duration: 0.7)) { displayURL = photos[idx] }
+            displayImage = await loadPhoto(photos[idx])
+            withAnimation(.easeInOut(duration: 0.2)) { }
         }
     }
 }
