@@ -128,7 +128,8 @@ enum NostrKey {
             "follow_pubkeys_ts_\(pubkey)",
             "relay_scoreboard_v1_\(pubkey)",
             "relay_list_repair_done_\(pubkey)",
-            "latest_feed_ts_\(pubkey)",
+            "latest_feed_ts_\(pubkey)",  // no longer written (#188); older installs still hold it
+            FollowsSyncCursor.key(pubkey),
             // Safety: mute lists, blocked users, muted threads, mute event timestamp
             "muted_words_\(pubkey)",
             "blocked_pubkeys_\(pubkey)",

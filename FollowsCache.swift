@@ -91,6 +91,10 @@ nonisolated final class FollowsCache: @unchecked Sendable {
     /// `reconcile` can tell a fresher relay copy from a stale one.
     nonisolated func update(pubkey: String, follows: [String], createdAt: Int) {
         let set = Set(follows)
+        // A different follow set means the Follows feed's sync point no
+        // longer describes it (a new follow's older notes were never asked
+        // for): drop it so the next load reaches back the default window.
+        if followsSet(for: pubkey) != set { FollowsSyncCursor.clear(pubkey: pubkey) }
         lock.lock()
         byPubkey[pubkey] = follows
         setByPubkey[pubkey] = set

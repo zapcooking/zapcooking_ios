@@ -197,4 +197,177 @@ import Testing
         vm.stop()
         await tearDown(account, stranger: stranger)
     }
+
+    // MARK: - The fix: Follows' own cursor
+
+    private func scratchDefaults() -> UserDefaults {
+        let name = "FollowsSinceTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    private func note(at createdAt: Int, by pubkey: String = String(repeating: "a", count: 64)) -> NostrEvent {
+        NostrEvent(id: UUID().uuidString, pubkey: pubkey, kind: 1, createdAt: createdAt,
+                   tags: [], content: "", sig: "")
+    }
+
+    @Test func refresh_emptyList_loadsLikeAColdStart() {
+        let now = 2_000_000_000
+        let window = FollowsSince.window(followCount: 50)
+        #expect(FollowsSince.refresh(listNewest: nil, anchor: nil, followCount: 50, now: now) == now - window)
+        #expect(FollowsSince.refresh(listNewest: nil, anchor: now - 3600, followCount: 50, now: now) == now - 3600 - 300)
+    }
+
+    /// The list's newest note may have been stored by another feed: when it
+    /// is newer than the sync point, the sync point decides.
+    @Test func refresh_listNewerThanTheSyncPoint_startsFromTheSyncPoint() {
+        let now = 2_000_000_000
+        let window = FollowsSince.window(followCount: 50)
+        #expect(FollowsSince.refresh(listNewest: now - 10, anchor: now - 7200, followCount: 50, now: now) == now - 7200 - 300)
+        #expect(FollowsSince.refresh(listNewest: now - 10, anchor: nil, followCount: 50, now: now) == now - window)
+    }
+
+    @Test func cursor_absentUntilRecorded_thenRoundTrips() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
+        FollowsSyncCursor.record(now - 500, pubkey: pk, now: now, defaults: defaults)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 500)
+        #expect(FollowsSyncCursor.load(pubkey: hex32(), now: now, defaults: defaults) == nil, "per account")
+        FollowsSyncCursor.clear(pubkey: pk, defaults: defaults)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
+    }
+
+    /// Rider 1: a future-dated note cannot push `since` into the future,
+    /// whether it arrives now or was stored by an earlier run.
+    @Test func cursor_futureDatedNote_cannotPushSinceIntoTheFuture() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let skew = OnlyFoodFilter.futureSkewSeconds
+
+        FollowsSyncCursor.record(now + 10 * 365 * 86400, pubkey: pk, now: now, defaults: defaults)
+        #expect(defaults.integer(forKey: FollowsSyncCursor.key(pk)) == now + skew, "clamped when written")
+        let anchor = FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults)
+        #expect(anchor == now + skew)
+        #expect(FollowsSince.coldStart(anchor: anchor, followCount: 50, now: now) <= now)
+        #expect(FollowsSince.refresh(listNewest: nil, anchor: anchor, followCount: 50, now: now) <= now)
+
+        // A raw future value already on disk is clamped when read.
+        defaults.set(now + 999_999, forKey: FollowsSyncCursor.key(pk))
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now + skew)
+
+        // And a clamped cursor does not stay ahead once the clock is read
+        // again later: it is at most `skew` past the time it was written.
+        #expect(FollowsSyncCursor.clamped(now + 999_999, now: now + 3600) == now + 3600 + skew)
+    }
+
+    @Test func cursor_neverMovesBack() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        FollowsSyncCursor.record(now - 100, pubkey: pk, now: now, defaults: defaults)
+        FollowsSyncCursor.record(now - 5000, pubkey: pk, now: now, defaults: defaults)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100)
+    }
+
+    /// Rider 2: nothing is persisted per event. A load that is killed
+    /// before its slowest relay answers leaves the cursor untouched.
+    @Test func settle_recordsOnlyWhenEveryAskedRelayHasAnswered() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let fast = "wss://fast.example.com", slow = "wss://slow.example.com"
+        let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [fast, slow], now: { now }, defaults: defaults)
+
+        settle.delivered(note(at: now - 100), from: fast)
+        settle.answered(relayUrl: fast)
+        settle.answered(relayUrl: fast)                       // a reconnect's second EOSE
+        settle.answered(relayUrl: "wss://unasked.example.com")
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil,
+                "the slow relay has not answered: a kill here must not skip what it holds")
+
+        settle.delivered(note(at: now - 4000), from: slow)
+        settle.answered(relayUrl: slow)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100)
+
+        // Settled once: later live deliveries do not move it.
+        settle.delivered(note(at: now - 1), from: fast)
+        settle.answered(relayUrl: fast)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100)
+    }
+
+    @Test func settle_withNothingDelivered_orNothingAsked_recordsNothing() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let quiet = FollowsLoadSettle(pubkey: pk, askedRelays: ["wss://a.example.com"], now: { now }, defaults: defaults)
+        quiet.answered(relayUrl: "wss://a.example.com")
+        let nobody = FollowsLoadSettle(pubkey: pk, askedRelays: [], now: { now }, defaults: defaults)
+        nobody.delivered(note(at: now - 5), from: "wss://a.example.com")
+        nobody.answered(relayUrl: "wss://a.example.com")
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
+    }
+
+    @Test func settle_clampsAFutureDatedDelivery() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let settle = FollowsLoadSettle(pubkey: pk, askedRelays: ["wss://a.example.com"], now: { now }, defaults: defaults)
+        settle.delivered(note(at: now + 86400), from: "wss://a.example.com")
+        settle.answered(relayUrl: "wss://a.example.com")
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now + OnlyFoodFilter.futureSkewSeconds)
+    }
+
+    /// Rider 3: a changed follow list clears the cursor, and a load that
+    /// was already running for the old list cannot put it back.
+    @Test func followListChange_clearsTheCursor_andStaleLoadsCannotRestoreIt() {
+        let pk = hex32(), a = hex32(), b = hex32(), now = Int(Date().timeIntervalSince1970)
+        defer {
+            for key in ["follow_pubkeys_", "follow_pubkeys_ts_"] { UserDefaults.standard.removeObject(forKey: key + pk) }
+            FollowsSyncCursor.clear(pubkey: pk)
+            FollowsCache.shared.invalidate(pubkey: pk)
+        }
+        FollowsCache.shared.update(pubkey: pk, follows: [a], createdAt: 10)
+        FollowsSyncCursor.record(now - 500, pubkey: pk, now: now)
+
+        // The same set again (a re-publish) keeps it.
+        FollowsCache.shared.update(pubkey: pk, follows: [a], createdAt: 10)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == now - 500)
+
+        // A load opens for [a]; then the list changes.
+        let stale = FollowsLoadSettle(pubkey: pk, askedRelays: ["wss://a.example.com"])
+        FollowsCache.shared.update(pubkey: pk, follows: [a, b], createdAt: 11)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil, "next load uses the default window")
+
+        stale.delivered(note(at: now - 60), from: "wss://a.example.com")
+        stale.answered(relayUrl: "wss://a.example.com")
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil)
+
+        // Unfollowing clears it too.
+        FollowsSyncCursor.record(now - 500, pubkey: pk, now: now)
+        FollowsCache.shared.update(pubkey: pk, follows: [b], createdAt: 12)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil)
+    }
+
+    /// End to end through the view model: a settled load records the
+    /// cursor, and the next cold start resumes from it with the overlap.
+    @Test func settledLoad_recordsTheCursor_andTheNextColdStartResumesFromIt() async throws {
+        let account = makeAccount()
+        FeedKindStore.persist(.follows, pubkey: account.me)
+        defer { FollowsSyncCursor.clear(pubkey: account.me) }
+        let now = Int(Date().timeIntervalSince1970)
+
+        let first = Captured()
+        let vm = makeVM(account, captured: first)
+        await vm.start()
+        #expect(await eventually { !first.loads.isEmpty })
+        let observer = try #require(first.observers.first ?? nil, "loadFeed passes its settle observer")
+        let relay = try #require(RelayPool.wsURL(first.loads[0][0].relayUrl)?.absoluteString)
+
+        observer.delivered(note(at: now - 1000, by: account.follow), from: relay)
+        #expect(FollowsSyncCursor.load(pubkey: account.me, now: now) == nil, "not per event")
+        observer.answered(relayUrl: relay)
+        #expect(FollowsSyncCursor.load(pubkey: account.me, now: now) == now - 1000)
+        vm.stop()
+
+        let second = Captured()
+        let relaunched = makeVM(account, captured: second)
+        await relaunched.start()
+        #expect(await eventually { !second.loads.isEmpty })
+        #expect(second.latestSinces == [now - 1000 - FollowsSince.overlapSeconds])
+        relaunched.stop()
+
+        await tearDown(account, stranger: account.follow)
+    }
 }

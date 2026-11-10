@@ -477,12 +477,13 @@ final class FeedViewModel {
         // 2. Calculate since timestamp for incremental sync
         let follows = FollowsCache.shared.follows(for: keypair.pubkey)
         let scoreBoard = RelayScoreBoard.load(pubkey: keypair.pubkey)
-        // Exclude our own pubkey: if the only stored kind-1 is the user's
-        // freshly-published intro note, `since` would clamp to "intro_ts - 5m"
-        // and hide every older note from follows on the first feed load.
-        let newestStored = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
-        let since = FollowsSince.coldStart(anchor: newestStored, followCount: follows.count,
-                                           now: Int(Date().timeIntervalSince1970))
+        // From where Follows itself last settled a load (`FollowsSyncCursor`),
+        // never from the newest note in the shared event store (#188).
+        let now = Int(Date().timeIntervalSince1970)
+        let since = FollowsSince.coldStart(
+            anchor: FollowsSyncCursor.load(pubkey: keypair.pubkey, now: now),
+            followCount: follows.count, now: now
+        )
 
         // 3. Open relay sockets immediately, then fetch profiles concurrently.
         //    loadFeed fires tasks and returns — no need to gate it on profile fetch.
@@ -491,11 +492,6 @@ final class FeedViewModel {
         MissingProfileWatcher.shared.observe(events)
 
         isLoading = false
-
-        // 4. Save latest timestamp for next session
-        if let newest = events.first {
-            UserDefaults.standard.set(newest.createdAt, forKey: "latest_feed_ts_\(keypair.pubkey)")
-        }
     }
 
     func refresh() async {
@@ -514,23 +510,16 @@ final class FeedViewModel {
         let follows = FollowsCache.shared.follows(for: keypair.pubkey)
         let scoreBoard = RelayScoreBoard.load(pubkey: keypair.pubkey)
 
-        var anchor: Int?
-        if events.isEmpty {
-            anchor = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
-        }
+        let now = Int(Date().timeIntervalSince1970)
         let since = FollowsSince.refresh(
             listNewest: events.first?.createdAt,
-            anchor: anchor,
+            anchor: FollowsSyncCursor.load(pubkey: keypair.pubkey, now: now),
             followCount: follows.count,
-            now: Int(Date().timeIntervalSince1970)
+            now: now
         )
 
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
         MissingProfileWatcher.shared.observe(events)
-
-        if let newest = events.first {
-            UserDefaults.standard.set(newest.createdAt, forKey: "latest_feed_ts_\(keypair.pubkey)")
-        }
     }
 
     func stop() {
@@ -1354,7 +1343,13 @@ final class FeedViewModel {
         //    after EOSE — matches Android's SharedFlow behavior.
         cancelLiveSubscription()
         let subId = "follows-feed-\(UUID().uuidString.prefix(8).lowercased())"
-        let sub = services.openFollowsSubscription(queries, subId, nil)
+        // The cursor advances only when every relay asked here has ended its
+        // backlog (`FollowsLoadSettle`).
+        let settle = FollowsLoadSettle(
+            pubkey: keypair.pubkey,
+            askedRelays: Set(queries.compactMap { RelayPool.wsURL($0.relayUrl)?.absoluteString })
+        )
+        let sub = services.openFollowsSubscription(queries, subId, settle)
         liveSubscription = sub
 
         liveConsumer = Task { [weak self] in
