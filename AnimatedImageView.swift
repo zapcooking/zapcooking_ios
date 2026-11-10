@@ -251,7 +251,8 @@ nonisolated enum AnimatedImageDecoder {
 /// matching the pre-fix status quo.
 ///
 /// WebP is treated as potentially animated even though many WebPs are static:
-/// Giphy and other GIF hosts serve animated content with a `.webp` extension,
+/// GIF hosts (nostr.build among them) serve animated content with a `.webp`
+/// extension,
 /// and the alternative (rendering them through AsyncImage) freezes them on
 /// frame 0. The animated decoder handles single-frame WebPs correctly, so the
 /// only cost of a false positive is the CGImageSource round-trip.

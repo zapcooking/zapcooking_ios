@@ -129,38 +129,44 @@ struct AltTextEditorView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                previewImage
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Scrollable: the content (180pt preview + explainer + field +
+            // AI action) exceeds the sheet's height at the medium detent and
+            // when the keyboard is up, and an overflowing VStack is what
+            // drew the nav title over the preview. Scrolling keeps every
+            // item reachable no matter how little room the sheet has.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    previewImage
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Text("A short description helps screen reader users and gives context to everyone.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                TextEditor(text: $text)
-                    .frame(minHeight: 96)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-                    .onChange(of: text) { _, newValue in
-                        if newValue.count > Self.maxCharacters {
-                            text = String(newValue.prefix(Self.maxCharacters))
-                        }
-                    }
-
-                aiRow
-
-                if case .notice(let message) = phase {
-                    Text(message)
+                    Text("A short description helps screen reader users and gives context to everyone.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
 
-                Spacer(minLength: 0)
+                    TextEditor(text: $text)
+                        .frame(minHeight: 96)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                        .onChange(of: text) { _, newValue in
+                            if newValue.count > Self.maxCharacters {
+                                text = String(newValue.prefix(Self.maxCharacters))
+                            }
+                        }
+
+                    aiRow
+
+                    if case .notice(let message) = phase {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("Description")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
