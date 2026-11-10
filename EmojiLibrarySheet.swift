@@ -333,6 +333,10 @@ struct EmojiLibrarySheet: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        // Tab buttons carry the same emoji label as grid
+                        // cells below; the identifier disambiguates them
+                        // for UI tests.
+                        .accessibilityIdentifier("emoji-tab-\(tab.id)")
                         .id("tab-\(tab.id)")
                     }
                 }
