@@ -143,6 +143,7 @@ final class SparkWallet: Wallet {
             let seed = Seed.mnemonic(mnemonic: mnemonic, passphrase: nil)
             var config = defaultConfig(network: Network.mainnet)
             config.apiKey = BreezConfig.apiKey
+            config.lnurlDomain = BreezConfig.lnurlDomain
 
             let sdk = try await BreezSdkSpark.connect(
                 request: ConnectRequest(
@@ -250,7 +251,7 @@ final class SparkWallet: Wallet {
                     request: ClaimDepositRequest(
                         txid: deposit.txid,
                         vout: deposit.vout,
-                        maxFee: .networkRecommended(leewaySatPerVbyte: 5)
+                        maxFee: MaxFee(onchain: .networkRecommended(leewaySatPerVbyte: 5))
                     )
                 )
                 claimedAny = true
@@ -492,7 +493,8 @@ final class SparkWallet: Wallet {
                         amountSats: amountSats,
                         expirySecs: UInt32(min(expirySecs, Int64(UInt32.max))),
                         paymentHash: nil,
-                        receiverIdentityPublicKey: nil
+                        receiverIdentityPublicKey: nil,
+                        preimage: nil
                     )
                 )
             )
@@ -530,7 +532,7 @@ final class SparkWallet: Wallet {
                         }
                     case .deposit(let txId, _):
                         bitcoinTxId = txId
-                    case .withdraw(let txId):
+                    case .withdraw(let txId, _, _):
                         bitcoinTxId = txId
                     default:
                         break

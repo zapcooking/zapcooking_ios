@@ -840,7 +840,7 @@ struct LightningAddressSetupSheet: View {
         case idle, checking, available, taken, error(String)
     }
 
-    private var domain: String { "breez.tips" }
+    private var domain: String { BreezConfig.lnurlDomain }
     private var trimmed: String { username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
     private var isValidUsername: Bool {
         let r = trimmed
@@ -987,6 +987,9 @@ struct LightningAddressSetupSheet: View {
         defer { isRegistering = false }
         do {
             try await store.registerLightningAddress(username: trimmed)
+            // Best-effort `lud16` sync onto kind-0 — the address already
+            // works without it, so a publish failure never blocks the sheet.
+            Task { await store.syncLightningAddressToProfile() }
             dismiss()
         } catch {
             registrationError = error.localizedDescription
