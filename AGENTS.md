@@ -29,6 +29,10 @@ xcodebuild -project wisp.xcodeproj -scheme wisp -destination 'platform=iOS Simul
 
 Tests under `wispTests/` use the Swift Testing framework (`import Testing`, `@Test`), not XCTest. Substantive coverage lives in `Nip44Tests`, `NSpamTests`, `RelaySettingsTests`, `SafetyTests`. UI tests under `wispUITests/` are XCTest.
 
+## Dev / QA hooks
+
+- **Crash-reporting test hook**: tapping the drawer's version footer ("Zap Cooking vX", under Logout) 7 times — each tap within 2 s of the previous, or the counter resets — fires `fatalError("Test crash")` on purpose, to exercise crash reporting. Lives in `SidebarDrawerView.handleCrashTestTap()`.
+
 ## Screenshots for UI changes (required)
 
 Any change that alters what a screen looks like — layout, styling, new/removed controls, gesture behavior — ships simulator screenshots in the same PR, committed under `docs/screenshots/<area>/` (`composer/`, `live/`, `lazarus/` exist; add a folder for new areas). Unit tests alone are not sufficient evidence for a UI change.
