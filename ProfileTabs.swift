@@ -382,7 +382,7 @@ struct GalleryTabView: View {
 
     @ViewBuilder
     private var galleryGrid: some View {
-        let screenWidth = UIScreen.main.bounds.width
+        let screenWidth = mediaLayoutScreenWidth()
         let totalGaps = spacing * (columnCount - 1) + edgePadding * 2
         let tileWidth = ((screenWidth - totalGaps) / columnCount).rounded(.down)
         let tileHeight = (tileWidth * 5.0 / 4.0).rounded(.down)
@@ -491,7 +491,7 @@ struct MediaTabView: View {
 
     @ViewBuilder
     private func mediaGrid(items: [MediaItem]) -> some View {
-        let screenWidth = UIScreen.main.bounds.width
+        let screenWidth = mediaLayoutScreenWidth()
         let totalGaps = spacing * (columnCount - 1) + edgePadding * 2
         let tileSize = ((screenWidth - totalGaps) / columnCount).rounded(.down)
         let rows = Int(ceil(Double(items.count) / Double(columnCount)))
