@@ -78,6 +78,21 @@ enum FeatureFlags {
     /// editor and manual entry remains.
     static let altTextAiEnabled: Bool = false
 
+    /// Member login (NIP-42) to the curated feed relay,
+    /// `wss://feed.zap.cooking`. **`false` on iOS (Guideline 2.1(b))**, same
+    /// reason as `cheffyEnabled`: the relay serves everyone the last 14 days,
+    /// and a logged-in Cook+ member the full history, full topic feeds and
+    /// the archive views. Those are paid unlocks sold off-app, so iOS must
+    /// not reach them. Logging in is also the only thing that tells that
+    /// relay who is reading. REVERSIBLE on the same condition as the other
+    /// Cook+ flags (a region-gated external purchase link). When `false`,
+    /// `Nip42.buildAuthEvent` refuses to sign a challenge for that host, so
+    /// no relay path in the app (the shared pool, the group pool, Lazarus)
+    /// can answer its AUTH. Consulted through `Nip42.loginAllowed`, never
+    /// directly. `nonisolated` because the signing paths run off the main
+    /// actor.
+    nonisolated static let feedRelayLoginEnabled: Bool = false
+
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT
     /// ported.** Paying Lightning in-app to unlock an in-app AI feature is the
