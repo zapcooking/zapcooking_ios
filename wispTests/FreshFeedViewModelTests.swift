@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import wisp
 
@@ -708,6 +709,13 @@ import Testing
 
     // MARK: - Fresh UI PR (rulings 2026-11-10)
 
+    nonisolated final class Fired: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value = false
+        func set() { lock.lock(); _value = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return _value }
+    }
+
     final class DeletedIds {
         var ids: Set<String> = []
     }
@@ -863,5 +871,96 @@ import Testing
     @Test("DeletionSender announces a recorded deletion with the target ids")
     func deletionAnnouncementName() {
         #expect(Notification.Name.eventDeletionRecorded.rawValue == "WispEventDeletionRecorded")
+    }
+
+    // MARK: - Review fixes (PR #206)
+
+    @Test("page 1 failed: posts arriving on the tail show the list with the pill, not the error message")
+    func failedFirstPageThenTailShowsPill() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        rig.vm.activate()
+        let req = try await awaitReq(rig.transport, 1)
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(req.subId)\",\"error: down\"]")
+        #expect(await eventually { rig.vm.showsFailureMessage })
+        let tail = try #require(await eventually { self.reqs(rig.transport.latest).contains(where: Self.isTail) } ? reqs(rig.transport.latest).first(where: Self.isTail) : nil)
+        answer(rig.transport, tail, [try a.event(Self.now - 5)], eose: false)
+        #expect(await eventually { rig.vm.newPostsCount == 1 })
+        #expect(!rig.vm.showsFailureMessage)
+        #expect(!rig.vm.showsEmptyMessage)
+        #expect(rig.vm.showsNewPostsPill)
+    }
+
+    @Test("closing the pill is observed (the overlay updates at once)")
+    func dismissIsObserved() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let (_, tail) = try await start(rig, page: [try a.event(Self.now - 100)])
+        answer(rig.transport, tail, [try a.event(Self.now - 5)], eose: false)
+        #expect(await eventually { rig.vm.showsNewPostsPill })
+        let fired = Fired()
+        withObservationTracking { _ = rig.vm.showsNewPostsPill } onChange: { fired.set() }
+        rig.vm.dismissNewPostsPill()
+        #expect(fired.value, "dismissing must invalidate views reading showsNewPostsPill")
+        #expect(!rig.vm.showsNewPostsPill)
+    }
+
+    @Test("a refresh that fails after some posts arrived keeps the list and puts those posts behind the pill")
+    func partialFailedRefreshGoesToPill() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let shown = try [a.event(Self.now - 100)]
+        _ = try await start(rig, page: shown)
+        _ = await eventually { rig.vm.posts.count == 1 }
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let pageReq = try #require(await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 2 } ? reqs(rig.transport.latest).filter { $0.limit == 30 }.last : nil)
+        let arrived = try a.event(Self.now - 10)
+        answer(rig.transport, pageReq, [arrived], eose: false)
+        try await Task.sleep(for: .milliseconds(30))
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(pageReq.subId)\",\"error: overloaded\"]")
+        await refresh
+        #expect(rig.vm.posts.map(\.id) == shown.map(\.id))
+        #expect(rig.vm.newPostsCount == 1)
+        rig.vm.showNewPosts()
+        #expect(rig.vm.posts.map(\.id) == [arrived.id] + shown.map(\.id))
+    }
+
+    @Test("a failed refresh that keeps the finish line restarts an unfinished recipe load")
+    func failedRefreshRestartsRecipes() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        _ = try await start(rig, page: [try a.event(Self.now - 100)])   // short page: end + recipes asked
+        _ = await eventually { self.reqs(rig.transport.latest).contains { $0.kinds == [30023] } }
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let pageReq = try #require(await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 2 } ? reqs(rig.transport.latest).filter { $0.limit == 30 }.last : nil)
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(pageReq.subId)\",\"error: overloaded\"]")
+        await refresh
+        #expect(rig.vm.finishLine.caughtUp)
+        let recipeReqs = await eventually { self.reqs(rig.transport.latest).filter { $0.kinds == [30023] }.count == 2 }
+        #expect(recipeReqs, "the recipe row is asked for again")
+        let recipe = try a.longForm(Self.now - 40 * Self.day, d: "soup", recipe: true)
+        answer(rig.transport, reqs(rig.transport.latest).filter { $0.kinds == [30023] }.last!, [recipe])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [recipe.id] })
+    }
+
+    @Test("the recipe row drops deleted and far-future recipes, and keeps old edits")
+    func recipeRowGuards() async throws {
+        let a = try Author()
+        let deleted = DeletedIds()
+        let rig = makeRig(deleted: deleted)
+        _ = try await start(rig, page: [try a.event(Self.now - 100)])
+        let recipesReq = try #require(await eventually { self.reqs(rig.transport.latest).contains { $0.kinds == [30023] } } ? reqs(rig.transport.latest).first { $0.kinds == [30023] } : nil)
+        let gone = try a.longForm(Self.now - 30 * Self.day, d: "gone", recipe: true)
+        let future = try a.longForm(Self.now + 3600, d: "future", recipe: true)
+        let oldEdit = try a.longForm(Self.now - 20 * Self.day, d: "classic", publishedAt: Self.now - 900 * Self.day, recipe: true)
+        deleted.ids = [gone.id]
+        answer(rig.transport, recipesReq, [gone, future, oldEdit])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [oldEdit.id] })
+    }
+
+    @Test("the optimistic row shows only for kinds Fresh keeps")
+    func pendingRowKinds() {
+        for kind in [1, 30023, 1068] { #expect(FreshFeedViewModel.showsPendingRow(kind: kind)) }
+        for kind in [20, 21, 22, 6] { #expect(!FreshFeedViewModel.showsPendingRow(kind: kind)) }
     }
 }

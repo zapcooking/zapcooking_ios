@@ -112,7 +112,8 @@ final class FreshFeedViewModel {
     private(set) var newPostsCount = 0
     /// How many waiting posts the reader dismissed the pill for; the pill
     /// comes back when more arrive.
-    @ObservationIgnored private var pillDismissedAt = 0
+    /// Observed: closing the pill must update the overlay at once.
+    private var pillDismissedAt = 0
 
     /// The pill shows while posts wait that the reader hasn't dismissed.
     var showsNewPostsPill: Bool { newPostsCount > pillDismissedAt }
@@ -127,7 +128,11 @@ final class FreshFeedViewModel {
     /// The "nothing yet" message. Once the end is reached the list shows
     /// instead, so the caught-up line and the recipe row are visible even
     /// when no post is.
-    var showsEmptyMessage: Bool { isEmpty && !finishLine.caughtUp }
+    var showsEmptyMessage: Bool { isEmpty && !finishLine.caughtUp && newPostsCount == 0 }
+
+    /// "Couldn't reach Fresh": page 1 failed with nothing to show. Posts
+    /// waiting behind the pill show the list (and its pill) instead.
+    var showsFailureMessage: Bool { loadFailed && posts.isEmpty && newPostsCount == 0 }
 
     // MARK: Tunables
 
@@ -417,6 +422,14 @@ final class FreshFeedViewModel {
             let answered = answer.outcome == .answered || answer.outcome == .floor
             if replace && refresh && !answered {
                 // Failed / timed-out / refused refresh: keep what is shown.
+                // Posts that did arrive are already marked seen by the
+                // client, so the restarted tail won't send them again: they
+                // wait behind the pill instead of being lost.
+                holdBehindPill(answer.events.filter(accept))
+                persist(answer.events.filter(accept))
+                // The refresh cancelled an unfinished recipe load; a kept
+                // finish line needs its row.
+                if finishLine.caughtUp && !recipesLoaded { startRecipes() }
                 isPaging = false
                 return true
             }
@@ -495,8 +508,12 @@ final class FreshFeedViewModel {
         guard epoch == self.epoch, !Task.isCancelled else { return }
         let rules = self.rules()
         var byCoordinate: [String: NostrEvent] = [:]
+        let ceiling = now() + FreshRelayClient.futureSkewSeconds
         for event in answer.events where FreshPosts.isRecipe(kind: event.kind, tags: event.tags) {
-            guard FreshPosts.passesReaderFilters(event, rules: rules), !isHiddenLocally(event) else { continue }
+            // The feed's rules, minus the old-edit rule (recipes keep old
+            // edits): reader filters, local hides, deletions, future dates.
+            guard FreshPosts.passesReaderFilters(event, rules: rules), !isHiddenLocally(event),
+                  !isDeleted(event), event.createdAt <= ceiling else { continue }
             let coordinate = RecipeRepository.coordinate(event)
             if let kept = byCoordinate[coordinate], kept.createdAt >= event.createdAt { continue }
             byCoordinate[coordinate] = event
@@ -564,12 +581,9 @@ final class FreshFeedViewModel {
             tailStatus = .live
             retryAttempt = 0
             guard accept(event) else { return }
-            guard !relayPosts.contains(where: { $0.id == event.id }),
-                  !pendingNew.contains(where: { $0.id == event.id }) else { return }
             persist([event])
             // Held behind the pill: nothing moves until the reader taps it.
-            pendingNew.append(event)
-            newPostsCount = pendingNew.count
+            holdBehindPill([event])
         case .lost:
             tailStatus = .lost
             scheduleTailRetry()
@@ -578,6 +592,23 @@ final class FreshFeedViewModel {
         case .ended:
             tailStatus = .ended
         }
+    }
+
+    /// The optimistic "publishing" row is shown only for kinds Fresh keeps
+    /// (notes, long-form, polls): a gallery post (20/21/22) would vanish
+    /// when its published event arrives, since Fresh can't pin it.
+    nonisolated static func showsPendingRow(kind: Int) -> Bool {
+        FreshPosts.feedKinds.contains(kind)
+    }
+
+    /// Queue posts behind the pill, skipping any already shown or waiting.
+    private func holdBehindPill(_ events: [NostrEvent]) {
+        for event in events
+        where !relayPosts.contains(where: { $0.id == event.id })
+            && !pendingNew.contains(where: { $0.id == event.id }) {
+            pendingNew.append(event)
+        }
+        newPostsCount = pendingNew.count
     }
 
     /// The pill was tapped: the waiting posts go into the list (a new post on

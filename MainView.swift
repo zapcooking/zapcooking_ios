@@ -1860,7 +1860,7 @@ struct MainView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Loading Fresh")
-        } else if freshFeedVM.loadFailed && freshFeedVM.posts.isEmpty {
+        } else if freshFeedVM.showsFailureMessage {
             freshMessage("Couldn't reach Fresh", detail: "Pull down to retry.")
         } else if freshFeedVM.showsEmptyMessage {
             freshMessage("Nothing fresh yet", detail: "Pull down to refresh.")
@@ -1922,7 +1922,8 @@ struct MainView: View {
                     // moment Post is tapped and gives way to the published
                     // event (`FreshFeedViewModel.insertOwnPublished`).
                     if let pending = PendingPostStore.shared.pending,
-                       !PendingPostStore.shared.pendingIsReply {
+                       !PendingPostStore.shared.pendingIsReply,
+                       FreshFeedViewModel.showsPendingRow(kind: pending.event.kind) {
                         PendingPostRow(pending: pending)
                             .padding(.vertical, 4)
                     }
