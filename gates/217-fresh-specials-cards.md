@@ -1,10 +1,23 @@
 # GATE — fresh/specials-cards (PR #217: Fresh specials S3)
 
-Stacked on #216 (`fresh/specials-loader` at edd182d, its gate HEAD). One
-code commit on top, **8f53e4d (code frozen)**. This file is the only commit
-after it, and it is the HEAD commit. A review fix breaks the freeze: push a
-fresh gate file last. If #216 changes, this branch merges it and is
-re-gated.
+Stacked on #216 (`fresh/specials-loader` at edd182d, its gate HEAD). Code
+commits 8f53e4d (cards) and **cd8185a (code frozen)**: the device-pass
+fixes. This file replaces gate 3fbe498 and is the HEAD commit. A review fix
+breaks the freeze: push a fresh gate file last. If #216 changes, this
+branch merges it and is re-gated.
+
+## cd8185a: Seth's device-pass fixes
+1. **Mentions rendered raw in spotlight tiles.**
+   - `plainText` now uses `ContentParser`, with no second parser.
+   - A profile mention reads `@name`, using `RichInlineTextView.mentionName`.
+     That rule was extracted from the inline renderer, and the feed still
+     uses it.
+   - Note, nevent and naddr references, links and media are dropped.
+2. **Spotlight authors had no profile.** A readied spotlight now asks for
+   its authors' and mentioned people's profiles before it is placed.
+3. **The recipe box took a tagged article.** `FreshRecipeBox.isCandidate`
+   now uses `RecipeParser.isRecipe`. The finish-line row's half of this fix
+   is #218.
 
 `freshSpecialsEnabled` is `false`. No test opens a socket or makes a
 network request, publishes an event or sends AUTH. The screenshots come
@@ -12,8 +25,9 @@ from the in-app fixture relay with a watch-only account.
 
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), DerivedData `wisp-specials-cards` (cold at
-fd98482, then incremental): **TEST BUILD SUCCEEDED** at 8f53e4d. Zero
-warnings in `wisp/FreshFeedViewModel.swift`, `wisp/FreshSpecialCards.swift`,
+fd98482, then incremental): **TEST BUILD SUCCEEDED** at cd8185a. Zero
+warnings in `RichInlineTextView.swift`, `wispTests/FreshSpecialsTests.swift`,
+`wispTests/FreshFeedViewModelTests.swift`, `wisp/FreshFeedViewModel.swift`, `wisp/FreshSpecialCards.swift`,
 `wisp/FreshRecipeBox.swift`, `wisp/FreshScreenshotFixtures.swift`,
 `wisp/FreshScreenshotHarness.swift`, `MainView.swift`,
 `wispTests/FreshSpecialsListTests.swift`,
@@ -31,15 +45,27 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
 sh ci_scripts/gate.sh --parse s3-gate.xcresult
 ```
 ```
-gate: 1945 passed / 3 failed / 23 skipped / 1971 total  (bundle result: Failed)
+gate: 1950 passed / 3 failed / 23 skipped / 1976 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1971 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1976 tests ran
 ```
-First full run at 8f53e4d. New tests:
-- `FreshSpecialsListTests` (14)
-- `FreshScreenshotFixturesTests/fixtureSpecials`
+First full run at cd8185a. (At 8f53e4d: PASS 1945/3/23/1971.) New tests:
+- `FreshSpecialsListTests` (18). Four came with cd8185a:
+  - tile text with mentions;
+  - profiles requested when a spotlight is readied;
+  - a tile whose profiles arrive after it is on screen;
+  - a tagged article never becomes a box card.
+- `FreshScreenshotFixturesTests`: `fixtureSpecials` and
+  `fixtureSpotlightMention`.
+- `FreshRecipeBoxTests/candidates`: now includes a tagged article.
+
+**Mutation check.** With the loader's `onChange` set back to
+`decideSlots()` (no profile request), `spotlightRequestsProfiles` fails.
+`lateProfilesReachTheTile` still passes under that mutation, because the
+`updates()` path delivered late profiles before this fix too. That test
+covers the arrival path, not the request.
 
 Also covered: the unchanged `FreshFeedViewModelTests` (the flag-off
 behaviour) and `FreshCopyTests` (which scans `FreshSpecialCards.swift`). No
@@ -48,8 +74,10 @@ local patch. No `project.pbxproj` diff.
 ## Gate 3: screenshots (not part of the hermetic run)
 `wispUITests/FreshScreenshotsUITests/testFreshSpecialCards` on the
 simulators shots-iphone-18pro (iPhone 18 Pro) and shots-ipad-13 (iPad Pro
-13" M5), iOS 27.2. Final runs: iPhone passed twice, iPad (portrait and
-landscape) passed once. Nine JPEGs are in `docs/screenshots/fresh/`.
+13" M5), iOS 27.2. Nine JPEGs are in `docs/screenshots/fresh/`. At
+cd8185a, iPhone and iPad (portrait and landscape) each passed once, and the
+six spotlight shots were re-taken: the Japanese tile now reads
+"@June Okafor".
 
 Earlier runs failed, and each failure was fixed:
 - **iPhone, first slot skipped.** Recipes are now asked for along with
