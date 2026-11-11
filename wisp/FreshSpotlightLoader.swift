@@ -25,7 +25,9 @@ import Foundation
 ///
 /// After a build that left nothing ready, the next one is scheduled: when
 /// the hold ends (plus 50 ms), else after `emptyRetrySeconds` (web
-/// `SpecialsFlow`). When every topic is used the type is out for the
+/// `SpecialsFlow`). Calling `prepare()` or `kick()` again doesn't start a
+/// build sooner. When no topic is left that the session may show (all used,
+/// or only the last spotlight's parent group), spotlights are out for the
 /// session and nothing more is asked. While `enabled` is false (the flag)
 /// nothing is asked at all.
 ///
@@ -75,6 +77,9 @@ final class FreshSpotlightLoader {
     private var previewRefusedAt: TimeInterval?
     private var previewRefusals = 0
     private var cancelRetry: (() -> Void)?
+    /// After a build that came back empty (or failed), no new build before
+    /// this (`emptyRetrySeconds`), however often `prepare()` is called.
+    private var emptyRetryAt: TimeInterval?
     private var disposed = false
 
     init(_ deps: Dependencies) {
@@ -94,6 +99,15 @@ final class FreshSpotlightLoader {
     func isAvailable(strict: Bool) -> Bool {
         guard deps.enabled(), !isOut else { return false }
         return ready != nil || (strict && (isBuilding || isStarting))
+    }
+
+    /// A build may start now: nothing ready or running, no preview hold, and
+    /// the empty retry's wait (if any) is over.
+    private var canStartNow: Bool {
+        guard deps.enabled(), !disposed, !isOut, ready == nil, !isBuilding,
+              previewHoldLeft() == 0 else { return false }
+        if let emptyRetryAt, deps.clock() < emptyRetryAt { return false }
+        return true
     }
 
     // MARK: - Preview hold
@@ -139,16 +153,16 @@ final class FreshSpotlightLoader {
         guard deps.enabled(), !disposed, !isOut, previewHoldLeft() == 0 else { return nil }
         let groups = await deps.topics()
         guard !disposed, !groups.isEmpty else { return nil }
-        if FreshSpecials.pickTopic(groups, used: usedTopics, lastParent: nil, history: [:]) == nil {
-            isOut = true
-            return nil
-        }
+        if markOutIfExhausted(groups) { return nil }
         var tried: Set<String> = []
         for _ in 0..<FreshSpecialsConfig.maxTopicTries {
             guard let topic = FreshSpecials.pickTopic(
                 groups, used: usedTopics, tried: tried, lastParent: lastParent,
                 history: deps.topicHistory(), rng: deps.rng
-            ) else { return nil }
+            ) else {
+                markOutIfExhausted(groups)
+                return nil
+            }
             tried.insert(topic.slug)
             let answer = await deps.preview(topic.slug)
             guard !disposed, deps.enabled() else { return nil }
@@ -159,6 +173,7 @@ final class FreshSpotlightLoader {
             switch answer.outcome {
             case .invalid:
                 usedTopics.insert(topic.slug)
+                if markOutIfExhausted(groups) { return nil }
                 continue
             case .failed, .timedOut, .floor:
                 return nil
@@ -169,10 +184,27 @@ final class FreshSpotlightLoader {
             usedTopics.insert(topic.slug)
             guard let posts = FreshSpecials.spotlightPosts(
                 answer.events.filter(deps.accept), shown: deps.shown(), exclude: deps.exclude()
-            ) else { continue }  // thin for this reader
+            ) else {  // thin for this reader
+                if markOutIfExhausted(groups) { return nil }
+                continue
+            }
             return .spotlight(topic, posts: posts)
         }
         return nil
+    }
+
+    /// No topic is left that this session may still show: none unused, or
+    /// only ones in the last spotlight's parent group (which the next one
+    /// may not share; `lastParent` only changes with a new spotlight, so
+    /// that never clears). Spotlights are out for the session, with no
+    /// retry. Web keeps retrying an empty pick every 15 s in that case.
+    @discardableResult
+    private func markOutIfExhausted(_ groups: [FreshTopicGroup]) -> Bool {
+        guard FreshSpecials.pickTopic(groups, used: usedTopics, lastParent: lastParent, history: [:]) == nil else {
+            return false
+        }
+        isOut = true
+        return true
     }
 
     /// Keep one spotlight ready. A build that leaves nothing ready is tried
@@ -180,12 +212,15 @@ final class FreshSpotlightLoader {
     /// topics, disabled or disposed: no retry.
     func prepare() async {
         guard deps.enabled(), !disposed, ready == nil, !isBuilding, !isOut else { return }
-        cancelRetry?()
-        cancelRetry = nil
-        guard previewHoldLeft() == 0 else {
-            scheduleRetry()
+        // Waiting out a hold or the empty retry: the pending timer runs the
+        // next build; asking again doesn't move it earlier.
+        guard canStartNow else {
+            if cancelRetry == nil { scheduleRetry() }
             return
         }
+        cancelRetry?()
+        cancelRetry = nil
+        emptyRetryAt = nil
         isBuilding = true
         let built = await build()
         isBuilding = false
@@ -201,6 +236,12 @@ final class FreshSpotlightLoader {
     /// Start `prepare()` without waiting (the list's call).
     func kick() {
         guard deps.enabled(), !disposed, !isOut else { return }
+        // Only a build that will really start may hold a far slot: during a
+        // hold or the empty retry's wait the turn goes to a recipe.
+        guard canStartNow else {
+            if ready == nil, !isBuilding, cancelRetry == nil { scheduleRetry() }
+            return
+        }
         isStarting = true
         Task {
             self.isStarting = false
@@ -234,10 +275,16 @@ final class FreshSpotlightLoader {
         guard !disposed, !isOut, deps.enabled() else { return }
         cancelRetry?()
         let hold = previewHoldLeft()
-        let delay = hold > 0 ? hold + 0.05 : Double(FreshSpecialsConfig.emptyRetrySeconds)
+        if hold > 0 {
+            emptyRetryAt = nil
+        } else if emptyRetryAt.map({ deps.clock() >= $0 }) ?? true {
+            emptyRetryAt = deps.clock() + Double(FreshSpecialsConfig.emptyRetrySeconds)
+        }
+        let delay = hold > 0 ? hold + 0.05 : max(0, (emptyRetryAt ?? deps.clock()) - deps.clock())
         cancelRetry = deps.schedule(delay) { [weak self] in
             guard let self else { return }
             self.cancelRetry = nil
+            self.emptyRetryAt = nil
             self.kick()
         }
     }
