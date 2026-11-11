@@ -1,9 +1,9 @@
 import Foundation
 
 /// The feed relay's topic catalog, from its NIP-11 document (`topics`),
-/// ported from web `src/lib/freshFeed/topicList.ts` (parsing only: the
-/// fetch is the later spotlight-card PR's). Kept for the spotlight cards; v1
-/// has no topic chip row and no topic screen.
+/// ported from web `src/lib/freshFeed/topicList.ts` (parsing; the GET and
+/// its cache are `FreshTopicList`). Used by the spotlight cards; v1 has no
+/// topic chip row and no topic screen.
 ///
 /// Shape as measured (build spec §2 "Fresh feed relay", NIP-11): `parents[]`
 /// groups `{slug, name, count_14d, topics[]}`, `featured_topics[]`
