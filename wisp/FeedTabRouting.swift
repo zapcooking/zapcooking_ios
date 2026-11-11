@@ -15,6 +15,8 @@ enum FeedTabRouting {
         case general
         /// Discovered NIP-53 streams (`LiveStreamRepository`), Sidecar-style.
         case liveVideo
+        /// The curated feed relay (`FreshFeedViewModel`).
+        case fresh
     }
 
     static func body(for kind: FeedKind) -> Body {
@@ -23,6 +25,8 @@ enum FeedTabRouting {
             return .onlyFood
         case .liveVideo:
             return .liveVideo
+        case .fresh:
+            return .fresh
         case .follows, .relay, .relaySet, .extendedNetwork:
             return .general
         }
@@ -44,6 +48,24 @@ enum FeedTabRouting {
     static func resumeOnlyFoodIfActive(kind: FeedKind, onlyFood: OnlyFoodFeedViewModel) {
         guard kind == .onlyFood else { return }
         onlyFood.resume()
+    }
+
+    /// Appear / kind-change hook for Fresh. The feed's socket is open only
+    /// while Fresh is the selected kind: picking it activates the VM (page 1
+    /// the first time, a new tail after that); picking anything else closes
+    /// the socket and keeps the list.
+    static func syncFresh(kind: FeedKind, fresh: FreshFeedViewModel) {
+        if kind == .fresh {
+            fresh.activate()
+        } else {
+            fresh.deactivate()
+        }
+    }
+
+    /// Foreground hook. The VM ignores it unless Fresh is active.
+    static func resumeFreshIfActive(kind: FeedKind, fresh: FreshFeedViewModel) {
+        guard kind == .fresh else { return }
+        fresh.appDidBecomeActive()
     }
 
     /// Re-tap of the feed tab: pop the stack to its root and bump the
@@ -72,7 +94,9 @@ enum FeedTabRouting {
         guard tracker.observe(kind) else { return nil }
         switch body(for: kind) {
         case .general: return .general
-        case .onlyFood, .liveVideo: return nil
+        // Fresh keeps its list across a switch (no new page), so it keeps
+        // the position too, like OnlyFood.
+        case .onlyFood, .liveVideo, .fresh: return nil
         }
     }
 
@@ -94,7 +118,7 @@ enum FeedTabRouting {
         switch kind {
         case .onlyFood:
             return OnlyFoodCompose.suggestedTags
-        case .follows, .relay, .relaySet, .extendedNetwork, .liveVideo:
+        case .follows, .relay, .relaySet, .extendedNetwork, .liveVideo, .fresh:
             return []
         }
     }

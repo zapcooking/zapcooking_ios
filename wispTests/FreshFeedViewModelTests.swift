@@ -1,0 +1,456 @@
+import Foundation
+import Testing
+@testable import wisp
+
+/// `FreshFeedViewModel` driven end to end through the real `FreshRelayClient`
+/// on `FakeGroupTransport` (no socket, no relay), with real signed events.
+/// Notifications go through a private `NotificationCenter`, so nothing here
+/// reaches the rest of the hosted app.
+@Suite(.serialized) @MainActor struct FreshFeedViewModelTests {
+
+    // MARK: - Fixtures
+
+    nonisolated static let now = 1_800_000_000
+    nonisolated static let floor = now - FreshPosts.freeWindowSeconds
+    static let day = 86_400
+
+    struct Author {
+        let priv: Data
+        let pubkey: String
+        init() throws {
+            priv = Schnorr.randomPrivkey()
+            pubkey = Hex.encode(try Schnorr.xonlyPubkey(privkey32: priv))
+        }
+        func event(_ createdAt: Int, kind: Int = 1, content: String? = nil, tags: [[String]] = []) throws -> NostrEvent {
+            try NostrEvent.sign(privkey32: priv, pubkey: pubkey, kind: kind, createdAt: createdAt,
+                                tags: tags, content: content ?? "post \(createdAt) \(UUID().uuidString)")
+        }
+        func longForm(_ createdAt: Int, d: String, publishedAt: Int? = nil, recipe: Bool = false) throws -> NostrEvent {
+            var tags: [[String]] = [["d", d]]
+            if let publishedAt { tags.append(["published_at", String(publishedAt)]) }
+            if recipe { tags.append(["t", "zapcooking"]) }
+            return try event(createdAt, kind: 30023, content: "long form \(d) \(createdAt)", tags: tags)
+        }
+    }
+
+    final class Rules {
+        var snapshot: SafetyFilterSnapshot? = nil
+        var reportedCoordinates: Set<String> = []
+        var own: [NostrEvent] = []
+    }
+
+    final class Store: FreshVisitStorage, @unchecked Sendable {
+        var data: [String: String] = [:]
+        func freshVisitValue(forKey key: String) throws -> String? { data[key] }
+        func setFreshVisitValue(_ value: String, forKey key: String) throws { data[key] = value }
+    }
+
+    struct Rig {
+        let transport: FakeGroupTransport
+        let vm: FreshFeedViewModel
+        let center: NotificationCenter
+        let rules: Rules
+        let store: Store
+    }
+
+    func makeRig(pubkey: String = String(repeating: "c", count: 64), rules: Rules = Rules(),
+                 store: Store = Store(), retry: [Duration] = [.milliseconds(30)]) -> Rig {
+        let transport = FakeGroupTransport()
+        let clientCenter = NotificationCenter()
+        let client = FreshRelayClient(
+            transport: transport, now: { Self.now }, silenceTimeout: 5,
+            notificationCenter: clientCenter,
+            foregroundNotification: Notification.Name("FreshFeedViewModelTests.fg")
+        )
+        let center = NotificationCenter()
+        let vm = FreshFeedViewModel(
+            pubkey: pubkey, client: client, now: { Self.now },
+            rules: { rules.snapshot },
+            isReportedCoordinate: { rules.reportedCoordinates.contains($0) },
+            ownLocalPosts: { rules.own },
+            persist: { _ in },
+            visitStorage: store, lastVisit: FreshLastVisit(),
+            notificationCenter: center, retryDelays: retry
+        )
+        return Rig(transport: transport, vm: vm, center: center, rules: rules, store: store)
+    }
+
+    struct Req {
+        let subId: String
+        let filter: [String: Any]
+        var since: Int? { filter["since"] as? Int }
+        var until: Int? { filter["until"] as? Int }
+        var kinds: [Int]? { filter["kinds"] as? [Int] }
+        var tTags: [String]? { filter["#t"] as? [String] }
+        var limit: Int? { filter["limit"] as? Int }
+    }
+
+    func reqs(_ socket: FakeGroupSocket?) -> [Req] {
+        (socket?.sent ?? []).compactMap { frame in
+            guard frame.hasPrefix("[\"REQ\""), let data = frame.data(using: .utf8),
+                  let a = try? JSONSerialization.jsonObject(with: data) as? [Any], a.count == 3,
+                  let id = a[1] as? String, let f = a[2] as? [String: Any] else { return nil }
+            return Req(subId: id, filter: f)
+        }
+    }
+
+    @discardableResult
+    func eventually(_ seconds: Double = 3, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    func awaitReq(_ t: FakeGroupTransport, _ n: Int) async throws -> Req {
+        let ok = await eventually { self.reqs(t.latest).count >= n }
+        try #require(ok, "REQ #\(n) never sent")
+        return reqs(t.latest)[n - 1]
+    }
+
+    func answer(_ t: FakeGroupTransport, _ req: Req, _ events: [NostrEvent], eose: Bool = true) {
+        for e in events { t.latest?.feed("[\"EVENT\",\"\(req.subId)\",\(e.toJSON())]") }
+        if eose { t.latest?.feed("[\"EOSE\",\"\(req.subId)\"]") }
+    }
+
+    /// Activate and answer page 1 with `page`; returns once the tail's REQ is out.
+    func start(_ rig: Rig, page: [NostrEvent]) async throws -> (page: Req, tail: Req) {
+        rig.vm.activate()
+        let pageReq = try await awaitReq(rig.transport, 1)
+        answer(rig.transport, pageReq, page)
+        // A short page 1 also asks for the recipe row, in either order with
+        // the tail: find the tail by its filter, not its position.
+        let found = await eventually { self.reqs(rig.transport.latest).contains(where: Self.isTail) }
+        try #require(found, "tail REQ never sent")
+        return (pageReq, reqs(rig.transport.latest).first(where: Self.isTail)!)
+    }
+
+    static func isTail(_ r: Req) -> Bool {
+        r.limit == FreshRelayClient.tailBacklogLimit && r.kinds == FreshPosts.feedKinds && r.until == nil
+    }
+
+    func rules(blocked: Set<String> = [], words: Set<String> = [], wot: Bool = false) -> SafetyFilterSnapshot {
+        SafetyFilterSnapshot(mutedWords: words, blockedPubkeys: blocked, mutedThreads: [],
+                             wotEnabled: wot, qualifiedNetwork: [], userPubkey: "")
+    }
+
+    // MARK: - Page 1 and filters
+
+    @Test("page 1: since = floor, kinds [1,30023,1068]; mutes, blocks, old edits and reported coordinates dropped; WoT not applied")
+    func firstPageFilters() async throws {
+        let a = try Author(), muted = try Author(), blocked = try Author()
+        let r = Rules()
+        // WoT on with an empty network fails closed everywhere else; Fresh ignores it.
+        r.snapshot = rules(blocked: [blocked.pubkey], words: ["spoiler"], wot: true)
+        let reported = try a.longForm(Self.now - 400, d: "reported")
+        r.reportedCoordinates = [RecipeRepository.coordinate(reported)]
+        let rig = makeRig(rules: r)
+
+        let keep1 = try a.event(Self.now - 100)
+        let keep2 = try muted.event(Self.now - 200)
+        let page = [keep1, keep2,
+                    try muted.event(Self.now - 250, content: "big SPOILER ahead"),
+                    try blocked.event(Self.now - 300),
+                    try a.longForm(Self.now - 350, d: "old", publishedAt: Self.now - 400 * Self.day),
+                    reported]
+        let (pageReq, tailReq) = try await start(rig, page: page)
+
+        #expect(pageReq.since == Self.floor)
+        #expect(pageReq.kinds == [1, 30023, 1068])
+        #expect(pageReq.until == nil)
+        #expect(await eventually { rig.vm.posts.map(\.id) == [keep1.id, keep2.id] })
+        #expect(rig.vm.hasLoaded && !rig.vm.loadFailed)
+        #expect(tailReq.kinds == [1, 30023, 1068])
+        #expect(rig.vm.tailStatus == .live)
+        #expect(!rig.transport.opened.flatMap(\.sent).contains { $0.hasPrefix("[\"AUTH\"") || $0.hasPrefix("[\"EVENT\"") })
+    }
+
+    @Test("page 1 failing with nothing to show is loadFailed; a refresh that answers clears it")
+    func firstPageFailure() async throws {
+        let rig = makeRig()
+        rig.vm.activate()
+        let req = try await awaitReq(rig.transport, 1)
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(req.subId)\",\"error: shutting down\"]")
+        #expect(await eventually { rig.vm.loadFailed })
+        #expect(rig.vm.posts.isEmpty)
+
+        let a = try Author()
+        let post = try a.event(Self.now - 10)
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let again = await eventually { self.reqs(rig.transport.latest).contains { $0.subId != req.subId && $0.until == nil && $0.since == Self.floor } }
+        try #require(again)
+        let req2 = reqs(rig.transport.latest).last { $0.since == Self.floor && $0.kinds == [1, 30023, 1068] && $0.limit == 30 }!
+        answer(rig.transport, req2, [post])
+        await refresh
+        #expect(!rig.vm.loadFailed)
+        #expect(rig.vm.posts.map(\.id) == [post.id])
+    }
+
+    // MARK: - Paging and the finish line
+
+    @Test("paging asks until = the previous page's oldest; a short page reaches the end and loads the recipe row")
+    func pagingToTheEnd() async throws {
+        let a = try Author(), b = try Author()
+        let rig = makeRig()
+        let page1 = try (0..<30).map { i in try (i % 2 == 0 ? a : b).event(Self.now - 10 - i * 10) }
+        _ = try await start(rig, page: page1)
+        #expect(await eventually { rig.vm.posts.count == 30 })
+        #expect(rig.vm.finishLine == .none)
+
+        async let more: Void = rig.vm.loadMoreAndWait()
+        let pageReq = try await awaitReq(rig.transport, 3)
+        #expect(pageReq.until == page1.map(\.createdAt).min())
+        #expect(pageReq.since == Self.floor)
+        let page2 = try [a.event(Self.now - 400), b.event(Self.now - 410)]
+        answer(rig.transport, pageReq, page2)
+        await more
+        #expect(rig.vm.posts.count == 32)
+        #expect(rig.vm.finishLine.caughtUp && rig.vm.finishLine.recipeRow)
+
+        // The recipe row: kind 30023 with #t, no since; newest per coordinate,
+        // old edits kept, reader's rules applied.
+        let recipesReq = try await awaitReq(rig.transport, 4)
+        #expect(recipesReq.kinds == [30023])
+        #expect(recipesReq.since == nil)
+        #expect(Set(recipesReq.tTags ?? []) == ["zapcooking", "nostrcooking"])
+        let old = try a.longForm(Self.now - 900 * Self.day, d: "soup", publishedAt: Self.now - 1000 * Self.day, recipe: true)
+        let newer = try a.longForm(Self.now - 800 * Self.day, d: "soup", publishedAt: Self.now - 1000 * Self.day, recipe: true)
+        let other = try b.longForm(Self.now - 700 * Self.day, d: "bread", recipe: true)
+        answer(rig.transport, recipesReq, [old, newer, other])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [other.id, newer.id] })
+    }
+
+    @Test("auth-required on a page is the floor: the end, not an error")
+    func floorEndsTheFeed() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let page1 = try (0..<30).map { try a.event(Self.now - 10 - $0 * 10) }
+        _ = try await start(rig, page: page1)
+        _ = await eventually { rig.vm.posts.count == 30 }
+        async let more: Void = rig.vm.loadMoreAndWait()
+        let req = try await awaitReq(rig.transport, 3)
+        rig.transport.latest?.feed("[\"AUTH\",\"challenge\"]")
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(req.subId)\",\"auth-required: posts older than 14 days are for Zap Cooking members\"]")
+        await more
+        #expect(rig.vm.finishLine.caughtUp)
+        #expect(!rig.vm.loadFailed)
+        #expect(rig.vm.posts.count == 30)
+    }
+
+    // MARK: - Block / report instant hide
+
+    @Test("block: .contentHidden pubkeys drop the author at once, and the tail can't bring them back")
+    func blockInstantHide() async throws {
+        let x = try Author(), y = try Author()
+        let rig = makeRig()
+        let xPost = try x.event(Self.now - 100), yPost = try y.event(Self.now - 200)
+        let (_, tail) = try await start(rig, page: [xPost, yPost])
+        _ = await eventually { rig.vm.posts.count == 2 }
+
+        // What MuteRepository.blockUser → ContentHide.broadcast posts.
+        rig.center.post(name: .contentHidden, object: nil, userInfo: [
+            ContentHideKey.eventIds: [String](), ContentHideKey.pubkeys: [x.pubkey.uppercased()],
+            ContentHideKey.coordinates: [String](),
+        ])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [yPost.id] })
+
+        let xLater = try x.event(Self.now - 5)
+        let yLater = try y.event(Self.now - 4)
+        answer(rig.transport, tail, [xLater, yLater], eose: false)
+        #expect(await eventually { rig.vm.posts.first?.id == yLater.id })
+        #expect(!rig.vm.posts.contains { $0.pubkey == x.pubkey })
+    }
+
+    @Test("report: a long-form post is hidden by id and coordinate, so its edit stays hidden; recipe picks too")
+    func reportHidesLongFormByCoordinate() async throws {
+        let z = try Author(), y = try Author()
+        let rig = makeRig()
+        let article = try z.longForm(Self.now - 100, d: "a1")
+        let note = try y.event(Self.now - 200)
+        let (_, tail) = try await start(rig, page: [article, note])
+        _ = await eventually { rig.vm.posts.count == 2 }
+
+        // What ReportedContent.hide → ContentHide.broadcast posts for a
+        // kind-30023 report (ReportTarget.event sets the coordinate).
+        let target = ReportTarget.event(article)
+        #expect(target.coordinate == "30023:\(z.pubkey):a1")
+        rig.center.post(name: .contentHidden, object: nil, userInfo: [
+            ContentHideKey.eventIds: [article.id], ContentHideKey.pubkeys: [String](),
+            ContentHideKey.coordinates: [target.coordinate!],
+        ])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [note.id] })
+
+        let edit = try z.longForm(Self.now - 50, d: "a1")
+        let fresh = try y.event(Self.now - 40)
+        answer(rig.transport, tail, [edit, fresh], eose: false)
+        #expect(await eventually { rig.vm.posts.first?.id == fresh.id })
+        #expect(!rig.vm.posts.contains { $0.id == edit.id })
+    }
+
+    @Test("a coordinate already reported (persisted) is dropped at ingest, whatever the event id")
+    func persistedReportedCoordinate() async throws {
+        let z = try Author()
+        let r = Rules()
+        r.reportedCoordinates = ["30023:\(z.pubkey):gone"]
+        let rig = makeRig(rules: r)
+        let edit = try z.longForm(Self.now - 100, d: "gone")
+        let kept = try z.longForm(Self.now - 200, d: "kept")
+        _ = try await start(rig, page: [edit, kept])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [kept.id] })
+    }
+
+    @Test("long-form edits collapse to the newest per coordinate, on the page and from the tail")
+    func longFormEditsCollapse() async throws {
+        let z = try Author()
+        let rig = makeRig()
+        let v1 = try z.longForm(Self.now - 300, d: "x")
+        let v2 = try z.longForm(Self.now - 200, d: "x")
+        let (_, tail) = try await start(rig, page: [v2, v1])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [v2.id] })
+        let v3 = try z.longForm(Self.now - 100, d: "x")
+        answer(rig.transport, tail, [v3], eose: false)
+        #expect(await eventually { rig.vm.posts.map(\.id) == [v3.id] })
+    }
+
+    // MARK: - Own posts
+
+    @Test("own posts: last 14 days from local sources, in time order, replaced by the relay's copy by id")
+    func ownPostsPinned() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let mine = try me.event(Self.now - 150)
+        r.own = [mine, try me.event(Self.now - 20 * Self.day), try other.event(Self.now - 10)]
+        let rig = makeRig(pubkey: me.pubkey, rules: r)
+        let p1 = try other.event(Self.now - 100), p2 = try other.event(Self.now - 200)
+        let (_, tail) = try await start(rig, page: [p1, p2])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [p1.id, mine.id, p2.id] })
+
+        // A fresh publish is pinned at its time.
+        let published = try me.event(Self.now - 5)
+        rig.center.post(name: .nostrEventPublished, object: nil, userInfo: ["event": published])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [published.id, p1.id, mine.id, p2.id] })
+
+        // The relay later returns it: one copy.
+        answer(rig.transport, tail, [published], eose: false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(rig.vm.posts.filter { $0.id == published.id }.count == 1)
+        #expect(rig.vm.posts.count == 4)
+    }
+
+    // MARK: - Tail
+
+    @Test("tail: a new post goes on top; a late-admitted one is placed by its time")
+    func tailPlacement() async throws {
+        let a = try Author(), b = try Author()
+        let rig = makeRig()
+        let p1 = try a.event(Self.now - 100), p2 = try b.event(Self.now - 1000)
+        let (_, tail) = try await start(rig, page: [p1, p2])
+        _ = await eventually { rig.vm.posts.count == 2 }
+        let newest = try b.event(Self.now - 10)
+        let late = try b.event(Self.now - 500)
+        answer(rig.transport, tail, [newest, late], eose: false)
+        #expect(await eventually { rig.vm.posts.map(\.id) == [newest.id, p1.id, late.id, p2.id] })
+    }
+
+    @Test("tail lost in the foreground is retried after the backoff; not while backgrounded; the foreground hook revives")
+    func tailRetryWithBackoff() async throws {
+        let a = try Author()
+        let rig = makeRig(retry: [.milliseconds(40)])
+        _ = try await start(rig, page: [try a.event(Self.now - 100)])
+
+        rig.transport.latest?.dropConnection()
+        #expect(await eventually { rig.vm.tailStatus == .lost })
+        #expect(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty })
+        #expect(await eventually { rig.vm.tailStatus == .live })
+
+        // Backgrounded: a drop is not retried.
+        rig.vm.appDidEnterBackground()
+        rig.transport.latest?.dropConnection()
+        #expect(await eventually { rig.vm.tailStatus == .lost })
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(rig.transport.opened.count == 2)
+
+        // Foreground: revived at once.
+        rig.vm.appDidBecomeActive()
+        #expect(await eventually { rig.transport.opened.count == 3 && !self.reqs(rig.transport.latest).isEmpty })
+        let resumed = reqs(rig.transport.latest)[0]
+        #expect(resumed.since == Self.now - 100 - FreshRelayClient.tailResumeOverlapSeconds)
+    }
+
+    @Test("leaving Fresh closes the socket and keeps the list; coming back starts a tail, not page 1")
+    func deactivateAndReturn() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let post = try a.event(Self.now - 100)
+        _ = try await start(rig, page: [post])
+        _ = await eventually { rig.vm.posts.count == 1 }
+
+        await rig.vm.deactivateAndWait()
+        #expect(rig.vm.tailStatus == .idle)
+        #expect(rig.vm.posts.map(\.id) == [post.id])
+
+        rig.vm.activate()
+        #expect(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty })
+        let reqsAfter = reqs(rig.transport.latest)
+        #expect(reqsAfter.count == 1)
+        #expect(reqsAfter[0].limit == FreshRelayClient.tailBacklogLimit)
+        #expect(reqsAfter[0].since == Self.now - 100 - FreshRelayClient.tailResumeOverlapSeconds)
+    }
+
+    // MARK: - Last visit
+
+    @Test("last visit: the divider sits before the first post already seen; the newest shown is stored")
+    func lastVisitDivider() async throws {
+        let a = try Author(), b = try Author()
+        let store = Store()
+        let pubkey = String(repeating: "d", count: 64)
+        store.data[FreshLastVisit.key(pubkey: pubkey)] = String(Self.now - 150)
+        let rig = makeRig(pubkey: pubkey, store: store)
+        let posts = try [a.event(Self.now - 50), b.event(Self.now - 100), a.event(Self.now - 200), b.event(Self.now - 300)]
+        _ = try await start(rig, page: posts)
+        _ = await eventually { rig.vm.posts.count == 4 }
+        let shape = rig.vm.rows.map { row -> String in
+            switch row {
+            case .row(let r): return r.id
+            case .divider(let n): return "divider:\(n)"
+            }
+        }
+        #expect(shape == [posts[0].id, posts[1].id, "divider:2", posts[2].id, posts[3].id])
+        #expect(store.data[FreshLastVisit.key(pubkey: pubkey)] == String(Self.now - 50))
+    }
+
+    // MARK: - Kind plumbing
+
+    @Test("FeedKind.fresh: stored as FRESH, restored only while the flag is on; routed to its own body")
+    func kindPlumbing() {
+        let name = "FreshFeedViewModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let pk = String(repeating: "e", count: 64)
+        FeedKindStore.persist(.fresh, pubkey: pk, defaults: defaults)
+        #expect(defaults.string(forKey: FeedKindStore.typeKey(pk)) == "FRESH")
+        #expect(FeedKindStore.resolveInitial(pubkey: pk, defaults: defaults, freshEnabled: true) { _ in nil } == .fresh)
+        #expect(FeedKindStore.resolveInitial(pubkey: pk, defaults: defaults, freshEnabled: false) { _ in nil } == FeedKindStore.defaultKind)
+        #expect(FeedTabRouting.body(for: .fresh) == .fresh)
+        #expect(FeedTabRouting.composeSuggestions(for: .fresh).isEmpty)
+        #expect(FeedKind.fresh.displayName == "Fresh")
+        var tracker = FeedKindSwitchTracker()
+        _ = FeedTabRouting.repinTarget(afterObserving: .follows, tracker: &tracker)
+        #expect(FeedTabRouting.repinTarget(afterObserving: .fresh, tracker: &tracker) == nil)
+    }
+
+    @Test("ships off: no picker entry, and selectFresh is inert")
+    func shipsOff() {
+        #expect(FeatureFlags.freshFeedEnabled == false)
+    }
+
+    @Test("account wipe removes the Fresh last-visit mark")
+    func wipeListHasLastVisit() {
+        let pk = String(repeating: "0", count: 63) + "f"
+        UserDefaults.standard.set("123", forKey: FreshLastVisit.key(pubkey: pk))
+        NostrKey.deleteAccount(pubkey: pk)
+        #expect(UserDefaults.standard.string(forKey: FreshLastVisit.key(pubkey: pk)) == nil)
+    }
+}

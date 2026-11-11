@@ -35,6 +35,8 @@ enum FeedKindStore {
         case relay = "RELAY"
         case relaySet = "RELAY_SET"
         case liveVideo = "LIVE_VIDEO"
+        /// iOS-only name; Android has no Fresh feed yet.
+        case fresh = "FRESH"
 
         init(_ kind: FeedKind) {
             switch kind {
@@ -44,6 +46,7 @@ enum FeedKindStore {
             case .relay: self = .relay
             case .relaySet: self = .relaySet
             case .liveVideo: self = .liveVideo
+            case .fresh: self = .fresh
             }
         }
     }
@@ -62,17 +65,19 @@ enum FeedKindStore {
         case .relaySet(let set):
             defaults.set(set.dTag, forKey: relaySetKey(pubkey))
             defaults.removeObject(forKey: relayUrlKey(pubkey))
-        case .onlyFood, .follows, .extendedNetwork, .liveVideo:
+        case .onlyFood, .follows, .extendedNetwork, .liveVideo, .fresh:
             break
         }
     }
 
     /// Resolve the landing kind for `pubkey`. Pure read: never writes.
     /// `relaySet` looks a stored d-tag up in the user's relay sets; return
-    /// `nil` when it no longer exists so the landing falls back.
+    /// `nil` when it no longer exists so the landing falls back. A stored
+    /// `FRESH` falls back too while `freshEnabled` is off.
     static func resolveInitial(
         pubkey: String,
         defaults: UserDefaults = .standard,
+        freshEnabled: Bool = FeatureFlags.freshFeedEnabled,
         relaySet: (String) -> RelaySet?
     ) -> FeedKind {
         guard let raw = defaults.string(forKey: typeKey(pubkey)),
@@ -101,6 +106,8 @@ enum FeedKindStore {
             return .relaySet(set)
         case .liveVideo:
             return .liveVideo
+        case .fresh:
+            return freshEnabled ? .fresh : defaultKind
         }
     }
 }

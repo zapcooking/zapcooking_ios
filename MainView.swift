@@ -47,6 +47,9 @@ struct MainView: View {
     @State private var searchThreadChain: [String] = []
     @State private var recipeFeedVM = RecipeFeedViewModel()
     @State private var onlyfoodFeedVM: OnlyFoodFeedViewModel
+    /// Fresh (`FeatureFlags.freshFeedEnabled`). Created with the screen; it
+    /// opens nothing until Fresh is the selected kind.
+    @State private var freshFeedVM: FreshFeedViewModel
     @State private var drawerOpen = false
     @State private var drawerDragOffset: CGFloat = 0
     @State private var engagementRepo = EngagementRepository.shared
@@ -162,6 +165,7 @@ struct MainView: View {
         _searchVM = State(initialValue: SearchViewModel(keypair: keypair))
         _walletStore = State(initialValue: WalletStore(keypair: keypair))
         _onlyfoodFeedVM = State(initialValue: OnlyFoodFeedViewModel(pubkey: keypair.pubkey))
+        _freshFeedVM = State(initialValue: FreshFeedViewModel(pubkey: keypair.pubkey))
         // Read once here, so changing the setting applies on the next launch
         // (or the next login) instead of switching tabs mid-session.
         _selectedTab = State(initialValue: AppSettings.shared.startupScreen == .feed ? .feed : .recipes)
@@ -199,9 +203,11 @@ struct MainView: View {
             switch phase {
             case .background:
                 wasBackgrounded = true
+                freshFeedVM.appDidEnterBackground()
             case .active where wasBackgrounded:
                 wasBackgrounded = false
                 FeedTabRouting.resumeOnlyFoodIfActive(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
+                FeedTabRouting.resumeFreshIfActive(kind: viewModel.currentKind, fresh: freshFeedVM)
             default:
                 break
             }
@@ -280,6 +286,8 @@ struct MainView: View {
             // so this must run before any subscription opens.
             let privkey32 = Hex.decode(keypair.privkey)
             ReportedContent.shared.bind(activePubkey: keypair.pubkey)
+            // A new account session re-reads its Fresh last-visit mark.
+            FreshLastVisit.shared.resetSession()
             MuteRepository.shared.bind(
                 activePubkey: keypair.pubkey,
                 privkey32: privkey32,
@@ -915,9 +923,12 @@ struct MainView: View {
             // re-issue the REQ (§7.4); no prewarming for other kinds.
             .onAppear {
                 FeedTabRouting.ensureOnlyFoodStarted(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
+                FeedTabRouting.syncFresh(kind: viewModel.currentKind, fresh: freshFeedVM)
             }
             .onChange(of: viewModel.currentKind) { _, kind in
                 FeedTabRouting.ensureOnlyFoodStarted(kind: kind, onlyFood: onlyfoodFeedVM)
+                // Fresh's socket is open only while Fresh is selected.
+                FeedTabRouting.syncFresh(kind: kind, fresh: freshFeedVM)
             }
             // §7 picker re-pin, guarded like Android's `prevMode`: the initial
             // observation only records the landing kind; a general kind
@@ -1382,6 +1393,14 @@ struct MainView: View {
     /// Android's order (unified-feed §2.3).
     private var feedPicker: some View {
         Menu {
+            if FeatureFlags.freshFeedEnabled {
+                Button {
+                    viewModel.selectFresh()
+                } label: {
+                    Label("Fresh", systemImage: viewModel.currentKind == .fresh ? "checkmark" : "sparkles")
+                }
+            }
+
             Button {
                 viewModel.selectOnlyFood()
             } label: {
@@ -1428,7 +1447,7 @@ struct MainView: View {
             } label: {
                 let active: Bool = {
                     switch viewModel.currentKind {
-                    case .onlyFood, .follows, .extendedNetwork, .liveVideo: return false
+                    case .onlyFood, .follows, .extendedNetwork, .liveVideo, .fresh: return false
                     case .relay, .relaySet: return true
                     }
                 }()
@@ -1479,6 +1498,7 @@ struct MainView: View {
         switch viewModel.currentKind {
         case .onlyFood: return "No food posts yet"  // unreachable: OnlyFood renders `onlyFoodBody`
         case .liveVideo: return "No one is streaming right now"  // unreachable: liveVideo renders `LiveVideoFeedView`
+        case .fresh: return "Nothing fresh yet"  // unreachable: Fresh renders `freshBody`
         case .follows: return "No posts yet"
         case .relay: return "Connecting…"
         case .relaySet: return "Connecting…"
@@ -1495,6 +1515,8 @@ struct MainView: View {
             return "Pull down to refresh."  // unreachable: OnlyFood renders `onlyFoodBody`
         case .liveVideo:
             return ""  // unreachable: liveVideo renders `LiveVideoFeedView`
+        case .fresh:
+            return ""  // unreachable: Fresh renders `freshBody`
         case .follows:
             return "Follow some people to see their posts here"
         case .relay(let url):
@@ -1514,7 +1536,7 @@ struct MainView: View {
         switch viewModel.currentKind {
         case .extendedNetwork where SocialGraphCache.load(pubkey: keypair.pubkey) == nil:
             emptyStateActionButton("Compute Now") { showSocialGraph = true }
-        case .onlyFood, .follows, .relay, .relaySet, .extendedNetwork, .liveVideo:
+        case .onlyFood, .follows, .relay, .relaySet, .extendedNetwork, .liveVideo, .fresh:
             EmptyView()
         }
     }
@@ -1534,7 +1556,7 @@ struct MainView: View {
     @ViewBuilder
     private var relayFeedStatusBanner: some View {
         switch viewModel.currentKind {
-        case .follows, .onlyFood, .liveVideo:
+        case .follows, .onlyFood, .liveVideo, .fresh:
             EmptyView()
         case .relay, .relaySet, .extendedNetwork:
             switch viewModel.relayFeedStatus {
@@ -1600,6 +1622,8 @@ struct MainView: View {
                     },
                     onRefresh: { viewModel.refreshLiveDiscovery() }
                 )
+            case .fresh:
+                freshBody
             }
         }
     }
@@ -1818,6 +1842,119 @@ struct MainView: View {
             }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
                 onlyFoodFollow.follow()
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo("feedTop", anchor: .top)
+                }
+            }
+        }
+    }
+
+    // MARK: - Fresh (behind FeatureFlags.freshFeedEnabled)
+
+    /// Fresh's plain list (the view-model PR; the designed UI is a later
+    /// PR). Posts with the last-visit divider, then the caught-up line and
+    /// the recipe row once the free window is exhausted.
+    @ViewBuilder
+    private var freshBody: some View {
+        if freshFeedVM.isLoading && freshFeedVM.posts.isEmpty {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Loading Fresh")
+        } else if freshFeedVM.loadFailed && freshFeedVM.posts.isEmpty {
+            freshMessage("Couldn't reach Fresh", detail: "Pull down to retry.")
+        } else if freshFeedVM.isEmpty {
+            freshMessage("Nothing fresh yet", detail: "Pull down to refresh.")
+        } else {
+            freshList
+        }
+    }
+
+    private func freshMessage(_ title: String, detail: String) -> some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                memoriesTeaser
+                Text(title)
+                    .font(AppFont.bodyLarge)
+                    .foregroundStyle(Color.wispOnSurface)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 80)
+            .frame(maxWidth: .infinity)
+        }
+        .refreshable { await freshFeedVM.refreshAndWait() }
+        .accessibilityLabel(title)
+    }
+
+    private func freshCard(_ event: NostrEvent) -> some View {
+        PostCardView(
+            event: event,
+            profile: freshFeedVM.profiles[event.pubkey],
+            profiles: freshFeedVM.profiles,
+            engagement: nil,
+            onProfileTap: { pubkey in
+                feedPath.append(ProfileRoute(pubkey: pubkey))
+            },
+            onNoteTap: { eventId in
+                feedPath.append(ThreadRoute(eventId: eventId, authorPubkey: event.pubkey))
+            },
+            onHashtagTap: { tag in
+                feedPath.append(HashtagFeedRoute(tag: tag))
+            }
+        )
+        .equatable()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            ArticleTapRouting.appendCardTap(to: &feedPath, event: event)
+        }
+    }
+
+    private var freshList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("feedTop")
+                    memoriesTeaser
+                    ForEach(Array(freshFeedVM.rows.enumerated()), id: \.element.stableId) { index, row in
+                        switch row {
+                        case .row(let item):
+                            freshCard(item.event)
+                                .onAppear {
+                                    engagementRepo.markVisible(event: item.event)
+                                    freshFeedVM.loadMoreIfNeeded(currentIndex: index)
+                                }
+                                .onDisappear { engagementRepo.markInvisible(event: item.event) }
+                            Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
+                        case .divider(let newCount):
+                            Text("\(newCount) new since your last visit")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                    }
+                    if freshFeedVM.isPaging {
+                        ProgressView().padding(16).frame(maxWidth: .infinity)
+                    }
+                    if freshFeedVM.finishLine.caughtUp {
+                        Text("You're all caught up")
+                            .font(AppFont.bodyLarge)
+                            .foregroundStyle(Color.wispOnSurfaceVariant)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                    }
+                    if freshFeedVM.finishLine.recipeRow {
+                        ForEach(freshFeedVM.recipePicks, id: \.id) { event in
+                            freshCard(event)
+                            Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
+                        }
+                    }
+                }
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .refreshable { await freshFeedVM.refreshAndWait() }
+            .onChange(of: feedScrollToTopTrigger) { _, _ in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo("feedTop", anchor: .top)
                 }
