@@ -645,7 +645,10 @@ final class FreshFeedViewModel {
         let rules = self.rules()
         var byCoordinate: [String: NostrEvent] = [:]
         let ceiling = now() + FreshRelayClient.futureSkewSeconds
-        for event in answer.events where FreshPosts.isRecipe(kind: event.kind, tags: event.tags) {
+        // Recipes only, by the app's rule (`RecipeParser.isRecipe`: kind 30023,
+        // a recipe tag AND recipe-template content). The tag alone lets in
+        // articles tagged zapcooking (the relay's `#t` filter is tag-only).
+        for event in answer.events where RecipeParser.isRecipe(event) {
             // The feed's rules, minus the old-edit rule (recipes keep old
             // edits): reader filters, local hides, deletions, future dates.
             guard FreshPosts.passesReaderFilters(event, rules: rules), !isHiddenLocally(event),

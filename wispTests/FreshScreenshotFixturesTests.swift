@@ -74,4 +74,11 @@ import Testing
         let text = FreshSpotlightTile.plainText(post, profiles: FreshScreenshotFixtures.profiles)
         #expect(text.hasPrefix("Dashi from scratch, the way @June Okafor taught me:"), "\(text)")
     }
+
+    @Test("every fixture recipe is a recipe by the app's rule (the recipe row takes nothing else)")
+    func fixtureRecipesPassTheRecipeRule() {
+        for recipe in FreshScreenshotFixtures.recipes {
+            #expect(RecipeParser.isRecipe(recipe), "\(RecipeParser.dTag(recipe))")
+        }
+    }
 }
