@@ -30,7 +30,11 @@ import Testing
             var tags: [[String]] = [["d", d]]
             if let publishedAt { tags.append(["published_at", String(publishedAt)]) }
             if recipe { tags.append(["t", "zapcooking"]) }
-            return try event(createdAt, kind: 30023, content: "long form \(d) \(createdAt)", tags: tags)
+            // A recipe carries the recipe template (`RecipeParser.isRecipe`).
+            let content = recipe
+                ? "## Chef's notes\n\n\(d) \(createdAt)\n\n## Ingredients\n\n- flour\n- water\n\n## Directions\n\n1. Mix.\n2. Bake."
+                : "long form \(d) \(createdAt)"
+            return try event(createdAt, kind: 30023, content: content, tags: tags)
         }
     }
 
@@ -258,6 +262,25 @@ import Testing
         let other = try b.longForm(Self.now - 700 * Self.day, d: "bread", recipe: true)
         answer(rig.transport, recipesReq, [old, newer, other])
         #expect(await eventually { rig.vm.recipePicks.map(\.id) == [other.id, newer.id] })
+    }
+
+    @Test("the recipe row takes recipes only: an article tagged zapcooking (no recipe template) never appears")
+    func recipeRowSkipsTaggedArticles() async throws {
+        let a = try Author(), b = try Author()
+        let rig = makeRig()
+        _ = try await start(rig, page: [])
+        let recipesReq = try #require(await eventually { self.reqs(rig.transport.latest).contains { $0.kinds == [30023] } }
+                                      ? reqs(rig.transport.latest).first { $0.kinds == [30023] } : nil)
+        let recipe = try a.longForm(Self.now - 30 * Self.day, d: "pie", recipe: true)
+        // The device-pass case: an announcement tagged zapcooking, badge ARTICLE.
+        let article = try b.event(Self.now - 20 * Self.day, kind: 30023,
+                                  content: "Arkade.Money and ZapCooking, now running Branta. Read more on our blog.",
+                                  tags: [["d", "branta"], ["title", "Now running Branta"], ["t", "zapcooking"]])
+        #expect(FreshPosts.isRecipe(kind: article.kind, tags: article.tags), "tag-only rule would take it")
+        #expect(!RecipeParser.isRecipe(article))
+        answer(rig.transport, recipesReq, [article, recipe])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [recipe.id] })
+        #expect(!rig.vm.recipePool.contains { $0.id == article.id })
     }
 
     @Test("auth-required on a page is the floor: the end, not an error")
