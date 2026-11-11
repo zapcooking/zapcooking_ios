@@ -1926,6 +1926,30 @@ struct MainView: View {
         }
     }
 
+    /// A special card (`FeatureFlags.freshSpecialsEnabled`): the recipe box
+    /// shows the recipe as a normal post card; a spotlight's posts open their
+    /// thread and carry their own Report / Block menu.
+    @ViewBuilder
+    private func freshSpecialCard(_ special: FreshSpecial) -> some View {
+        switch special {
+        case .recipe(let recipe):
+            FreshRecipeBoxCard { freshCard(recipe) }
+        case .spotlight(let topic, let posts):
+            FreshSpotlightCard(
+                topic: topic,
+                posts: posts,
+                profiles: freshFeedVM.profiles,
+                me: freshFeedVM.pubkey,
+                onPostTap: { event in
+                    feedPath.append(ThreadRoute(eventId: event.id, authorPubkey: event.pubkey))
+                },
+                onProfileTap: { pubkey in
+                    feedPath.append(ProfileRoute(pubkey: pubkey))
+                }
+            )
+        }
+    }
+
     private var freshList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -1944,12 +1968,18 @@ struct MainView: View {
                     ForEach(Array(freshFeedVM.rows.enumerated()), id: \.element.stableId) { index, row in
                         switch row {
                         case .row(let item):
-                            freshCard(item.event)
-                                .onAppear {
-                                    engagementRepo.markVisible(event: item.event)
-                                    freshFeedVM.loadMoreIfNeeded(currentIndex: index)
-                                }
-                                .onDisappear { engagementRepo.markInvisible(event: item.event) }
+                            switch item.content {
+                            case .post(let event):
+                                freshCard(event)
+                                    .onAppear {
+                                        engagementRepo.markVisible(event: event)
+                                        freshFeedVM.postAppeared(rowIndex: index)
+                                    }
+                                    .onDisappear { engagementRepo.markInvisible(event: event) }
+                            case .card(let key, let special):
+                                freshSpecialCard(special)
+                                    .onAppear { freshFeedVM.cardAppeared(key: key) }
+                            }
                             Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
                         case .divider(let newCount):
                             FreshNewSinceDivider(newCount: newCount)

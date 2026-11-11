@@ -94,14 +94,60 @@ enum FreshScreenshotFixtures {
         recipe(0, minutesAgo: 100_000, d: "salsa-verde", title: "Tomatillo Salsa Verde", summary: "Charred tomatillos, serrano, cilantro, lime."),
     ].compactMap { $0 }) + feed.filter { $0.kind == 30023 }
 
-    /// A Fresh view model wired to the fixture relay and profiles.
-    static func viewModel(pubkey: String) -> FreshFeedViewModel {
-        FreshFeedViewModel(
+    /// Spotlight topics (`-FreshScreenshotSpecials`): two groups, so the
+    /// rotation can change group. No NIP-11 request is made.
+    static let topicGroups: [FreshTopicGroup] = [
+        FreshTopicGroup(slug: "baking", name: "Baking", count14d: 0, topics: [
+            FreshTopic(slug: "sourdough", name: "Sourdough", count14d: 0),
+        ]),
+        FreshTopicGroup(slug: "world-cuisines", name: "World cuisines", count14d: 0, topics: [
+            FreshTopic(slug: "japanese", name: "Japanese", count14d: 0),
+        ]),
+    ]
+
+    /// Each topic's preview: three posts from three cooks, none in the feed.
+    static let previews: [String: [NostrEvent]] = [
+        "sourdough": [
+            sign(1, minutesAgo: 240, "Levain peaked at 6am, mixed by 7. Long autolyse today and the dough already feels silky."),
+            sign(3, minutesAgo: 900, "Discard focaccia with garden rosemary and flaky salt. Nobody believes it's leftovers."),
+            sign(5, minutesAgo: 2_000, "Semolina sourdough for the first time. Golden crumb, nutty crust, slightly too proud of it."),
+        ].compactMap { $0 },
+        "japanese": [
+            sign(2, minutesAgo: 300, "Dashi from scratch: kombu cold-steeped overnight, katsuobushi for one minute. That's the whole secret."),
+            sign(0, minutesAgo: 1_100, "Okonomiyaki night. Cabbage, a little pork belly, too much kewpie. Perfect."),
+            sign(4, minutesAgo: 2_400, "Onigiri for the road: umeboshi, salmon, and one with leftover curry nobody asked for."),
+        ].compactMap { $0 },
+    ]
+
+    /// A Fresh view model wired to the fixture relay and profiles. With
+    /// `-FreshScreenshotSpecials` the special cards are on for this view
+    /// model only (the flag stays off): fixture topics and previews, a
+    /// fixed random seed so the shots repeat, and a throwaway "already
+    /// shown" store.
+    static func viewModel(pubkey: String, specials: Bool = FreshScreenshotHarness.usesSpecials) -> FreshFeedViewModel {
+        var seed: UInt64 = 0x5eed
+        return FreshFeedViewModel(
             pubkey: pubkey,
-            client: FreshRelayClient(transport: FreshFixtureTransport(events: feed + recipes)),
+            // With the cards on, page 1 is held a moment so the recipe download
+            // lands first: on a tall screen (iPad portrait) the first slot's
+            // anchor is already on screen when page 1 draws, and a slot the
+            // reader can see is skipped (as on web).
+            client: FreshRelayClient(transport: FreshFixtureTransport(
+                events: feed + recipes, feedDelay: specials ? .milliseconds(400) : .zero)),
             ownLocalPosts: { [] },
             persist: { _ in },
-            profileSource: FixtureProfiles()
+            profileSource: FixtureProfiles(),
+            specialsEnabled: specials,
+            specialsStore: specials
+                ? FreshSpecialsStore(pubkey: pubkey, defaults: UserDefaults(suiteName: "fresh-shots-\(UUID().uuidString)") ?? .standard)
+                : nil,
+            specialsRng: {
+                // A small LCG: the same slots and picks every run.
+                seed = seed &* 6364136223846793005 &+ 1442695040888963407
+                return Double(seed >> 11) / Double(1 << 53)
+            },
+            topicGroups: { specials ? topicGroups : [] },
+            topicPreview: { slug in FreshAnswer(events: previews[slug] ?? [], outcome: .answered) }
         )
     }
 
@@ -117,18 +163,25 @@ enum FreshScreenshotFixtures {
 /// A tail stays open and quiet. Topic searches get nothing.
 nonisolated final class FreshFixtureTransport: GroupRelayTransport, @unchecked Sendable {
     let events: [NostrEvent]
-    init(events: [NostrEvent]) { self.events = events }
-    func open(url: URL) -> GroupRelaySocket { FreshFixtureSocket(events: events) }
+    /// Feed pages (not recipes) are answered after this.
+    let feedDelay: Duration
+    init(events: [NostrEvent], feedDelay: Duration = .zero) {
+        self.events = events
+        self.feedDelay = feedDelay
+    }
+    func open(url: URL) -> GroupRelaySocket { FreshFixtureSocket(events: events, feedDelay: feedDelay) }
 }
 
 nonisolated final class FreshFixtureSocket: GroupRelaySocket, @unchecked Sendable {
     private let events: [NostrEvent]
+    private let feedDelay: Duration
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
     private var iterator: AsyncStream<String>.AsyncIterator?
 
-    init(events: [NostrEvent]) {
+    init(events: [NostrEvent], feedDelay: Duration = .zero) {
         self.events = events
+        self.feedDelay = feedDelay
         (stream, continuation) = AsyncStream<String>.makeStream()
     }
 
@@ -140,6 +193,7 @@ nonisolated final class FreshFixtureSocket: GroupRelaySocket, @unchecked Sendabl
               frame.first as? String == "REQ", frame.count >= 3,
               let subId = frame[1] as? String,
               let filter = frame[2] as? [String: Any] else { return }
+        var frames: [String] = []
         if filter["search"] == nil {
             let kinds = Set(filter["kinds"] as? [Int] ?? [])
             let since = filter["since"] as? Int ?? Int.min
@@ -153,10 +207,21 @@ nonisolated final class FreshFixtureSocket: GroupRelaySocket, @unchecked Sendabl
                 .sorted { $0.createdAt > $1.createdAt }
                 .prefix(limit)
             for event in matches {
-                continuation.yield("[\"EVENT\",\"\(subId)\",\(event.toJSON())]")
+                frames.append("[\"EVENT\",\"\(subId)\",\(event.toJSON())]")
             }
         }
-        continuation.yield("[\"EOSE\",\"\(subId)\"]")
+        frames.append("[\"EOSE\",\"\(subId)\"]")
+        let isFeedPage = filter["search"] == nil && filter["#t"] == nil && filter["limit"] as? Int == FreshRelayClient.pageSize
+        guard isFeedPage, feedDelay > .zero else {
+            for frame in frames { continuation.yield(frame) }
+            return
+        }
+        let continuation = self.continuation
+        let delay = feedDelay
+        Task {
+            try? await Task.sleep(for: delay)
+            for frame in frames { continuation.yield(frame) }
+        }
     }
 
     func receive() async throws -> String {

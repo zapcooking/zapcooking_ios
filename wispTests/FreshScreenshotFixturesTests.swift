@@ -42,4 +42,28 @@ import Testing
         #expect(recipes.events.count == FreshScreenshotFixtures.recipes.count)
         await client.close()
     }
+
+    @Test("with the special cards on, the fixture feed places a recipe-box card and a spotlight as it is read")
+    func fixtureSpecials() async throws {
+        let vm = FreshScreenshotFixtures.viewModel(pubkey: String(repeating: "e", count: 64), specials: true)
+        await vm.activateAndWait()
+        let deadline = Date().addingTimeInterval(5)
+        func types() -> [String] {
+            vm.placedSlots.map { slot in
+                let at = vm.posts.firstIndex { $0.id == slot.anchorId } ?? -1
+                return "\(at):\(slot.special?.type.rawValue ?? "skip")"
+            }
+        }
+        // Read down the list the way the view reports it.
+        var row = 0
+        while Date() < deadline {
+            let rows = vm.rows
+            if row < rows.count { vm.postAppeared(rowIndex: row); row += 1 }
+            if vm.placedSlots.compactMap(\.special).count >= 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let placed = vm.placedSlots.compactMap(\.special).map(\.type)
+        #expect(placed == [.recipe, .spotlight], "\(types()) posts \(vm.posts.count)")
+        await vm.deactivateAndWait()
+    }
 }

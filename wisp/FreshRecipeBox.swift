@@ -10,9 +10,10 @@ import Foundation
 /// version.
 ///
 /// The box cards and the finish-line recipe row never show the same recipe
-/// (Seth, 2026-11-11): a box pick skips what the row has shown, and the row
-/// skips what the box has taken. Web gets this by drawing its explore row
-/// from the same taken set.
+/// (Seth, 2026-11-11): the box picks first and the row skips what the box
+/// has taken (`rowPicks(boxTaken:)`), so a recipe never leaves a row the
+/// reader may already see. Web gets this by drawing its explore row from
+/// the same taken set.
 nonisolated enum FreshRecipeBox {
     /// `kind:pubkey:d`, the coordinate every version of a recipe shares.
     static func address(_ e: NostrEvent) -> String {
@@ -38,8 +39,8 @@ nonisolated enum FreshRecipeBox {
     }
 
     /// A random recipe this account hasn't been shown (`seen`), not already
-    /// taken this session, and not otherwise excluded (in the feed, or shown
-    /// in the finish-line row); nil when the pool is used up.
+    /// taken this session, and not otherwise excluded (in the feed, by id or
+    /// coordinate); nil when the pool is used up.
     static func pickRandom(
         _ pool: [NostrEvent],
         seen: Set<String>,

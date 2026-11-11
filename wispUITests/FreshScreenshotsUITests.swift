@@ -119,4 +119,46 @@ final class FreshScreenshotsUITests: XCTestCase {
         }
         XCUIDevice.shared.orientation = .portrait
     }
+
+    /// The special cards (`-FreshScreenshotSpecials`, fixture topics and
+    /// recipes; the flag itself stays off): the recipe-box card, the
+    /// spotlight card, and a spotlight post's Report / Block menu.
+    func testFreshSpecialCards() {
+        let orientations: [UIDeviceOrientation] = isPad ? [.portrait, .landscapeLeft] : [.portrait]
+        for orientation in orientations {
+            XCUIDevice.shared.orientation = orientation
+            let app = launch(["-FreshScreenshotSpecials"])
+            dismissSystemAlerts()
+            waitForFresh(app)
+
+            let box = app.descendants(matching: .any)["fresh-recipe-box-card"].firstMatch
+            if bring(box, in: app, low: 0.25, high: 0.55) {
+                sleep(2)
+                shot("recipe-box-card", orientation)
+            } else {
+                XCTFail("no recipe-box card found")
+            }
+
+            let spotlight = app.descendants(matching: .any)["fresh-spotlight-card"].firstMatch
+            if bring(spotlight, in: app, low: 0.3, high: 0.6) {
+                sleep(2)
+                shot("spotlight-card", orientation)
+                let menu = spotlight.buttons["fresh-spotlight-post-menu"].firstMatch
+                if menu.waitForExistence(timeout: 5) {
+                    menu.tap()
+                    XCTAssertTrue(app.buttons["Report"].waitForExistence(timeout: 5), "no Report in the spotlight menu")
+                    XCTAssertTrue(app.buttons["Block User"].exists, "no Block User in the spotlight menu")
+                    sleep(1)
+                    shot("spotlight-menu", orientation)
+                } else {
+                    XCTFail("no menu on the spotlight post")
+                }
+            } else {
+                shot("debug-no-spotlight", orientation)
+                XCTFail("no spotlight card found")
+            }
+            app.terminate()
+        }
+        XCUIDevice.shared.orientation = .portrait
+    }
 }
