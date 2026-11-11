@@ -1,10 +1,16 @@
 # GATE — fresh/specials-cards (PR #217: Fresh specials S3)
 
-Stacked on #216 (`fresh/specials-loader` at edd182d, its gate HEAD). Code
-commits 8f53e4d (cards) and **cd8185a (code frozen)**: the device-pass
-fixes. This file replaces gate 3fbe498 and is the HEAD commit. A review fix
-breaks the freeze: push a fresh gate file last. If #216 changes, this
-branch merges it and is re-gated.
+Stacked on #216, merged in at its gate HEAD 13fd700, which carries #216's
+review fixes aa0e52f; the merge is 9cd92ca. This branch's code commits are
+8f53e4d (cards) and **cd8185a (device-pass fixes)**. This file replaces gate
+a2462aa and is the HEAD commit. A review fix breaks the freeze: push a
+fresh gate file last. If #216 changes again, this branch merges it and is
+re-gated.
+
+**What the merge brings:** the loader changes only, and none of this
+branch's files. The screenshots were not re-taken: the fixture's two topics
+sit in different groups, so the new last-group rule doesn't change which
+cards show.
 
 ## cd8185a: Seth's device-pass fixes
 1. **Mentions rendered raw in spotlight tiles.**
@@ -25,7 +31,7 @@ from the in-app fixture relay with a watch-only account.
 
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), DerivedData `wisp-specials-cards` (cold at
-fd98482, then incremental): **TEST BUILD SUCCEEDED** at cd8185a. Zero
+fd98482, then incremental): **TEST BUILD SUCCEEDED** at 9cd92ca. Zero
 warnings in `RichInlineTextView.swift`, `wispTests/FreshSpecialsTests.swift`,
 `wispTests/FreshFeedViewModelTests.swift`, `wisp/FreshFeedViewModel.swift`, `wisp/FreshSpecialCards.swift`,
 `wisp/FreshRecipeBox.swift`, `wisp/FreshScreenshotFixtures.swift`,
@@ -41,17 +47,18 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,id=90B23E20-BA47-4AD0-98EF-175513626A4B' \
   -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-specials-cards \
   -parallel-testing-enabled NO -only-testing:wispTests \
-  -collect-test-diagnostics never -resultBundlePath s3-gate.xcresult
-sh ci_scripts/gate.sh --parse s3-gate.xcresult
+  -collect-test-diagnostics never -resultBundlePath s3d-gate.xcresult
+sh ci_scripts/gate.sh --parse s3d-gate.xcresult
 ```
 ```
-gate: 1950 passed / 3 failed / 23 skipped / 1976 total  (bundle result: Failed)
+gate: 1953 passed / 3 failed / 23 skipped / 1979 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1976 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1979 tests ran
 ```
-First full run at cd8185a. (At 8f53e4d: PASS 1945/3/23/1971.) New tests:
+First full run at 9cd92ca. (Earlier: 1945/1971 at 8f53e4d and 1950/1976 at
+cd8185a.) New tests:
 - `FreshSpecialsListTests` (18). Four came with cd8185a:
   - tile text with mentions;
   - profiles requested when a spotlight is readied;
