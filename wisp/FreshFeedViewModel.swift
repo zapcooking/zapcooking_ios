@@ -105,6 +105,17 @@ final class FreshFeedViewModel {
     /// This session's previous-visit mark (`FreshLastVisit`).
     private(set) var visitMark: Int?
     private(set) var tailStatus: FreshTailStatus = .idle
+    /// Tail posts waiting behind the "N new posts" pill. They are never put
+    /// into the list on their own: the reader taps the pill
+    /// (`showNewPosts`), which scrolls to the top and inserts them, so the
+    /// list never moves under them.
+    private(set) var newPostsCount = 0
+    /// How many waiting posts the reader dismissed the pill for; the pill
+    /// comes back when more arrive.
+    @ObservationIgnored private var pillDismissedAt = 0
+
+    /// The pill shows while posts wait that the reader hasn't dismissed.
+    var showsNewPostsPill: Bool { newPostsCount > pillDismissedAt }
 
     /// `posts` with the "new since your last visit" divider placed.
     var rows: [FreshDividedRow<FreshRow>] {
@@ -138,6 +149,7 @@ final class FreshFeedViewModel {
     @ObservationIgnored private let rules: () -> SafetyFilterSnapshot?
     @ObservationIgnored private let isReportedCoordinate: (String) -> Bool
     @ObservationIgnored private let isPrivate: (String) -> Bool
+    @ObservationIgnored private let isDeleted: (NostrEvent) -> Bool
     @ObservationIgnored private let ownLocalPosts: () async -> [NostrEvent]
     @ObservationIgnored private let persist: ([NostrEvent]) -> Void
     @ObservationIgnored private let visitStorage: FreshVisitStorage?
@@ -161,6 +173,8 @@ final class FreshFeedViewModel {
     @ObservationIgnored private var pendingClose: Task<Void, Never>?
     /// The relay's posts in display order (spaced; tail posts placed by time).
     @ObservationIgnored private var relayPosts: [NostrEvent] = []
+    /// Tail posts held behind the pill, in arrival order.
+    @ObservationIgnored private var pendingNew: [NostrEvent] = []
     /// Own posts from local sources, by id.
     @ObservationIgnored private var ownPosts: [String: NostrEvent] = [:]
     /// `until` for the next page: the oldest event the last page returned,
@@ -181,6 +195,7 @@ final class FreshFeedViewModel {
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
+    @ObservationIgnored private var deletionObserver: NSObjectProtocol?
 
     init(
         pubkey: String,
@@ -189,6 +204,7 @@ final class FreshFeedViewModel {
         rules: (() -> SafetyFilterSnapshot?)? = nil,
         isReportedCoordinate: ((String) -> Bool)? = nil,
         isPrivate: ((String) -> Bool)? = nil,
+        isDeleted: ((NostrEvent) -> Bool)? = nil,
         ownLocalPosts: (() async -> [NostrEvent])? = nil,
         persist: (([NostrEvent]) -> Void)? = nil,
         visitStorage: FreshVisitStorage? = UserDefaults.standard,
@@ -204,6 +220,9 @@ final class FreshFeedViewModel {
         self.rules = rules ?? { SafetyFilter.shared.snapshot }
         self.isReportedCoordinate = isReportedCoordinate ?? { ReportedContent.shared.isHidden(coordinate: $0) }
         self.isPrivate = isPrivate ?? { PrivateInteractionStore.shared.privateEventIds.contains($0) }
+        // The app's deletion handling (NIP-09, `DeletionTracker`), in its
+        // strict form: a kind 5 counts only from the post's own author.
+        self.isDeleted = isDeleted ?? { DeletionTracker.shared.isDeleted(eventId: $0.id, author: $0.pubkey) }
         self.ownLocalPosts = ownLocalPosts ?? {
             await EventStore.shared.loadRecentByAuthor(pubkey: pubkey, kinds: FreshPosts.feedKinds, limit: 100)
         }
@@ -228,6 +247,7 @@ final class FreshFeedViewModel {
         profileUpdatesTask?.cancel()
         if let hideObserver { center.removeObserver(hideObserver) }
         if let publishObserver { center.removeObserver(publishObserver) }
+        if let deletionObserver { center.removeObserver(deletionObserver) }
         let client = self.client
         Task { await client.close() }
     }
@@ -245,6 +265,7 @@ final class FreshFeedViewModel {
             observing = true
             observeContentHidden()
             observeOwnPublishes()
+            observeDeletions()
             ensureProfileUpdates()
         }
         if !hasLoaded {
@@ -331,7 +352,7 @@ final class FreshFeedViewModel {
         guard epoch == self.epoch else { return }
         await loadOwnLocalPosts()
         guard epoch == self.epoch else { return }
-        let fresh = await fetchPages(first: true, epoch: epoch)
+        let fresh = await fetchPages(first: true, epoch: epoch, refresh: true)
         guard fresh, epoch == self.epoch, isActive else { return }
         retryAttempt = 0
         startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
@@ -381,7 +402,9 @@ final class FreshFeedViewModel {
 
     /// One page, then more while a full page added no visible row (bounded,
     /// and only while the cursor moves back). Returns false when abandoned.
-    private func fetchPages(first: Bool, epoch: Int) async -> Bool {
+    /// A refresh (`refresh`) that fails or times out keeps the list as it
+    /// was: only an answered page (or the floor) replaces it.
+    private func fetchPages(first: Bool, epoch: Int, refresh: Bool = false) async -> Bool {
         var replace = first
         var hops = 0
         while true {
@@ -391,13 +414,30 @@ final class FreshFeedViewModel {
             let answer = await client.feedPage(until: replace ? nil : pageCursor)
             guard epoch == self.epoch, !Task.isCancelled else { return false }
 
+            let answered = answer.outcome == .answered || answer.outcome == .floor
+            if replace && refresh && !answered {
+                // Failed / timed-out / refused refresh: keep what is shown.
+                isPaging = false
+                return true
+            }
             let accepted = answer.events.filter(accept)
-            let incoming = collapseEdits(accepted, replacing: !replace)
             if replace {
+                let incoming = collapseEdits(accepted, replacing: false)
                 relayPosts = FreshSpacing.spaceAuthors(before: [], incoming: incoming)
                 pageCursor = nil
                 finishLine = .none
-            } else {
+                if refresh {
+                    // The new page holds what the pill was holding; anything
+                    // newer comes again on the tail, which restarts with the
+                    // overlap.
+                    pendingNew = []
+                    newPostsCount = 0
+                    pillDismissedAt = 0
+                }
+            }
+            let shownIds = Set(relayPosts.map(\.id))
+            let incoming = replace ? [] : collapseEdits(accepted.filter { !shownIds.contains($0.id) }, replacing: true)
+            if !replace {
                 relayPosts += FreshSpacing.spaceAuthors(before: relayPosts, incoming: incoming)
             }
             if let oldest = answer.events.map(\.createdAt).min() { pageCursor = oldest }
@@ -416,6 +456,7 @@ final class FreshFeedViewModel {
             case .answered: reachedEnd = answer.isShortPage
             case .invalid, .failed, .timedOut: reachedEnd = false
             }
+            let added = replace ? relayPosts.count : incoming.count
             replace = false
             emit()
 
@@ -425,7 +466,7 @@ final class FreshFeedViewModel {
             }
             let cursorMoved = pageCursor.map { new in previousCursor.map { new < $0 } ?? true } ?? false
             hops += 1
-            guard answer.outcome == .answered, incoming.isEmpty, cursorMoved, hops <= Self.maxEmptyPageHops else { break }
+            guard answer.outcome == .answered, added == 0, cursorMoved, hops <= Self.maxEmptyPageHops else { break }
         }
         isPaging = false
         return true
@@ -433,6 +474,9 @@ final class FreshFeedViewModel {
 
     private func reachEnd() {
         finishLine = .of(reached: true)
+        // Own posts older than the last page are placed once the end is
+        // reached, so the list is rebuilt here.
+        emit()
         if !recipesLoaded { startRecipes() }
     }
 
@@ -520,14 +564,12 @@ final class FreshFeedViewModel {
             tailStatus = .live
             retryAttempt = 0
             guard accept(event) else { return }
+            guard !relayPosts.contains(where: { $0.id == event.id }),
+                  !pendingNew.contains(where: { $0.id == event.id }) else { return }
             persist([event])
-            if event.kind == 30023, replaceEdit(event) {
-                emit()
-                return
-            }
-            let index = relayPosts.firstIndex { $0.createdAt < event.createdAt } ?? relayPosts.endIndex
-            relayPosts.insert(event, at: index)
-            emit()
+            // Held behind the pill: nothing moves until the reader taps it.
+            pendingNew.append(event)
+            newPostsCount = pendingNew.count
         case .lost:
             tailStatus = .lost
             scheduleTailRetry()
@@ -536,6 +578,28 @@ final class FreshFeedViewModel {
         case .ended:
             tailStatus = .ended
         }
+    }
+
+    /// The pill was tapped: the waiting posts go into the list (a new post on
+    /// top, a late-admitted one at its time, an edit in its row). The view
+    /// scrolls to the top in the same tap.
+    func showNewPosts() {
+        let waiting = pendingNew.filter { accept($0) }
+        pendingNew = []
+        newPostsCount = 0
+        pillDismissedAt = 0
+        for event in waiting {
+            if event.kind == 30023, replaceEdit(event) { continue }
+            let index = relayPosts.firstIndex { $0.createdAt < event.createdAt } ?? relayPosts.endIndex
+            relayPosts.insert(event, at: index)
+        }
+        emit()
+    }
+
+    /// The pill's close button: the pill hides until another post arrives;
+    /// the waiting posts stay waiting (still not inserted under the reader).
+    func dismissNewPostsPill() {
+        pillDismissedAt = newPostsCount
     }
 
     /// While the app stays in the foreground, a lost tail is revived after a
@@ -561,6 +625,9 @@ final class FreshFeedViewModel {
 
     private func accept(_ event: NostrEvent) -> Bool {
         guard FreshPosts.feedKinds.contains(event.kind) else { return false }
+        // Dated more than the app's skew ahead: dropped (ruling 2026-11-10).
+        guard event.createdAt <= now() + FreshRelayClient.futureSkewSeconds else { return false }
+        guard !isDeleted(event) else { return false }
         guard FreshPosts.passesFreshFilters(event, rules: rules(), now: now()) else { return false }
         return !isHiddenLocally(event)
     }
@@ -623,7 +690,16 @@ final class FreshFeedViewModel {
             && event.createdAt >= floor
             && !event.sig.isEmpty
             && !isPrivate(event.id)
+            && Self.isTopLevel(event)
             && accept(event)
+    }
+
+    /// A note that replies to nothing (NIP-10, mentions ignored). Own replies
+    /// are never pinned: they belong to their thread. Long-form and polls
+    /// are always top-level.
+    nonisolated static func isTopLevel(_ event: NostrEvent) -> Bool {
+        guard event.kind == 1 else { return true }
+        return Nip10.replyTarget(of: event) == nil
     }
 
     /// Reload own posts from the event store (activation and refresh). This
@@ -670,6 +746,25 @@ final class FreshFeedViewModel {
         }
     }
 
+    /// A deletion the app just recorded (`DeletionSender`, after the kind 5
+    /// is published): the post goes at once, own pinned posts included.
+    private func observeDeletions() {
+        guard deletionObserver == nil else { return }
+        deletionObserver = center.addObserver(forName: .eventDeletionRecorded, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dropDeleted() }
+        }
+    }
+
+    func dropDeleted() {
+        relayPosts.removeAll(where: isDeleted)
+        pendingNew.removeAll(where: isDeleted)
+        newPostsCount = pendingNew.count
+        pillDismissedAt = min(pillDismissedAt, newPostsCount)
+        ownPosts = ownPosts.filter { !isDeleted($0.value) }
+        recipePicks.removeAll(where: isDeleted)
+        emit()
+    }
+
     /// Instant hide for block and report (`ContentHide.broadcast`).
     func dropHidden(eventIds: Set<String>, pubkeys: Set<String>, coordinates: Set<String>) {
         guard !eventIds.isEmpty || !pubkeys.isEmpty || !coordinates.isEmpty else { return }
@@ -677,6 +772,9 @@ final class FreshFeedViewModel {
         hiddenPubkeys.formUnion(pubkeys.map { $0.lowercased() })
         hiddenCoordinates.formUnion(coordinates)
         relayPosts.removeAll(where: isHiddenLocally)
+        pendingNew.removeAll(where: isHiddenLocally)
+        newPostsCount = pendingNew.count
+        pillDismissedAt = min(pillDismissedAt, newPostsCount)
         ownPosts = ownPosts.filter { !isHiddenLocally($0.value) }
         recipePicks.removeAll(where: isHiddenLocally)
         emit()
@@ -698,7 +796,7 @@ final class FreshFeedViewModel {
         // than what is loaded (unless the end is reached), newest first.
         // Long-form: one per coordinate, the newest of own and relay copies.
         var candidates = ownPosts.values
-            .filter { !shownIds.contains($0.id) && $0.createdAt >= floor }
+            .filter { !shownIds.contains($0.id) && $0.createdAt >= floor && !isDeleted($0) }
             .filter { own in finishLine.caughtUp || oldestRelay.map { own.createdAt >= $0 } ?? true }
             .sorted { $0.createdAt > $1.createdAt }
         var seenOwnCoordinates: Set<String> = []

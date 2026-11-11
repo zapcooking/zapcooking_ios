@@ -157,6 +157,13 @@ import Testing
         return (pageReq, reqs(rig.transport.latest).first(where: Self.isTail)!)
     }
 
+    /// Tail posts wait behind the pill; tap it (what the view does).
+    func reveal(_ rig: Rig, count: Int) async {
+        let arrived = await eventually { rig.vm.newPostsCount >= count }
+        #expect(arrived, "\(count) tail post(s) never reached the pill")
+        rig.vm.showNewPosts()
+    }
+
     static func isTail(_ r: Req) -> Bool {
         r.limit == FreshRelayClient.tailBacklogLimit && r.kinds == FreshPosts.feedKinds && r.until == nil
     }
@@ -289,6 +296,7 @@ import Testing
         let xLater = try x.event(Self.now - 5)
         let yLater = try y.event(Self.now - 4)
         answer(rig.transport, tail, [xLater, yLater], eose: false)
+        await reveal(rig, count: 1)
         #expect(await eventually { rig.vm.posts.first?.id == yLater.id })
         #expect(!rig.vm.posts.contains { $0.pubkey == x.pubkey })
     }
@@ -315,6 +323,7 @@ import Testing
         let edit = try z.longForm(Self.now - 50, d: "a1")
         let fresh = try y.event(Self.now - 40)
         answer(rig.transport, tail, [edit, fresh], eose: false)
+        await reveal(rig, count: 1)
         #expect(await eventually { rig.vm.posts.first?.id == fresh.id })
         #expect(!rig.vm.posts.contains { $0.id == edit.id })
     }
@@ -341,6 +350,7 @@ import Testing
         #expect(await eventually { rig.vm.posts.map(\.id) == [v2.id] })
         let v3 = try z.longForm(Self.now - 100, d: "x")
         answer(rig.transport, tail, [v3], eose: false)
+        await reveal(rig, count: 1)
         #expect(await eventually { rig.vm.posts.map(\.id) == [v3.id] })
     }
 
@@ -364,6 +374,7 @@ import Testing
 
         // The relay later returns it: one copy.
         answer(rig.transport, tail, [published], eose: false)
+        await reveal(rig, count: 1)
         try await Task.sleep(for: .milliseconds(100))
         #expect(rig.vm.posts.filter { $0.id == published.id }.count == 1)
         #expect(rig.vm.posts.count == 4)
@@ -381,6 +392,7 @@ import Testing
         let newest = try b.event(Self.now - 10)
         let late = try b.event(Self.now - 500)
         answer(rig.transport, tail, [newest, late], eose: false)
+        await reveal(rig, count: 2)
         #expect(await eventually { rig.vm.posts.map(\.id) == [newest.id, p1.id, late.id, p2.id] })
     }
 
@@ -619,16 +631,21 @@ import Testing
         #expect(await eventually { rig.vm.posts.map(\.id) == [visible.id] })
     }
 
-    @Test("a future-dated post can't anchor the tail ahead of now + 30 s")
+    @Test("a post dated days ahead is dropped, so it can't anchor the tail; the anchor stays clamped to now + 30 s")
     func futureDatedAnchorClamped() async throws {
         let a = try Author()
         let rig = makeRig()
         let (_, tail) = try await start(rig, page: [try a.event(Self.now + 86_400), try a.event(Self.now - 100)])
-        #expect(tail.since == Self.now + FreshRelayClient.futureSkewSeconds)
+        #expect(tail.since == Self.now - 100)
         await rig.vm.deactivateAndWait()
         rig.vm.activate()
-        let resumed = try #require(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty } ? reqs(rig.transport.latest).first : nil)
-        #expect(resumed.since == Self.now + FreshRelayClient.futureSkewSeconds - FreshRelayClient.tailResumeOverlapSeconds)
+        let resumed = try #require(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty } ? reqs(rig.transport.latest).first(where: Self.isTail) : nil)
+        #expect(resumed.since == Self.now - 100 - FreshRelayClient.tailResumeOverlapSeconds)
+
+        // Within the skew, a post is kept and anchors at most now + 30 s.
+        let rig2 = makeRig()
+        let (_, tail2) = try await start(rig2, page: [try a.event(Self.now + 30)])
+        #expect(tail2.since == Self.now + FreshRelayClient.futureSkewSeconds)
     }
 
     @Test("a long-form edit from the tail is persisted as well as shown")
@@ -639,6 +656,7 @@ import Testing
         let (_, tail) = try await start(rig, page: [try z.longForm(Self.now - 300, d: "x")])
         let edit = try z.longForm(Self.now - 100, d: "x")
         answer(rig.transport, tail, [edit], eose: false)
+        await reveal(rig, count: 1)
         #expect(await eventually { rig.vm.posts.map(\.id) == [edit.id] })
         #expect(r.persisted.contains { $0.id == edit.id })
     }
@@ -686,5 +704,164 @@ import Testing
         answer(rig.transport, pageReq, [p])
         await refresh
         #expect(rig.vm.posts.map(\.id) == [recipe.id, p.id])
+    }
+
+    // MARK: - Fresh UI PR (rulings 2026-11-10)
+
+    final class DeletedIds {
+        var ids: Set<String> = []
+    }
+
+    func makeRig(pubkey: String = String(repeating: "c", count: 64), rules: Rules = Rules(),
+                 deleted: DeletedIds) -> Rig {
+        let transport = FakeGroupTransport()
+        let client = FreshRelayClient(
+            transport: transport, now: { Self.now }, silenceTimeout: 5,
+            notificationCenter: NotificationCenter(),
+            foregroundNotification: Notification.Name("FreshFeedViewModelTests.fg")
+        )
+        let center = NotificationCenter()
+        let store = Store()
+        let vm = FreshFeedViewModel(
+            pubkey: pubkey, client: client, now: { Self.now },
+            rules: { rules.snapshot },
+            isReportedCoordinate: { rules.reportedCoordinates.contains($0) },
+            isPrivate: { rules.privateIds.contains($0) },
+            isDeleted: { deleted.ids.contains($0.id) },
+            ownLocalPosts: { rules.own },
+            persist: { rules.persisted.append(contentsOf: $0) },
+            visitStorage: store, lastVisit: FreshLastVisit(),
+            notificationCenter: center, retryDelays: [.milliseconds(30)],
+            profileSource: NoProfiles()
+        )
+        return Rig(transport: transport, vm: vm, center: center, rules: rules, store: store)
+    }
+
+    @Test("pill: tail posts wait behind it and the list does not move; tapping inserts them by time")
+    func pillHoldsTailPosts() async throws {
+        let a = try Author(), b = try Author()
+        let rig = makeRig()
+        let p1 = try a.event(Self.now - 100), p2 = try b.event(Self.now - 1000)
+        let (_, tail) = try await start(rig, page: [p1, p2])
+        _ = await eventually { rig.vm.posts.count == 2 }
+        let newest = try b.event(Self.now - 10)
+        let late = try b.event(Self.now - 500)
+        answer(rig.transport, tail, [newest, late, newest], eose: false)   // a repeat counts once
+        #expect(await eventually { rig.vm.newPostsCount == 2 })
+        #expect(rig.vm.showsNewPostsPill)
+        #expect(rig.vm.posts.map(\.id) == [p1.id, p2.id])
+
+        // Close: the pill hides, the posts keep waiting, the list stays.
+        rig.vm.dismissNewPostsPill()
+        #expect(!rig.vm.showsNewPostsPill)
+        #expect(rig.vm.posts.map(\.id) == [p1.id, p2.id])
+        // Another arrival brings the pill back.
+        let third = try a.event(Self.now - 5)
+        answer(rig.transport, tail, [third], eose: false)
+        #expect(await eventually { rig.vm.showsNewPostsPill && rig.vm.newPostsCount == 3 })
+
+        rig.vm.showNewPosts()
+        #expect(rig.vm.posts.map(\.id) == [third.id, newest.id, p1.id, late.id, p2.id])
+        #expect(!rig.vm.showsNewPostsPill)
+        #expect(rig.vm.newPostsCount == 0)
+    }
+
+    @Test("a blocked author's waiting posts leave the pill too")
+    func hideClearsWaitingPosts() async throws {
+        let x = try Author(), y = try Author()
+        let rig = makeRig()
+        let (_, tail) = try await start(rig, page: [try y.event(Self.now - 100)])
+        answer(rig.transport, tail, [try x.event(Self.now - 10), try y.event(Self.now - 9)], eose: false)
+        #expect(await eventually { rig.vm.newPostsCount == 2 })
+        rig.center.post(name: .contentHidden, object: nil, userInfo: [
+            ContentHideKey.eventIds: [String](), ContentHideKey.pubkeys: [x.pubkey],
+            ContentHideKey.coordinates: [String](),
+        ])
+        #expect(await eventually { rig.vm.newPostsCount == 1 })
+    }
+
+    @Test("a failed or timed-out pull-to-refresh keeps the list (and the finish line)")
+    func failedRefreshKeepsTheList() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let shown = try [a.event(Self.now - 100), a.event(Self.now - 200)]
+        _ = try await start(rig, page: shown)
+        _ = await eventually { rig.vm.posts.count == 2 && rig.vm.finishLine.caughtUp }
+
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let pageReq = try #require(await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 2 } ? reqs(rig.transport.latest).filter { $0.limit == 30 }.last : nil)
+        rig.transport.latest?.feed("[\"CLOSED\",\"\(pageReq.subId)\",\"error: overloaded\"]")
+        await refresh
+        #expect(rig.vm.posts.map(\.id) == shown.map(\.id))
+        #expect(rig.vm.finishLine.caughtUp)
+        #expect(!rig.vm.loadFailed)
+
+        // A dropped connection during the refresh: same.
+        async let again: Void = rig.vm.refreshAndWait()
+        let sent = await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 3 }
+        try #require(sent)
+        rig.transport.latest?.dropConnection()
+        await again
+        #expect(rig.vm.posts.map(\.id) == shown.map(\.id))
+    }
+
+    @Test("own posts: replies are never pinned; top-level notes, long-form and polls are")
+    func ownRepliesNotPinned() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let topLevel = try me.event(Self.now - 150)
+        let reply = try me.event(Self.now - 140, tags: [["e", String(repeating: "a", count: 64), "", "root"]])
+        let legacyReply = try me.event(Self.now - 130, tags: [["e", String(repeating: "b", count: 64)]])
+        let mentionOnly = try me.event(Self.now - 120, tags: [["e", String(repeating: "c", count: 64), "", "mention"]])
+        r.own = [topLevel, reply, legacyReply, mentionOnly]
+        let rig = makeRig(pubkey: me.pubkey, rules: r)
+        let p = try other.event(Self.now - 300)
+        _ = try await start(rig, page: [p])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [mentionOnly.id, topLevel.id, p.id] })
+        // A reply published now is not pinned either.
+        let published = try me.event(Self.now - 5, tags: [["e", p.id, "", "reply"]])
+        rig.center.post(name: .nostrEventPublished, object: nil, userInfo: ["event": published])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!rig.vm.posts.contains { $0.id == published.id })
+    }
+
+    @Test("deleted posts are hidden at ingest and when a deletion is recorded, own pinned posts included")
+    func deletedPostsHidden() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let deleted = DeletedIds()
+        let mine = try me.event(Self.now - 150)
+        let gone = try other.event(Self.now - 120)
+        deleted.ids = [gone.id]
+        r.own = [mine]
+        let rig = makeRig(pubkey: me.pubkey, rules: r, deleted: deleted)
+        let keep = try other.event(Self.now - 100)
+        _ = try await start(rig, page: [keep, gone])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [keep.id, mine.id] })
+
+        // The user deletes their own post (DeletionSender records it, then
+        // posts .eventDeletionRecorded).
+        deleted.ids.insert(mine.id)
+        rig.center.post(name: .eventDeletionRecorded, object: nil, userInfo: ["eventIds": [mine.id]])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [keep.id] })
+    }
+
+    @Test("posts dated more than 30 s ahead are dropped; within the skew they stay")
+    func futureDatedDropped() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let ahead = try a.event(Self.now + 31)
+        let within = try a.event(Self.now + 30)
+        let past = try a.event(Self.now - 10)
+        let (_, tail) = try await start(rig, page: [ahead, within, past])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [within.id, past.id] })
+        answer(rig.transport, tail, [try a.event(Self.now + 3600)], eose: false)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(rig.vm.newPostsCount == 0)
+    }
+
+    @Test("DeletionSender announces a recorded deletion with the target ids")
+    func deletionAnnouncementName() {
+        #expect(Notification.Name.eventDeletionRecorded.rawValue == "WispEventDeletionRecorded")
     }
 }
