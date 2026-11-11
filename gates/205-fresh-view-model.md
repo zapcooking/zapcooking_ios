@@ -1,16 +1,31 @@
 # GATE — fresh/view-model (PR #205: FreshFeedViewModel, FeedKind.fresh, picker entry, behind freshFeedEnabled = false)
 
-Branched from main at 16b98f9 (#202). **Code frozen at 04644c7.** This file
-is the only commit after it, and it is the HEAD commit. A review fix breaks
-the freeze: push a fresh gate file last.
+Branched from main at 16b98f9 (#202); main merged in at e17755f (#191,
+#197) as e41f634. **Code frozen at 28d00c8** (Copilot review fixes on top
+of 04644c7). This file is the only commit after it, and it is the HEAD
+commit. A review fix breaks the freeze: push a fresh gate file last.
 
 Fresh feed PR 5. Ships off (`FeatureFlags.freshFeedEnabled = false`): no
 picker entry, and a stored `FRESH` landing falls back to the default. No
-test opens a socket or touches a relay; nothing publishes or sends AUTH.
+test opens a socket or touches a relay (profiles go through a no-op
+`FreshProfileSource` in the tests); nothing publishes or sends AUTH.
+
+## Review fixes (28d00c8)
+All 13 Copilot comments, each with a regression test (12 new tests,
+`FreshFeedViewModelTests` 28): private replies excluded; an epoch
+invalidates page / recipe / first-load work on deactivation, and new
+connections wait for the pending close; no tail on foreground while page 1
+or a refresh is pending; refresh stops the tail before resetting seen and
+restarts it with the overlap; empty full pages hop (max 5, cursor must
+move); tail anchor and visit mark clamped to now + 30 s; tail edits
+persisted; own long-form one row per coordinate; visit mark from merged
+rows; empty window shows the finish line; foreground forwarded whatever
+the kind; own posts reloaded on refresh; injectable profile source. Also
+found while writing the tests: refresh did not reset the finish line.
 
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), iPhone 18 Pro on iOS 27.2
-(`90B23E20-BA47-4AD0-98EF-175513626A4B`). Both builds cold (fresh
+(`90B23E20-BA47-4AD0-98EF-175513626A4B`). Measured at 04644c7; both builds cold (fresh
 DerivedData), so every file compiled and every warning printed:
 - main 16b98f9 → `wisp-main-cold`: **TEST BUILD SUCCEEDED**, 163 unique
   warning sites.
@@ -21,49 +36,41 @@ Per touched file (main / branch): `FeedViewModel.swift` 5 / 5 (main's),
 `FeatureFlags.swift`, `NostrKey.swift`, `AppDataWipe.swift`,
 `KeptMountedFeedBodiesTests.swift` 0 / 0; new `FreshFeedViewModel.swift`
 and `FreshFeedViewModelTests.swift` 0.
+At 28d00c8 (incremental; the four changed files recompiled):
+`FreshFeedViewModel.swift`, `FreshFeedViewModelTests.swift`,
+`FeedTabRouting.swift`, `MainView.swift` 0 warnings.
 
 ## Gate 2: hermetic at the known set, serial
+At 28d00c8:
 ```
 xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,id=90B23E20-BA47-4AD0-98EF-175513626A4B' \
   -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-fresh-vm \
   -parallel-testing-enabled NO -only-testing:wispTests \
-  -collect-test-diagnostics never -resultBundlePath vm-gate3.xcresult
-sh ci_scripts/gate.sh --parse vm-gate3.xcresult
+  -collect-test-diagnostics never -resultBundlePath vm-gate4.xcresult
+sh ci_scripts/gate.sh --parse vm-gate4.xcresult
 ```
 ```
-gate: 1769 passed / 3 failed / 23 skipped / 1795 total  (bundle result: Failed)
+gate: 1787 passed / 3 failed / 23 skipped / 1813 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1795 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1813 tests ran
 ```
-`FreshFeedViewModelTests` 16/16; `KeptMountedFeedBodiesTests`,
-`FeedStickToTopTests`, `FeedTabRoutingTests` green. The 23rd skip is
-#202's opt-in live smoke test. **No local patch.** No `project.pbxproj`
-diff (`git diff origin/main...HEAD --stat -- wisp.xcodeproj` is empty).
+First full run at this commit; no re-run. `FreshFeedViewModelTests` 28/28
+(also 3 targeted runs in a row, 28/28 each, since several tests are about
+ordering); `KeptMountedFeedBodiesTests`, `FeedStickToTopTests`,
+`FeedTabRoutingTests` green. The 23rd skip is #202's opt-in live smoke
+test. **No local patch.** No `project.pbxproj` diff.
 
-**Two earlier full runs at the same commit failed, and are reported here.**
-vm-gate (run while a cold main build was compiling) and vm-gate2 (nothing
-else running) each gave 1752 / 20 / 23 / 1795: the known three plus the
-same 17 hosted-window / `ImageRenderer` tests that failed in #202's first
-run, with the same messages ("drew nothing", "did not lay out", blank
-renders): AttachmentStrip, ColorHierarchyRender, ComposeToolbar,
-EntryPresentation, FeedStickToTop, KeptMountedFeedBodies, Lazarus renders.
-Why they are not this branch:
-- the first failure, `AttachmentStripRenderTests`, is the fourth suite in
-  the run, thousands of lines before `FreshFeedViewModelTests` starts; the
-  three suites before it touch nothing here;
-- five of those suites (Lazarus renders, KeptMountedFeedBodies,
-  ComposeToolbar, EntryPresentation, FeedStickToTop: 46 tests) pass on
-  main's cold build run on their own, and passed on this branch in a
-  targeted run;
-- the run above is the identical bundle re-run (nothing rebuilt), from a
-  freshly booted simulator.
+One targeted run before this failed to start: the simulator's SpringBoard
+crashed launching the test host ("Failed to install or launch the test
+runner"); no test ran, and the next run started normally.
 
-The flake is the Studio's, not a branch's. It has now hit 3 of the last 4
-full runs (#202's first run and these two), up from 1 in 4 in November.
-Its trigger is not known.
+**History at 04644c7 (before the review):** PASS 1769 / 3 / 23 / 1795 on
+the third full run; the first two hit the Studio render flake (the same 17
+hosted-window / `ImageRenderer` tests as #202's first run, starting at the
+fourth suite, before anything Fresh runs).
 
 ## Not gated
 - No device pass. The `MainView` wiring (picker entry, `freshBody`,
