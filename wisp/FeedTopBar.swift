@@ -13,10 +13,10 @@ enum FeedTopBarControl: Equatable, Hashable, CaseIterable {
     /// Leading, general kinds only: the content-filter cycle. Hidden on the
     /// hashtag-backed OnlyFood feed (unchanged).
     case contentFilter
-    /// Trailing: the Gadgets sheet (timers), drawn with Android's measuring
-    /// cup. Android groups it with the Intelligence atom in the bar's
-    /// actions; the drawer row alone made a timer three taps away mid-cook.
-    /// Visible on every kind.
+    /// Trailing: the Gadgets sheet (timers), drawn with the shared
+    /// egg-timer artwork (Android's Gadgets glyph). Android groups it with
+    /// the Intelligence atom in the bar's actions; the drawer row alone made
+    /// a timer three taps away mid-cook. Visible on every kind.
     case gadgets
     /// Centre: the kind picker, overlaid so it stays centred.
     case feedPicker
@@ -46,8 +46,8 @@ enum FeedTopBarLayout {
     static let cheffyTargetSize: CGFloat = 44
     static let cheffyGlyphSize: CGFloat = 30
 
-    /// The Gadgets cup sits beside the 30 pt Cheffy mark inside the same
-    /// 44 pt target every bar control gets. Android draws its cup a touch
+    /// The Gadgets glyph sits beside the 30 pt Cheffy mark inside the same
+    /// 44 pt target every bar control gets. Android draws its glyph a touch
     /// smaller than its neighbours so the full-bleed artwork matches their
     /// visual height; same trick here.
     static let gadgetsTargetSize: CGFloat = 44

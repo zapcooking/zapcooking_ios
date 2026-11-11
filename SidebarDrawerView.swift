@@ -396,7 +396,7 @@ struct SidebarDrawerView: View {
             DrawerRow(icon: "pencil", label: "Drafts & Scheduled") {
                 onOpenDraftsScheduled()
             }
-            DrawerRow(icon: "timer", label: "Gadgets") {
+            DrawerRow(icon: "timer", assetIcon: "ZapNavGadgets", label: "Gadgets") {
                 onOpenGadgets()
             }
             DrawerRow(

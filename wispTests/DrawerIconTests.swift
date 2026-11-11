@@ -130,14 +130,14 @@ struct NavGlyphAssetTests {
         #expect(outline < fill, "outline \(outline) px vs fill \(fill) px")
     }
 
-    /// The Gadgets cup is its own artwork, not a reused nav glyph, and it
-    /// has to be template-rendered so the bar's tint reaches it.
-    @Test func gadgetsCup_isBundled_andTemplateRendered() throws {
-        let cup = try #require(UIImage(named: "ZapNavGadgets"))
-        #expect(cup.renderingMode != .alwaysOriginal)
+    /// The Gadgets egg timer is its own artwork, not a reused nav glyph,
+    /// and it has to be template-rendered so the bar's tint reaches it.
+    @Test func gadgetsArt_isBundled_andTemplateRendered() throws {
+        let art = try #require(UIImage(named: "ZapNavGadgets"))
+        #expect(art.renderingMode != .alwaysOriginal)
         for other in ["ZapNavFlame", "ZapNavRecipes"] {
             let sibling = try #require(UIImage(named: other))
-            #expect(Self.render(cup) != Self.render(sibling), "cup matches \(other)")
+            #expect(Self.render(art) != Self.render(sibling), "art matches \(other)")
         }
     }
 

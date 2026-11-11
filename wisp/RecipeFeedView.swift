@@ -19,7 +19,7 @@ struct RecipeFeedView: View {
     /// `CheffyGate.entryVisible()` is false. With both entries present the
     /// atom becomes Android's Intelligence menu (Sous Chef → Cheffy).
     var onCheffy: (() -> Void)?
-    /// Gadgets sheet. Android carries the measuring cup on this bar as well
+    /// Gadgets sheet. Android carries the egg timer on this bar as well
     /// as the feed's, so a timer is one tap away from the recipe you are
     /// about to cook.
     var onGadgets: (() -> Void)?
