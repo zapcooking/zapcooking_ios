@@ -64,6 +64,8 @@ final class FreshSpotlightLoader {
     private(set) var isOut = false
     /// A build is running.
     private(set) var isBuilding = false
+    /// `kick()` was called and its build hasn't started yet.
+    private var isStarting = false
     /// Topics used this session (shown, thin, or `invalid:`).
     private(set) var usedTopics: Set<String> = []
     /// The parent group of the last spotlight made ready.
@@ -91,7 +93,7 @@ final class FreshSpotlightLoader {
     /// that can fill it, `FreshRotation.choose` lets recipe repeat.
     func isAvailable(strict: Bool) -> Bool {
         guard deps.enabled(), !isOut else { return false }
-        return ready != nil || (strict && isBuilding)
+        return ready != nil || (strict && (isBuilding || isStarting))
     }
 
     // MARK: - Preview hold
@@ -198,7 +200,12 @@ final class FreshSpotlightLoader {
 
     /// Start `prepare()` without waiting (the list's call).
     func kick() {
-        Task { await self.prepare() }
+        guard deps.enabled(), !disposed, !isOut else { return }
+        isStarting = true
+        Task {
+            self.isStarting = false
+            await self.prepare()
+        }
     }
 
     /// The ready card, if its posts are still all eligible (≠ web: a post

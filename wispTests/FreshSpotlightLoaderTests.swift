@@ -369,6 +369,18 @@ struct FreshSpotlightLoaderTests {
         #expect(rig.loader.isAvailable(strict: false))
     }
 
+    @Test("a build kicked but not yet started already holds a far slot (no race with the first slot decision)")
+    func kickedBuildCountsAsBuilding() async {
+        let rig = Self.rig()
+        for slug in ["sourdough", "bread", "coffee", "tea"] { rig.previews.posts(slug) }
+        rig.loader.kick()
+        // Nothing has run yet: same turn of the main actor.
+        #expect(rig.loader.isAvailable(strict: true))
+        #expect(!rig.loader.isAvailable(strict: false))
+        await Self.eventually { rig.loader.ready != nil }
+        #expect(rig.loader.isAvailable(strict: false))
+    }
+
     // MARK: - Flag and lifetime
 
     @Test("disabled (the flag): no topic list asked, no preview, no timer")
