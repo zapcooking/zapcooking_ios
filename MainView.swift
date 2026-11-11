@@ -1851,16 +1851,16 @@ struct MainView: View {
 
     // MARK: - Fresh (behind FeatureFlags.freshFeedEnabled)
 
-    /// Fresh's plain list (the view-model PR; the designed UI is a later
-    /// PR). Posts with the last-visit divider, then the caught-up line and
-    /// the recipe row once the free window is exhausted.
+    /// Fresh's list: the optimistic own post, the posts with the last-visit
+    /// divider, then the caught-up card and the recipe row once the free
+    /// window is exhausted. Live posts wait behind the "N new posts" pill.
     @ViewBuilder
     private var freshBody: some View {
         if freshFeedVM.isLoading && freshFeedVM.posts.isEmpty {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Loading Fresh")
-        } else if freshFeedVM.loadFailed && freshFeedVM.posts.isEmpty {
+        } else if freshFeedVM.showsFailureMessage {
             freshMessage("Couldn't reach Fresh", detail: "Pull down to retry.")
         } else if freshFeedVM.showsEmptyMessage {
             freshMessage("Nothing fresh yet", detail: "Pull down to refresh.")
@@ -1873,14 +1873,16 @@ struct MainView: View {
         ScrollView {
             VStack(spacing: 8) {
                 memoriesTeaser
+                Text("🍳")
+                    .font(.system(size: 40))
+                    .padding(.top, 64)
                 Text(title)
                     .font(AppFont.bodyLarge)
-                    .foregroundStyle(Color.wispOnSurface)
+                    .foregroundStyle(Color.wispOnSurfaceVariant)
                 Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 80)
             .frame(maxWidth: .infinity)
         }
         .refreshable { await freshFeedVM.refreshAndWait() }
@@ -1916,6 +1918,15 @@ struct MainView: View {
                 LazyVStack(spacing: 0) {
                     Color.clear.frame(height: 0).id("feedTop")
                     memoriesTeaser
+                    // Optimistic own post, as on the general feed: shows the
+                    // moment Post is tapped and gives way to the published
+                    // event (`FreshFeedViewModel.insertOwnPublished`).
+                    if let pending = PendingPostStore.shared.pending,
+                       !PendingPostStore.shared.pendingIsReply,
+                       FreshFeedViewModel.showsPendingRow(kind: pending.event.kind) {
+                        PendingPostRow(pending: pending)
+                            .padding(.vertical, 4)
+                    }
                     ForEach(Array(freshFeedVM.rows.enumerated()), id: \.element.stableId) { index, row in
                         switch row {
                         case .row(let item):
@@ -1927,37 +1938,61 @@ struct MainView: View {
                                 .onDisappear { engagementRepo.markInvisible(event: item.event) }
                             Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
                         case .divider(let newCount):
-                            Text("\(newCount) new since your last visit")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
+                            FreshNewSinceDivider(newCount: newCount)
                         }
                     }
                     if freshFeedVM.isPaging {
                         ProgressView().padding(16).frame(maxWidth: .infinity)
                     }
                     if freshFeedVM.finishLine.caughtUp {
-                        Text("You're all caught up")
-                            .font(AppFont.bodyLarge)
-                            .foregroundStyle(Color.wispOnSurfaceVariant)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
+                        FreshCaughtUpCard()
                     }
-                    if freshFeedVM.finishLine.recipeRow {
-                        ForEach(freshFeedVM.recipePicks, id: \.id) { event in
-                            freshCard(event)
-                            Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
-                        }
+                    if freshFeedVM.finishLine.recipeRow && !freshFeedVM.recipePicks.isEmpty {
+                        FreshRecipeRow(recipes: freshFeedVM.recipePicks)
                     }
                 }
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .refreshable { await freshFeedVM.refreshAndWait() }
+            .onScrollPhaseChange { _, newPhase in
+                switch newPhase {
+                case .tracking, .interacting: feedFabOpacity = 0.35
+                case .decelerating, .animating: feedFabOpacity = 0.75
+                case .idle: feedFabOpacity = 1.0
+                @unknown default: feedFabOpacity = 1.0
+                }
+            }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo("feedTop", anchor: .top)
                 }
+            }
+            .overlay(alignment: .top) {
+                // Live posts wait here; the list never moves on its own.
+                // Tap: scroll to the top and insert them. Close: hide the
+                // pill until more arrive (the posts keep waiting).
+                Group {
+                    if freshFeedVM.showsNewPostsPill {
+                        NewPostsPill(
+                            count: freshFeedVM.newPostsCount,
+                            onTap: {
+                                freshFeedVM.showNewPosts()
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    proxy.scrollTo("feedTop", anchor: .top)
+                                }
+                            },
+                            onDismiss: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    freshFeedVM.dismissNewPostsPill()
+                                }
+                            }
+                        )
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .accessibilityIdentifier("fresh-new-posts-pill")
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: freshFeedVM.showsNewPostsPill)
             }
         }
     }
