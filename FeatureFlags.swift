@@ -43,6 +43,13 @@ enum FeatureFlags {
     /// (`FeedDefaultMigration`); accounts already on the device keep theirs.
     static let freshFeedEnabled: Bool = true
 
+    /// Fresh's special cards: "From the recipe box" and topic spotlights
+    /// woven into the Fresh list (web `freshFeed/specials*`). Operational,
+    /// free tier only: no memory cards, no membership copy, no login. While
+    /// `false` nothing places a card, fetches the topic list or asks for a
+    /// topic preview, and the Fresh list is exactly as before.
+    static let freshSpecialsEnabled: Bool = false
+
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
     /// flow. Nothing on the URL path is gated or sold, so this is a plain
