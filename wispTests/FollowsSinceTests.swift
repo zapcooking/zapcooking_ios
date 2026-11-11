@@ -47,9 +47,19 @@ import Testing
     @MainActor private final class Captured {
         private(set) var loads: [[RelayQuery]] = []
         private(set) var observers: [RelayBacklogObserver?] = []
+        /// Pubkeys the view model asked to fetch profiles for: the seam
+        /// keeps these off the production indexers.
+        var profileFetches: [[String]] = []
+        /// The subscriptions handed back, so a test can push events down
+        /// the stream the view model consumes.
+        private(set) var subscriptions: [RelaySubscription] = []
         func record(_ queries: [RelayQuery], observer: RelayBacklogObserver?) {
             loads.append(queries)
             observers.append(observer)
+        }
+        func opened(_ sub: RelaySubscription) -> RelaySubscription {
+            subscriptions.append(sub)
+            return sub
         }
         /// The `since` values of the most recent load's filters.
         var latestSinces: [Int?] { loads.last?.flatMap { $0.filters.map(\.since) } ?? [] }
@@ -97,8 +107,13 @@ import Testing
             queryIndexers: { _ in [] },
             openFollowsSubscription: { queries, id, observer in
                 captured.record(queries, observer: observer)
-                return RelaySubscription(id: id)
-            }
+                return captured.opened(RelaySubscription(id: id))
+            },
+            ensureProfiles: { pks in
+                captured.profileFetches.append(pks)
+                return [:]
+            },
+            observeMissingProfiles: { _ in }
         )
         return FeedViewModel(keypair: account.keypair, services: services)
     }
@@ -173,6 +188,8 @@ import Testing
         vm.selectFollows()
         #expect(await eventually { !captured.loads.isEmpty })
         #expect(vm.events.contains { $0.pubkey == follow }, "the cached note seeds the list")
+        #expect(await eventually { captured.profileFetches.contains { $0.contains(follow) } },
+                "the uncached author's profile goes through the injected fetch, not the indexers")
 
         expectDefaultWindow(captured, followCount: 1)
         vm.stop()
@@ -275,29 +292,29 @@ import Testing
         let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [fast, slow], now: { now }, defaults: defaults)
 
         settle.delivered(note(at: now - 100), from: fast)
-        settle.answered(relayUrl: fast)
-        settle.answered(relayUrl: fast)                       // a reconnect's second EOSE
-        settle.answered(relayUrl: "wss://unasked.example.com")
+        settle.answered(relayUrl: fast, streamCount: 0)
+        settle.answered(relayUrl: fast, streamCount: 0)                       // a reconnect's second EOSE
+        settle.answered(relayUrl: "wss://unasked.example.com", streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil,
                 "the slow relay has not answered: a kill here must not skip what it holds")
 
         settle.delivered(note(at: now - 4000), from: slow)
-        settle.answered(relayUrl: slow)
+        settle.answered(relayUrl: slow, streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100)
 
         // Settled once: later live deliveries do not move it.
         settle.delivered(note(at: now - 1), from: fast)
-        settle.answered(relayUrl: fast)
+        settle.answered(relayUrl: fast, streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100)
     }
 
     @Test func settle_withNothingDelivered_orNothingAsked_recordsNothing() {
         let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
         let quiet = FollowsLoadSettle(pubkey: pk, askedRelays: ["wss://a.example.com"], now: { now }, defaults: defaults)
-        quiet.answered(relayUrl: "wss://a.example.com")
+        quiet.answered(relayUrl: "wss://a.example.com", streamCount: 0)
         let nobody = FollowsLoadSettle(pubkey: pk, askedRelays: [], now: { now }, defaults: defaults)
         nobody.delivered(note(at: now - 5), from: "wss://a.example.com")
-        nobody.answered(relayUrl: "wss://a.example.com")
+        nobody.answered(relayUrl: "wss://a.example.com", streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
     }
 
@@ -305,7 +322,7 @@ import Testing
         let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
         let settle = FollowsLoadSettle(pubkey: pk, askedRelays: ["wss://a.example.com"], now: { now }, defaults: defaults)
         settle.delivered(note(at: now + 86400), from: "wss://a.example.com")
-        settle.answered(relayUrl: "wss://a.example.com")
+        settle.answered(relayUrl: "wss://a.example.com", streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now + OnlyFoodFilter.futureSkewSeconds)
     }
 
@@ -331,13 +348,175 @@ import Testing
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil, "next load uses the default window")
 
         stale.delivered(note(at: now - 60), from: "wss://a.example.com")
-        stale.answered(relayUrl: "wss://a.example.com")
+        stale.answered(relayUrl: "wss://a.example.com", streamCount: 0)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil)
 
         // Unfollowing clears it too.
         FollowsSyncCursor.record(now - 500, pubkey: pk, now: now)
         FollowsCache.shared.update(pubkey: pk, follows: [b], createdAt: 12)
         #expect(FollowsSyncCursor.load(pubkey: pk, now: now) == nil)
+    }
+
+    // MARK: - Review fixes (#194)
+
+    nonisolated final class PersistGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _batches: [[NostrEvent]] = []
+        private var waiter: CheckedContinuation<Void, Never>?
+        private var opened = false
+        var batches: [[NostrEvent]] { lock.lock(); defer { lock.unlock() }; return _batches }
+        /// Persistence that does not finish until `open()`.
+        func persist(_ batch: [NostrEvent]) async {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                _batches.append(batch)
+                if opened { lock.unlock(); c.resume() } else { waiter = c; lock.unlock() }
+            }
+        }
+        func open() {
+            lock.lock(); opened = true; let w = waiter; waiter = nil; lock.unlock()
+            w?.resume()
+        }
+    }
+
+    /// A load settles while two backlog notes are still on the stream: the
+    /// cursor waits for the consumer to take both, then for the accepted
+    /// one to be written, and only then moves.
+    @Test func settle_commitsOnlyAfterTheBacklogIsConsumedAndPersisted() async {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let relay = "wss://a.example.com", gate = PersistGate()
+        let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [relay], now: { now }, defaults: defaults,
+                                       persist: { await gate.persist($0) })
+        let kept = note(at: now - 100), dropped = note(at: now - 200)
+        settle.delivered(kept, from: relay)
+        settle.delivered(dropped, from: relay)
+        settle.answered(relayUrl: relay, streamCount: 2)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil,
+                "settled, but the consumer has not taken the backlog: a feed switch now would discard it")
+
+        settle.consumed(kept, accepted: true)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
+        settle.consumed(dropped, accepted: false)
+        #expect(await eventually { gate.batches.count == 1 })
+        #expect(gate.batches.first?.map(\.id) == [kept.id], "only what the feed accepted is written")
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil,
+                "persistence has not finished")
+
+        gate.open()
+        #expect(await eventually { FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100 })
+        // Live notes after the barrier are not part of the load.
+        settle.consumed(note(at: now - 1), accepted: true)
+        #expect(gate.batches.count == 1)
+    }
+
+    /// The consumer may be ahead of the socket's answer: everything was
+    /// consumed before the last relay's EOSE.
+    @Test func settle_consumerAlreadyCaughtUp_commitsAtSettle() async {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let relay = "wss://a.example.com"
+        let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [relay], now: { now }, defaults: defaults,
+                                       persist: { _ in })
+        let n = note(at: now - 300)
+        settle.delivered(n, from: relay)
+        settle.consumed(n, accepted: true)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil, "not settled")
+        settle.answered(relayUrl: relay, streamCount: 1)
+        #expect(await eventually { FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 300 })
+    }
+
+    /// A load that ended (feed switched, replaced, stopped) cannot settle or
+    /// commit from a late EOSE: its unflushed notes were discarded.
+    @Test func endedLoad_ignoresLateAnswers_andUncommittedBacklog() async {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let relay = "wss://a.example.com"
+        let early = FollowsLoadSettle(pubkey: pk, askedRelays: [relay], now: { now }, defaults: defaults)
+        early.delivered(note(at: now - 100), from: relay)
+        early.end()
+        early.answered(relayUrl: relay, streamCount: 0)
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil, "ended before its EOSE")
+
+        let mid = FollowsLoadSettle(pubkey: pk, askedRelays: [relay], now: { now }, defaults: defaults,
+                                    persist: { _ in })
+        let n = note(at: now - 100)
+        mid.delivered(n, from: relay)
+        mid.answered(relayUrl: relay, streamCount: 1)
+        mid.end()                              // switched away before the consumer took it
+        mid.consumed(n, accepted: true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil, "ended before commit")
+    }
+
+    /// A relay that refuses the REQ delivered nothing. A transient refusal
+    /// keeps the load unsettled (its notes may come next time); a final one
+    /// counts as an answer, since asking again gets the same refusal.
+    @Test func rejectedRequest_settlesOnlyOnAFinalRefusal() {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let good = "wss://good.example.com", bad = "wss://bad.example.com"
+        for reason in ["rate-limited: slow down", "error: internal", "", "shutting down"] {
+            let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [good, bad], now: { now }, defaults: defaults)
+            settle.delivered(note(at: now - 100), from: good)
+            settle.answered(relayUrl: good, streamCount: 0)
+            settle.rejected(relayUrl: bad, reason: reason, streamCount: 0)
+            #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil,
+                    "'\(reason)' must not let the good relay's note advance past what bad holds")
+        }
+        for reason in ["blocked: not on the allow list", "restricted: paid relay", "INVALID: too many filters"] {
+            FollowsSyncCursor.clear(pubkey: pk, defaults: defaults)
+            let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [good, bad], now: { now }, defaults: defaults)
+            settle.delivered(note(at: now - 100), from: good)
+            settle.answered(relayUrl: good, streamCount: 0)
+            settle.rejected(relayUrl: bad, reason: reason, streamCount: 0)
+            #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == now - 100, "'\(reason)'")
+        }
+    }
+
+    @Test func settle_holdingTooMuchBacklog_givesUpOnTheCursor() async {
+        let defaults = scratchDefaults(), pk = hex32(), now = 2_000_000_000
+        let relay = "wss://a.example.com"
+        let settle = FollowsLoadSettle(pubkey: pk, askedRelays: [relay], now: { now }, defaults: defaults,
+                                       persist: { _ in })
+        let count = FollowsLoadSettle.maxHeldEvents + 1
+        for i in 0..<count {
+            let n = note(at: now - 1000 + i % 500)
+            settle.delivered(n, from: relay)
+            settle.consumed(n, accepted: true)
+        }
+        settle.answered(relayUrl: relay, streamCount: count)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(FollowsSyncCursor.load(pubkey: pk, now: now, defaults: defaults) == nil)
+    }
+
+    /// The stamp check and the cursor write happen under the follow cache's
+    /// lock: once `update` has replaced the list, a write for the old
+    /// stamp does not run.
+    @Test func ifFollowListUnchanged_runsOnlyForTheCurrentList() {
+        let pk = hex32()
+        defer {
+            for key in ["follow_pubkeys_", "follow_pubkeys_ts_"] { UserDefaults.standard.removeObject(forKey: key + pk) }
+            FollowsCache.shared.invalidate(pubkey: pk)
+        }
+        FollowsCache.shared.update(pubkey: pk, follows: [hex32()], createdAt: 20)
+        #expect(FollowsCache.shared.ifFollowListUnchanged(pubkey: pk, stamp: 20) {})
+        FollowsCache.shared.update(pubkey: pk, follows: [hex32()], createdAt: 21)
+        var ran = false
+        #expect(!FollowsCache.shared.ifFollowListUnchanged(pubkey: pk, stamp: 20) { ran = true })
+        #expect(!ran)
+        FollowsCache.shared.invalidate(pubkey: pk)   // cold cache reads the stored stamp
+        #expect(FollowsCache.shared.ifFollowListUnchanged(pubkey: pk, stamp: 21) {})
+    }
+
+    /// `RelaySubscription` counts exactly what it yields: duplicates and
+    /// post-cancel deliveries are not stream elements.
+    @Test func subscription_yieldedCount_countsStreamElements() {
+        let sub = RelaySubscription(id: "count-test")
+        let a = note(at: 1), b = note(at: 2)
+        sub.deliver(event: a, relayUrl: "wss://x.example.com")
+        sub.deliver(event: a, relayUrl: "wss://y.example.com")
+        sub.deliver(event: b, relayUrl: "wss://x.example.com")
+        #expect(sub.yieldedCount == 2)
+        sub.cancel()
+        sub.deliver(event: note(at: 3), relayUrl: "wss://x.example.com")
+        #expect(sub.yieldedCount == 2)
     }
 
     /// End to end through the view model: a settled load records the
@@ -355,10 +534,18 @@ import Testing
         let observer = try #require(first.observers.first ?? nil, "loadFeed passes its settle observer")
         let relay = try #require(RelayPool.wsURL(first.loads[0][0].relayUrl)?.absoluteString)
 
-        observer.delivered(note(at: now - 1000, by: account.follow), from: relay)
+        let sub = try #require(first.subscriptions.first)
+
+        // What the pool's sink does: observe, yield, then EOSE with the
+        // stream position. The view model's consumer takes it from there.
+        let backlog = note(at: now - 1000, by: account.follow)
+        observer.delivered(backlog, from: relay)
+        sub.deliver(event: backlog, relayUrl: relay)
         #expect(FollowsSyncCursor.load(pubkey: account.me, now: now) == nil, "not per event")
-        observer.answered(relayUrl: relay)
-        #expect(FollowsSyncCursor.load(pubkey: account.me, now: now) == now - 1000)
+        observer.answered(relayUrl: relay, streamCount: sub.yieldedCount)
+        #expect(await eventually { FollowsSyncCursor.load(pubkey: account.me, now: now) == now - 1000 },
+                "consumed, persisted, then recorded")
+        #expect(!(await EventStore.shared.eventsByIds([backlog.id])).isEmpty, "on disk before the cursor moved")
         vm.stop()
 
         let second = Captured()

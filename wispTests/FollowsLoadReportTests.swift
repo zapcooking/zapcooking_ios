@@ -43,11 +43,11 @@ import Testing
         let lines = Lines(), clock = Clock()
         let settle = load([a, b], lines: lines, clock: clock)
         clock.advance(1)
-        settle.answered(relayUrl: a)
+        settle.answered(relayUrl: a, streamCount: 0)
         #expect(lines.all.isEmpty)
         clock.advance(1.5)
-        settle.answered(relayUrl: b)
-        settle.answered(relayUrl: b)       // a reconnect's second EOSE
+        settle.answered(relayUrl: b, streamCount: 0)
+        settle.answered(relayUrl: b, streamCount: 0)       // a reconnect's second EOSE
         settle.end()                       // replaced later
         #expect(lines.all == ["Follows load: relays asked 2, answered 2, settled yes, seconds to settle 2.5"])
     }
@@ -55,19 +55,19 @@ import Testing
     @Test func unsettledLoad_logsOnceWhenReplaced_withHowManyAnswered() {
         let lines = Lines(), clock = Clock()
         let settle = load([a, b, c], lines: lines, clock: clock)
-        settle.answered(relayUrl: a)
-        settle.answered(relayUrl: "wss://unasked.example.com")
+        settle.answered(relayUrl: a, streamCount: 0)
+        settle.answered(relayUrl: "wss://unasked.example.com", streamCount: 0)
         settle.end()
         settle.end()                       // stop() after a replace
-        settle.answered(relayUrl: b)
-        settle.answered(relayUrl: c)       // settles after its end: no second line
+        settle.answered(relayUrl: b, streamCount: 0)
+        settle.answered(relayUrl: c, streamCount: 0)       // settles after its end: no second line
         #expect(lines.all == ["Follows load: relays asked 3, answered 1, settled no, seconds to settle -"])
     }
 
     @Test func loadThatAskedNobody_logsWhenItEnds() {
         let lines = Lines(), clock = Clock()
         let settle = load([], lines: lines, clock: clock)
-        settle.answered(relayUrl: a)
+        settle.answered(relayUrl: a, streamCount: 0)
         settle.end()
         #expect(lines.all == ["Follows load: relays asked 0, answered 0, settled no, seconds to settle -"])
     }

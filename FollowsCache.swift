@@ -84,6 +84,23 @@ nonisolated final class FollowsCache: @unchecked Sendable {
         return ts
     }
 
+    /// Runs `body` only while the stored follow list is still the one whose
+    /// kind-3 had `created_at` == `stamp`, holding the lock `update` takes, so
+    /// a list replaced concurrently can't slip in between the check and the
+    /// write. Returns whether `body` ran. Keep `body` short; it must not call
+    /// back into this cache.
+    @discardableResult
+    nonisolated func ifFollowListUnchanged(pubkey: String, stamp: Int, _ body: () -> Void) -> Bool {
+        _ = storedCreatedAt(for: pubkey)   // load before taking the lock
+        lock.lock()
+        defer { lock.unlock() }
+        let current = createdAtByPubkey[pubkey]
+            ?? UserDefaults.standard.integer(forKey: Self.createdAtKey(for: pubkey))
+        guard current == stamp else { return false }
+        body()
+        return true
+    }
+
     /// Persist a new follow list. Updates the in-memory cache *and*
     /// UserDefaults so callers reading via the legacy key still see the
     /// fresh value. `createdAt` is the `created_at` of the kind-3 this set
@@ -91,11 +108,14 @@ nonisolated final class FollowsCache: @unchecked Sendable {
     /// `reconcile` can tell a fresher relay copy from a stale one.
     nonisolated func update(pubkey: String, follows: [String], createdAt: Int) {
         let set = Set(follows)
+        _ = followsSet(for: pubkey)   // load the stored set before comparing
+        lock.lock()
         // A different follow set means the Follows feed's sync point no
         // longer describes it (a new follow's older notes were never asked
         // for): drop it so the next load reaches back the default window.
-        if followsSet(for: pubkey) != set { FollowsSyncCursor.clear(pubkey: pubkey) }
-        lock.lock()
+        // Under the lock, with the replacement, so a load settling for the
+        // old list (`ifFollowListUnchanged`) can't write between the two.
+        if setByPubkey[pubkey] != set { FollowsSyncCursor.clear(pubkey: pubkey) }
         byPubkey[pubkey] = follows
         setByPubkey[pubkey] = set
         createdAtByPubkey[pubkey] = createdAt

@@ -248,6 +248,11 @@ final class FeedViewModel {
         var openFollowsSubscription: @MainActor (
             _ queries: [RelayQuery], _ id: String, _ observer: RelayBacklogObserver?
         ) -> RelaySubscription
+        /// Fetches kind-0s for authors with no cached profile
+        /// (`hydrateProfiles`), and hands events to the missing-profile
+        /// sweep. Injectable so view-model tests stay off the indexers.
+        var ensureProfiles: @MainActor (_ pubkeys: [String]) async -> [String: ProfileData]
+        var observeMissingProfiles: @MainActor (_ events: [NostrEvent]) -> Void
 
         static var live: StartupServices {
             StartupServices(
@@ -261,7 +266,9 @@ final class FeedViewModel {
                 },
                 openFollowsSubscription: { queries, id, observer in
                     RelayPool.subscribe(queries: queries, id: id, observer: observer)
-                }
+                },
+                ensureProfiles: { await ProfileRepository.shared.ensure($0) },
+                observeMissingProfiles: { MissingProfileWatcher.shared.observe($0) }
             )
         }
     }
@@ -497,7 +504,7 @@ final class FeedViewModel {
         //    loadFeed fires tasks and returns — no need to gate it on profile fetch.
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
         await loadUserProfile()
-        MissingProfileWatcher.shared.observe(events)
+        services.observeMissingProfiles(events)
 
         isLoading = false
     }
@@ -527,7 +534,7 @@ final class FeedViewModel {
         )
 
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
-        MissingProfileWatcher.shared.observe(events)
+        services.observeMissingProfiles(events)
     }
 
     func stop() {
@@ -604,8 +611,9 @@ final class FeedViewModel {
         guard !missing.isEmpty else { return }
         let pks = Array(missing)
         Task { @MainActor [weak self] in
-            let dict = await ProfileRepository.shared.ensure(pks)
-            guard let self, !dict.isEmpty else { return }
+            guard let self else { return }
+            let dict = await self.services.ensureProfiles(pks)
+            guard !dict.isEmpty else { return }
             var merged = self.profiles
             for (pk, profile) in dict { merged[pk] = profile }
             self.profiles = merged
@@ -833,7 +841,7 @@ final class FeedViewModel {
             // that when the user finally taps the pill, the merge into
             // `events` is fully populated.
             Task { await EventPersistQueue.shared.enqueue(pendingInserts) }
-            MissingProfileWatcher.shared.observe(pendingInserts)
+            services.observeMissingProfiles(pendingInserts)
             if relayFeedStatus != .streaming { relayFeedStatus = .streaming }
             return
         }
@@ -866,7 +874,7 @@ final class FeedViewModel {
         // inflight / exhausted sets, batches into one kind-0 fan-out per 150
         // pubkeys, and yields back through `updates` so our `profiles` dict
         // hydrates as profiles land. Replaces the per-VM batched fetcher.
-        MissingProfileWatcher.shared.observe(batch)
+        services.observeMissingProfiles(batch)
     }
 
     /// Toggle the hold-new-posts flag from the view layer. Set true while
@@ -1381,26 +1389,36 @@ final class FeedViewModel {
             for await (event, _) in sub.events {
                 guard let self else { return }
                 if Task.isCancelled { return }
-                // Same gate as every other feed write path (startSubscription,
-                // seed, loadOlder, loadMore). A followed author is in the WoT
-                // network by definition, but their kind-6 can wrap a stranger's
-                // note — `shouldDrop` fail-closes on the inner author, and this
-                // was the one live path that skipped it.
-                if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
-                // Kind 5 is a deletion request, not feed content — feed it to
-                // the tracker and drop it before it can reach the render path.
-                // This runs AFTER shouldDrop so the tracker has already learned
-                // about the deletion from the `shouldDrop` call above for any
-                // matching event id; this ingestion is for future events.
-                if event.kind == Nip09.kindDeletion {
-                    DeletionTracker.shared.ingest(event)
-                    continue
-                }
-                guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { continue }
-                guard self.seenIds.insert(event.id).inserted else { continue }
-                self.enqueueLiveEvent(event)
+                // Every element is reported, accepted or not: the load's
+                // cursor waits until its backlog has all been through here
+                // (`FollowsLoadSettle.consumed`).
+                settle.consumed(event, accepted: self.acceptFollowsEvent(event))
             }
         }
+    }
+
+    /// One element of the Follows subscription: gate it, and buffer it for
+    /// the next flush. Returns whether it went into the feed.
+    private func acceptFollowsEvent(_ event: NostrEvent) -> Bool {
+        // Same gate as every other feed write path (startSubscription,
+        // seed, loadOlder, loadMore). A followed author is in the WoT
+        // network by definition, but their kind-6 can wrap a stranger's
+        // note — `shouldDrop` fail-closes on the inner author, and this
+        // was the one live path that skipped it.
+        if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { return false }
+        // Kind 5 is a deletion request, not feed content — feed it to
+        // the tracker and drop it before it can reach the render path.
+        // This runs AFTER shouldDrop so the tracker has already learned
+        // about the deletion from the `shouldDrop` call above for any
+        // matching event id; this ingestion is for future events.
+        if event.kind == Nip09.kindDeletion {
+            DeletionTracker.shared.ingest(event)
+            return false
+        }
+        guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { return false }
+        guard self.seenIds.insert(event.id).inserted else { return false }
+        enqueueLiveEvent(event)
+        return true
     }
 
     // MARK: - Follows cache

@@ -84,20 +84,53 @@ nonisolated enum FollowsSyncCursor {
     }
 }
 
-/// One Follows load, watched until it settles: every relay that was asked
-/// has ended its backlog. Only then is the cursor advanced, to the newest
-/// note the load delivered — not per event, so a load killed half-way
-/// leaves the cursor where it was and the next load asks the slower relays
-/// again. A relay that never answers means this load never settles, which
-/// errs the same way.
+/// One Follows load, watched until it settles and its backlog is saved.
 ///
-/// Nothing is recorded if the follow list changed while the load ran: its
-/// REQs named the old authors.
+/// It settles when every relay that was asked has ended its backlog. Only
+/// then may the cursor advance, to the newest note the load delivered — not
+/// per event, so a load killed half-way leaves the cursor where it was and
+/// the next load asks the slower relays again. A relay that never answers
+/// means this load never settles, which errs the same way.
+///
+/// Settling is not enough on its own: at that moment the backlog has been
+/// yielded to the feed's stream but not yet consumed, merged or written to
+/// `EventStore`, and a feed switch in that window throws the unflushed
+/// notes away. So the feed consumer reports every element it takes off the
+/// stream (`consumed`), and the cursor is committed once the consumer has
+/// taken all `streamCount` elements that were ahead of the settling answer
+/// and the notes it accepted from them have been persisted.
+///
+/// Nothing is recorded if the load ends first (`end()`: replaced by the
+/// next load, the feed switched away, or the view model stopped), or if the
+/// follow list changed while it ran: its REQs named the old authors.
+///
+/// A `CLOSED` counts as an answer only when its reason says the request
+/// will never be served (`blocked:`, `restricted:`, `invalid:`): asking that
+/// relay again gets the same refusal, so waiting on it would stall the
+/// cursor for nothing. Any other `CLOSED` (`rate-limited:`, `error:`, no
+/// prefix) delivered nothing and may succeed next time, so the load stays
+/// unsettled.
 ///
 /// Each load writes one log line (`FollowsLoadReport`), at whichever comes
-/// first: it settles, or it ends unsettled (`end()`: replaced by the next
-/// load, the feed switched away, or the view model stopped).
+/// first: it settles, or it ends unsettled.
 nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Sendable {
+    /// The accepted backlog notes held until commit. A load holding more
+    /// gives up on advancing the cursor rather than grow without bound.
+    static let maxHeldEvents = 5_000
+
+    /// `CLOSED` prefixes (NIP-01) that refuse the request for good.
+    static let finalRejectionPrefixes = ["blocked:", "restricted:", "invalid:"]
+
+    /// Production persistence for the held backlog.
+    static func persistToStore(_ events: [NostrEvent]) async {
+        await EventStore.shared.persist(events)
+    }
+
+    static func rejectionIsFinal(_ reason: String) -> Bool {
+        let lowered = reason.lowercased()
+        return finalRejectionPrefixes.contains { lowered.hasPrefix($0) }
+    }
+
     private let pubkey: String
     private let askedRelays: Set<String>
     private let followListStamp: Int
@@ -106,11 +139,18 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
     private let uptime: @Sendable () -> TimeInterval
     private let startedAt: TimeInterval
     private let report: @Sendable (String) -> Void
+    private let persist: @Sendable ([NostrEvent]) async -> Void
 
     private let lock = NSLock()
     private var answeredRelays: Set<String> = []
     private var newest: Int?
-    private var settled = false
+    /// Stream elements ahead of the settling answer; set when settled.
+    private var barrier: Int?
+    private var consumedCount = 0
+    private var held: [NostrEvent] = []
+    private var overflowed = false
+    private var ended = false
+    private var committing = false
     private var reported = false
 
     /// `askedRelays` are the socket URLs the load was sent to, as the
@@ -119,7 +159,8 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
          now: @escaping @Sendable () -> Int = { Int(Date().timeIntervalSince1970) },
          defaults: UserDefaults = .standard,
          uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         report: @escaping @Sendable (String) -> Void = FollowsLoadReport.log) {
+         report: @escaping @Sendable (String) -> Void = FollowsLoadReport.log,
+         persist: @escaping @Sendable ([NostrEvent]) async -> Void = FollowsLoadSettle.persistToStore) {
         self.pubkey = pubkey
         self.askedRelays = askedRelays
         self.followListStamp = FollowsCache.shared.storedCreatedAt(for: pubkey)
@@ -128,12 +169,17 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
         self.uptime = uptime
         self.startedAt = uptime()
         self.report = report
+        self.persist = persist
     }
 
-    /// The load is over without having settled (replaced, feed switched,
-    /// view model stopped). Writes its log line unless settling already did.
+    /// The load is over. Writes its log line unless settling already did,
+    /// and stops it from settling or committing later (a late `EOSE` can
+    /// still arrive while the socket deregisters). A commit already under
+    /// way finishes: its notes were handed to persistence first.
     func end() {
         lock.lock()
+        ended = true
+        held = []
         guard !reported else {
             lock.unlock()
             return
@@ -147,13 +193,44 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
 
     func delivered(_ event: NostrEvent, from relayUrl: String) {
         lock.lock()
-        if !settled { newest = max(newest ?? 0, event.createdAt) }
+        if barrier == nil, !ended { newest = max(newest ?? 0, event.createdAt) }
         lock.unlock()
     }
 
-    func answered(relayUrl: String) {
+    func answered(relayUrl: String, streamCount: Int) {
+        markAnswered(relayUrl, streamCount: streamCount)
+    }
+
+    func rejected(relayUrl: String, reason: String, streamCount: Int) {
+        guard Self.rejectionIsFinal(reason) else { return }
+        markAnswered(relayUrl, streamCount: streamCount)
+    }
+
+    /// The feed consumer took one element off the subscription's stream, in
+    /// order. `accepted`: it went into the feed (so it must be on disk
+    /// before the cursor moves past it).
+    func consumed(_ event: NostrEvent, accepted: Bool) {
         lock.lock()
-        guard !settled, !askedRelays.isEmpty, askedRelays.contains(relayUrl) else {
+        guard !ended, !committing else {
+            lock.unlock()
+            return
+        }
+        consumedCount += 1
+        if accepted, !overflowed {
+            held.append(event)
+            if held.count > Self.maxHeldEvents {
+                overflowed = true
+                held = []
+            }
+        }
+        let commit = takeCommitIfReady()
+        lock.unlock()
+        commit?()
+    }
+
+    private func markAnswered(_ relayUrl: String, streamCount: Int) {
+        lock.lock()
+        guard barrier == nil, !ended, !askedRelays.isEmpty, askedRelays.contains(relayUrl) else {
             lock.unlock()
             return
         }
@@ -162,20 +239,45 @@ nonisolated final class FollowsLoadSettle: RelayBacklogObserver, @unchecked Send
             lock.unlock()
             return
         }
-        settled = true
-        let newest = self.newest
+        barrier = streamCount
         let firstReport = !reported
         reported = true
+        let commit = takeCommitIfReady()
         lock.unlock()
 
         if firstReport {
             report(FollowsLoadReport.line(asked: askedRelays.count, answered: askedRelays.count,
                                           settledAfter: uptime() - startedAt))
         }
+        commit?()
+    }
 
-        guard let newest,
-              FollowsCache.shared.storedCreatedAt(for: pubkey) == followListStamp else { return }
-        FollowsSyncCursor.record(newest, pubkey: pubkey, now: now(), defaults: defaults)
+    /// Called under `lock`. Once settled and consumed up to the barrier,
+    /// claims the commit and returns the work to run outside the lock.
+    private func takeCommitIfReady() -> (() -> Void)? {
+        guard let barrier, consumedCount >= barrier, !committing, !ended else { return nil }
+        committing = true
+        let batch = held
+        held = []
+        guard !overflowed, let newest else { return nil }
+        return { [self] in
+            if batch.isEmpty {
+                recordCursor(newest)
+            } else {
+                Task.detached(priority: .utility) { [self] in
+                    await persist(batch)
+                    recordCursor(newest)
+                }
+            }
+        }
+    }
+
+    private func recordCursor(_ newest: Int) {
+        // Under the follow cache's lock: `update` can't swap the list (and
+        // clear the cursor) between the stamp check and this write.
+        FollowsCache.shared.ifFollowListUnchanged(pubkey: pubkey, stamp: followListStamp) {
+            FollowsSyncCursor.record(newest, pubkey: pubkey, now: now(), defaults: defaults)
+        }
     }
 }
 
