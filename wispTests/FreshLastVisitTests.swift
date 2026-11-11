@@ -19,6 +19,21 @@ struct FreshLastVisitTests {
         func setFreshVisitValue(_ value: String, forKey key: String) throws { throw Denied() }
     }
 
+    /// Thread-safe, with a pause between a read and the caller's write so
+    /// an unlocked read-compare-write in `recordNewest` loses updates.
+    nonisolated final class SlowStore: FreshVisitStorage, @unchecked Sendable {
+        private let lock = NSLock()
+        private var data: [String: String] = [:]
+        func freshVisitValue(forKey key: String) throws -> String? {
+            lock.lock(); let v = data[key]; lock.unlock()
+            usleep(200)
+            return v
+        }
+        func setFreshVisitValue(_ value: String, forKey key: String) throws {
+            lock.lock(); data[key] = value; lock.unlock()
+        }
+    }
+
     static let pk = String(repeating: "a", count: 64)
     static var key: String { FreshLastVisit.key(pubkey: pk) }
 
@@ -56,6 +71,33 @@ struct FreshLastVisitTests {
         let visit = FreshLastVisit()
         #expect(visit.beginVisit(pubkey: Self.pk, storage: Failing()) == nil)
         visit.recordNewest(5, pubkey: Self.pk, storage: Failing()) // does not throw
+    }
+
+    // MARK: review fixes (PR #201)
+
+    @Test func concurrentRecords_leaveTheNewestStored() throws {
+        let s = SlowStore()
+        let visit = FreshLastVisit()
+        let times = Array(1...200).shuffled()
+        DispatchQueue.concurrentPerform(iterations: times.count) { i in
+            visit.recordNewest(times[i], pubkey: Self.pk, storage: s)
+        }
+        #expect(try s.freshVisitValue(forKey: Self.key) == "200")
+    }
+
+    @Test func outOfRangeStoredMark_readsAsNoMark_andIsReplaced() {
+        for raw in ["1e100", "9.3e18", "\(Double.greatestFiniteMagnitude)"] {
+            let s = Store()
+            s.data[Self.key] = raw
+            #expect(FreshLastVisit().beginVisit(pubkey: Self.pk, storage: s) == nil, "\(raw)")
+            FreshLastVisit().recordNewest(1000, pubkey: Self.pk, storage: s)
+            #expect(s.data[Self.key] == "1000", "\(raw)")
+        }
+    }
+
+    @Test func specialCardsAboveTheFirstSeenPost_withNothingNew_placeNoDivider() {
+        let rows = [Self.row("r", 10, box: true), Self.row("c", 100), Self.row("d", 50)]
+        #expect(Self.keys(FreshDivider.withDivider(rows, mark: 200)) == ["box:r", "c", "d"])
     }
 
     // MARK: withDivider

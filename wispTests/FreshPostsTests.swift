@@ -59,6 +59,15 @@ struct FreshPostsTests {
         #expect(!FreshPosts.isOldEdit(kind: 1, tags: [["published_at", "1"]], now: Self.now))
     }
 
+    /// Review fix (PR #201): a value `Int` cannot hold is no timestamp, not a trap.
+    @Test func outOfRangePublishedAt_isNil_andNotAnEdit() {
+        for raw in ["1e100", "9.3e18", "1e308"] {
+            #expect(FreshPosts.publishedAt(tags: [["published_at", raw]]) == nil, "\(raw)")
+            #expect(!FreshPosts.isOldEdit(kind: 30023, tags: [["published_at", raw]], now: Self.now), "\(raw)")
+        }
+        #expect(FreshPosts.publishedAt(tags: [["published_at", "1700000000.9"]]) == 1_700_000_000)
+    }
+
     // MARK: passesFreshFilters
 
     @Test func passesAnOrdinaryPost() {

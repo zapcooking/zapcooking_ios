@@ -45,13 +45,15 @@ nonisolated enum FreshPosts {
         return .note
     }
 
-    /// `published_at`, when the post has a sane one (finite and > 0). Like
-    /// web's `Number(v)`, a decimal value counts; it is truncated to seconds.
+    /// `published_at`, when the post has a sane one (finite, > 0 and within
+    /// `Int`). Like web's `Number(v)`, a decimal value counts; it is
+    /// truncated to seconds. ≠ web: a value too large for `Int` (`"1e100"`)
+    /// is nil here; web keeps it, and either way it is not an old edit.
     static func publishedAt(tags: [[String]]) -> Int? {
         guard let tag = tags.first(where: { $0.first == "published_at" }), tag.count >= 2 else { return nil }
         let raw = tag[1].trimmingCharacters(in: .whitespaces)
         guard let n = Double(raw), n.isFinite, n > 0 else { return nil }
-        return Int(n)
+        return Int(exactly: n.rounded(.towardZero))
     }
 
     /// A long-form post first published before the free window and edited

@@ -53,9 +53,13 @@ nonisolated final class FreshLastVisit: @unchecked Sendable {
     }
 
     /// Remember the newest post shown, for the next visit (never moves back).
+    /// The read, compare and write happen under the lock, so two concurrent
+    /// calls cannot leave the older value stored.
     func recordNewest(_ createdAt: Int, pubkey: String, storage: FreshVisitStorage?) {
         guard let storage, createdAt > 0 else { return }
         let key = Self.key(pubkey: pubkey)
+        lock.lock()
+        defer { lock.unlock() }
         do {
             if let raw = try storage.freshVisitValue(forKey: key),
                let cur = Self.positive(raw), cur >= createdAt { return }
@@ -72,9 +76,11 @@ nonisolated final class FreshLastVisit: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// A stored mark as whole seconds; nil for garbage, zero, negatives and
+    /// values `Int` cannot hold (`"1e100"`), which would trap in `Int(_:)`.
     private static func positive(_ raw: String) -> Int? {
         guard let n = Double(raw.trimmingCharacters(in: .whitespaces)), n.isFinite, n > 0 else { return nil }
-        return Int(n)
+        return Int(exactly: n.rounded(.towardZero))
     }
 }
 
@@ -100,12 +106,17 @@ nonisolated enum FreshDivider {
     /// the reader already saw, with the number of new posts above it. No
     /// divider on a first visit, when every post shown is new (the reader
     /// hasn't reached the old ones yet), or when none is.
+    ///
+    /// ≠ web: web checks only the divider's index, so special cards above
+    /// the first seen post put a divider with `newCount: 0` there. Here a
+    /// zero count means no divider.
     static func withDivider<R: FreshDividable>(_ rows: [R], mark: Int?) -> [FreshDividedRow<R>] {
         let plain = rows.map { FreshDividedRow.row($0) }
         guard let mark else { return plain }
         guard let at = rows.firstIndex(where: { !$0.isSpecialCard && $0.dividerCreatedAt <= mark }),
               at > 0 else { return plain }
         let newCount = rows[..<at].filter { !$0.isSpecialCard }.count
+        guard newCount > 0 else { return plain }
         var out = Array(plain[..<at])
         out.append(.divider(newCount: newCount))
         out.append(contentsOf: plain[at...])

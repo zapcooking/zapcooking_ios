@@ -62,6 +62,21 @@ struct FreshTopicCatalogTests {
         ])
     }
 
+    /// Review fix (PR #201): a count `Int` cannot hold reads as 0, not a trap.
+    @Test func outOfRangeCounts_readAsZero() {
+        #expect(FreshTopicCatalog.count(NSNumber(value: 1e100)) == 0)
+        #expect(FreshTopicCatalog.count("1e100") == 0)
+        #expect(FreshTopicCatalog.count(NSNumber(value: 42.9)) == 42)
+        let doc: [String: Any] = ["topics": ["parents": [
+            ["slug": "ok", "name": "OK", "count_14d": 1e100, "topics": [
+                ["slug": "fine", "name": "Fine", "count_14d": "1e100"],
+            ]],
+        ]]]
+        #expect(FreshTopicCatalog.parseTopics(doc) == [
+            FreshTopicGroup(slug: "ok", name: "OK", count14d: 0, topics: [FreshTopic(slug: "fine", name: "Fine", count14d: 0)]),
+        ])
+    }
+
     // MARK: parseFeatured
 
     @Test func readsSlugsAndTrimmedShortLabelsInOrder() {

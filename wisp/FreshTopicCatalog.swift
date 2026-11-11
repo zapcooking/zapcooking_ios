@@ -164,6 +164,7 @@ nonisolated struct FreshTopicCatalog: Equatable, Sendable {
     }
 
     /// Web `count()`: `Number(x)` finite and > 0, floored; anything else 0.
+    /// ≠ web: a value too large for `Int` (`1e100`) is 0, not a trap.
     static func count(_ raw: Any?) -> Int {
         let n: Double
         switch raw {
@@ -177,6 +178,6 @@ nonisolated struct FreshTopicCatalog: Equatable, Sendable {
             return 0
         }
         guard n.isFinite, n > 0 else { return 0 }
-        return Int(n.rounded(.down))
+        return Int(exactly: n.rounded(.down)) ?? 0
     }
 }
