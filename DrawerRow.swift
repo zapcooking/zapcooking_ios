@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DrawerRow: View {
     let icon: String
+    /// Bundled artwork (the Gadgets egg timer); when set it replaces `icon`.
+    var assetIcon: String? = nil
     let label: String
     var indented: Bool = false
     var tint: Color? = nil
@@ -21,10 +23,18 @@ struct DrawerRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(tint ?? .secondary)
-                    .frame(width: 24, height: 24)
+                Group {
+                    if let assetIcon {
+                        Image(assetIcon)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 20))
+                    }
+                }
+                .foregroundStyle(tint ?? .secondary)
+                .frame(width: 24, height: 24)
 
                 Text(label)
                     .font(.body)

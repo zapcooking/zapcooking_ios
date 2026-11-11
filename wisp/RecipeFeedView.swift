@@ -19,10 +19,13 @@ struct RecipeFeedView: View {
     /// `CheffyGate.entryVisible()` is false. With both entries present the
     /// atom becomes Android's Intelligence menu (Sous Chef → Cheffy).
     var onCheffy: (() -> Void)?
-    /// Gadgets sheet. Android carries the measuring cup on this bar as well
+    /// Gadgets sheet. Android carries the egg timer on this bar as well
     /// as the feed's, so a timer is one tap away from the recipe you are
     /// about to cook.
     var onGadgets: (() -> Void)?
+    /// True while the Gadgets sheet is up: the bar draws the filled cut,
+    /// mirroring the web header's active weight.
+    var gadgetsActive: Bool = false
 
     @Bindable var viewModel: RecipeFeedViewModel
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -36,6 +39,7 @@ struct RecipeFeedView: View {
         onSousChef: (() -> Void)? = nil,
         onCheffy: (() -> Void)? = nil,
         onGadgets: (() -> Void)? = nil,
+        gadgetsActive: Bool = false,
         viewModel: RecipeFeedViewModel? = nil
     ) {
         self.keypair = keypair
@@ -45,6 +49,7 @@ struct RecipeFeedView: View {
         self.onSousChef = onSousChef
         self.onCheffy = onCheffy
         self.onGadgets = onGadgets
+        self.gadgetsActive = gadgetsActive
         self.viewModel = viewModel ?? RecipeFeedViewModel()
     }
 
@@ -94,7 +99,7 @@ struct RecipeFeedView: View {
                 HStack(spacing: 0) {
                     if let onGadgets {
                         Button(action: onGadgets) {
-                            Image("ZapNavGadgets")
+                            Image(gadgetsActive ? "ZapNavGadgetsFill" : "ZapNavGadgets")
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(height: FeedTopBarLayout.gadgetsGlyphSize)
