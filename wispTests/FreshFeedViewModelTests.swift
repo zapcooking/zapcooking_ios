@@ -36,7 +36,32 @@ import Testing
     final class Rules {
         var snapshot: SafetyFilterSnapshot? = nil
         var reportedCoordinates: Set<String> = []
+        var privateIds: Set<String> = []
         var own: [NostrEvent] = []
+        var ownGate: Gate? = nil
+        var persisted: [NostrEvent] = []
+    }
+
+    /// Holds `ownLocalPosts` until opened.
+    final class Gate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var opened = false
+        func wait() async {
+            if opened { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func open() {
+            opened = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// No profile fetches: the live source asks real relays for kind 0s.
+    struct NoProfiles: FreshProfileSource {
+        func cached(_ pubkey: String) -> ProfileData? { nil }
+        func observe(_ events: [NostrEvent]) {}
+        func updates() -> AsyncStream<String> { AsyncStream { $0.finish() } }
     }
 
     final class Store: FreshVisitStorage, @unchecked Sendable {
@@ -67,10 +92,15 @@ import Testing
             pubkey: pubkey, client: client, now: { Self.now },
             rules: { rules.snapshot },
             isReportedCoordinate: { rules.reportedCoordinates.contains($0) },
-            ownLocalPosts: { rules.own },
-            persist: { _ in },
+            isPrivate: { rules.privateIds.contains($0) },
+            ownLocalPosts: {
+                if let gate = rules.ownGate { await gate.wait() }
+                return rules.own
+            },
+            persist: { rules.persisted.append(contentsOf: $0) },
             visitStorage: store, lastVisit: FreshLastVisit(),
-            notificationCenter: center, retryDelays: retry
+            notificationCenter: center, retryDelays: retry,
+            profileSource: NoProfiles()
         )
         return Rig(transport: transport, vm: vm, center: center, rules: rules, store: store)
     }
@@ -393,10 +423,14 @@ import Testing
 
         rig.vm.activate()
         #expect(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty })
+        // A tail, and (page 1 was short, recipes unanswered) the recipe row
+        // again; never page 1.
+        _ = await eventually { self.reqs(rig.transport.latest).contains(where: Self.isTail) }
         let reqsAfter = reqs(rig.transport.latest)
-        #expect(reqsAfter.count == 1)
-        #expect(reqsAfter[0].limit == FreshRelayClient.tailBacklogLimit)
-        #expect(reqsAfter[0].since == Self.now - 100 - FreshRelayClient.tailResumeOverlapSeconds)
+        #expect(!reqsAfter.contains { $0.limit == FreshRelayClient.pageSize })
+        let tails = reqsAfter.filter(Self.isTail)
+        #expect(tails.count == 1)
+        #expect(tails.first?.since == Self.now - 100 - FreshRelayClient.tailResumeOverlapSeconds)
     }
 
     // MARK: - Last visit
@@ -452,5 +486,205 @@ import Testing
         UserDefaults.standard.set("123", forKey: FreshLastVisit.key(pubkey: pk))
         NostrKey.deleteAccount(pubkey: pk)
         #expect(UserDefaults.standard.string(forKey: FreshLastVisit.key(pubkey: pk)) == nil)
+    }
+
+    // MARK: - Review fixes (PR #205)
+
+    @Test("private replies never show: a cached synthetic and a broadcast one are both excluded")
+    func privateRepliesExcluded() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let signed = try me.event(Self.now - 150)
+        let cachedPrivate = try me.event(Self.now - 120)
+        let unsigned = NostrEvent(id: UUID().uuidString, pubkey: me.pubkey, kind: 1,
+                                  createdAt: Self.now - 110, tags: [], content: "private reply", sig: "")
+        r.privateIds = [cachedPrivate.id]
+        r.own = [signed, cachedPrivate, unsigned]
+        let rig = makeRig(pubkey: me.pubkey, rules: r)
+        let p = try other.event(Self.now - 300)
+        _ = try await start(rig, page: [p])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [signed.id, p.id] })
+
+        // What PrivateReplyPublisher posts.
+        let synthetic = NostrEvent(id: UUID().uuidString, pubkey: me.pubkey, kind: 1,
+                                   createdAt: Self.now - 5, tags: [], content: "private", sig: "")
+        rig.center.post(name: .nostrEventPublished, object: nil, userInfo: ["event": synthetic, "isPrivate": true])
+        let flagged = try me.event(Self.now - 4)
+        rig.center.post(name: .nostrEventPublished, object: nil, userInfo: ["event": flagged, "isPrivate": true])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(rig.vm.posts.map(\.id) == [signed.id, p.id])
+    }
+
+    @Test("an empty answered page reaches the end: the list (caught up + recipe row) shows, not the empty message")
+    func emptyWindowShowsTheFinishLine() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        _ = try await start(rig, page: [])
+        #expect(await eventually { rig.vm.finishLine.caughtUp })
+        #expect(rig.vm.isEmpty)
+        #expect(!rig.vm.showsEmptyMessage)
+        let recipes = try #require(await eventually { self.reqs(rig.transport.latest).contains { $0.kinds == [30023] } } ? reqs(rig.transport.latest).first { $0.kinds == [30023] } : nil)
+        let recipe = try a.longForm(Self.now - 30 * Self.day, d: "pie", recipe: true)
+        answer(rig.transport, recipes, [recipe])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [recipe.id] })
+    }
+
+    @Test("foreground is forwarded while another kind is selected, so retries work after Fresh is picked")
+    func foregroundForwardedWhileInactive() async throws {
+        let a = try Author()
+        let rig = makeRig(retry: [.milliseconds(30)])
+        rig.vm.appDidEnterBackground()
+        FeedTabRouting.freshDidBecomeActive(fresh: rig.vm)   // Fresh not selected yet
+        _ = try await start(rig, page: [try a.event(Self.now - 100)])
+        rig.transport.latest?.dropConnection()
+        #expect(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty })
+    }
+
+    @Test("leaving Fresh while page 1 is still loading sends nothing; coming back loads page 1")
+    func deactivateDuringFirstLoad() async throws {
+        let a = try Author()
+        let r = Rules()
+        let gate = Gate()
+        r.ownGate = gate
+        let rig = makeRig(rules: r)
+        rig.vm.activate()
+        try await Task.sleep(for: .milliseconds(20))
+        rig.vm.deactivate()
+        gate.open()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(rig.transport.opened.flatMap(\.sent).isEmpty)
+        #expect(!rig.vm.hasLoaded && !rig.vm.isLoading)
+
+        let post = try a.event(Self.now - 10)
+        _ = try await start(rig, page: [post])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [post.id] })
+    }
+
+    @Test("coming to the foreground while page 1 is pending starts no tail before the page")
+    func foregroundDuringFirstPage() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        rig.vm.activate()
+        let pageReq = try await awaitReq(rig.transport, 1)
+        rig.vm.appDidBecomeActive()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(reqs(rig.transport.latest).count == 1)
+        answer(rig.transport, pageReq, [try a.event(Self.now - 10)])
+        #expect(await eventually { self.reqs(rig.transport.latest).contains(where: Self.isTail) })
+        #expect(reqs(rig.transport.latest).filter(Self.isTail).count == 1)
+    }
+
+    @Test("refresh stops the tail before resetting seen, reloads page 1, then restarts the tail with the overlap")
+    func refreshOrdersTheTail() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let first = try a.event(Self.now - 100)
+        let (_, tail) = try await start(rig, page: [first])
+        _ = await eventually { rig.vm.posts.count == 1 }
+
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let closed = await eventually { rig.transport.latest?.sent.contains("[\"CLOSE\",\"\(tail.subId)\"]") ?? false }
+        #expect(closed)
+        let pageReq = try #require(await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 2 } ? reqs(rig.transport.latest).filter { $0.limit == 30 }.last : nil)
+        let sent = rig.transport.latest?.sent ?? []
+        let closeIndex = sent.firstIndex(of: "[\"CLOSE\",\"\(tail.subId)\"]")!
+        let pageIndex = sent.firstIndex { $0.contains(pageReq.subId) }!
+        #expect(closeIndex < pageIndex)
+        // The page returns the post the old tail could have delivered: it is
+        // not lost to the seen-set.
+        let during = try a.event(Self.now - 20)
+        answer(rig.transport, pageReq, [during, first])
+        await refresh
+        #expect(rig.vm.posts.map(\.id) == [during.id, first.id])
+        let restarted = await eventually { self.reqs(rig.transport.latest).contains { Self.isTail($0) && $0.subId != tail.subId } }
+        try #require(restarted)
+        let newTail = try #require(reqs(rig.transport.latest).last(where: Self.isTail))
+        #expect(newTail.since == Self.now - 20 - FreshRelayClient.tailResumeOverlapSeconds)
+    }
+
+    @Test("a full page that is all filtered out fetches the next page without a scroll")
+    func emptyFullPageHops() async throws {
+        let muted = try Author(), a = try Author()
+        let r = Rules()
+        r.snapshot = rules(blocked: [muted.pubkey])
+        let rig = makeRig(rules: r)
+        let hiddenPage = try (0..<30).map { try muted.event(Self.now - 10 - $0 * 10) }
+        rig.vm.activate()
+        let req1 = try await awaitReq(rig.transport, 1)
+        answer(rig.transport, req1, hiddenPage)
+        let req2 = try #require(await eventually { self.reqs(rig.transport.latest).contains { $0.until != nil } } ? reqs(rig.transport.latest).first { $0.until != nil } : nil)
+        #expect(req2.until == hiddenPage.map(\.createdAt).min())
+        let visible = try a.event(Self.now - 400)
+        answer(rig.transport, req2, [visible])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [visible.id] })
+    }
+
+    @Test("a future-dated post can't anchor the tail ahead of now + 30 s")
+    func futureDatedAnchorClamped() async throws {
+        let a = try Author()
+        let rig = makeRig()
+        let (_, tail) = try await start(rig, page: [try a.event(Self.now + 86_400), try a.event(Self.now - 100)])
+        #expect(tail.since == Self.now + FreshRelayClient.futureSkewSeconds)
+        await rig.vm.deactivateAndWait()
+        rig.vm.activate()
+        let resumed = try #require(await eventually { rig.transport.opened.count == 2 && !self.reqs(rig.transport.latest).isEmpty } ? reqs(rig.transport.latest).first : nil)
+        #expect(resumed.since == Self.now + FreshRelayClient.futureSkewSeconds - FreshRelayClient.tailResumeOverlapSeconds)
+    }
+
+    @Test("a long-form edit from the tail is persisted as well as shown")
+    func tailEditPersisted() async throws {
+        let z = try Author()
+        let r = Rules()
+        let rig = makeRig(rules: r)
+        let (_, tail) = try await start(rig, page: [try z.longForm(Self.now - 300, d: "x")])
+        let edit = try z.longForm(Self.now - 100, d: "x")
+        answer(rig.transport, tail, [edit], eose: false)
+        #expect(await eventually { rig.vm.posts.map(\.id) == [edit.id] })
+        #expect(r.persisted.contains { $0.id == edit.id })
+    }
+
+    @Test("own long-form keeps one row per coordinate: own edits collapse, and the newer of own and relay wins")
+    func ownLongFormByCoordinate() async throws {
+        let me = try Author()
+        let r = Rules()
+        let ownOld = try me.longForm(Self.now - 500, d: "a")
+        let ownNew = try me.longForm(Self.now - 400, d: "a")
+        let ownNewerThanRelay = try me.longForm(Self.now - 50, d: "b")
+        r.own = [ownOld, ownNew, ownNewerThanRelay]
+        let rig = makeRig(pubkey: me.pubkey, rules: r)
+        let relayB = try me.longForm(Self.now - 200, d: "b")
+        let relayNote = try me.event(Self.now - 600)
+        _ = try await start(rig, page: [relayB, relayNote])
+        #expect(await eventually { rig.vm.posts.map(\.id) == [ownNewerThanRelay.id, ownNew.id, relayNote.id] })
+    }
+
+    @Test("the visit mark records the newest row shown, own posts included")
+    func visitMarkIncludesOwnPosts() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let mine = try me.event(Self.now - 10)
+        r.own = [mine]
+        let store = Store()
+        let rig = makeRig(pubkey: me.pubkey, rules: r, store: store)
+        _ = try await start(rig, page: [try other.event(Self.now - 100)])
+        _ = await eventually { rig.vm.posts.count == 2 }
+        #expect(store.data[FreshLastVisit.key(pubkey: me.pubkey)] == String(Self.now - 10))
+    }
+
+    @Test("a recipe published from the editor (persisted, no notification) appears on refresh")
+    func ownRecipeArrivesOnRefresh() async throws {
+        let me = try Author(), other = try Author()
+        let r = Rules()
+        let rig = makeRig(pubkey: me.pubkey, rules: r)
+        let p = try other.event(Self.now - 100)
+        _ = try await start(rig, page: [p])
+        _ = await eventually { rig.vm.posts.count == 1 }
+        let recipe = try me.longForm(Self.now - 30, d: "stew", recipe: true)
+        r.own = [recipe]
+        async let refresh: Void = rig.vm.refreshAndWait()
+        let pageReq = try #require(await eventually { self.reqs(rig.transport.latest).filter { $0.limit == 30 }.count == 2 } ? reqs(rig.transport.latest).filter { $0.limit == 30 }.last : nil)
+        answer(rig.transport, pageReq, [p])
+        await refresh
+        #expect(rig.vm.posts.map(\.id) == [recipe.id, p.id])
     }
 }

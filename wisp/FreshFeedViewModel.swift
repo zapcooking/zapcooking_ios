@@ -35,6 +35,23 @@ nonisolated enum FreshTailStatus: Equatable, Sendable {
     case ended
 }
 
+/// Where Fresh gets author profiles. The live source is the app's profile
+/// cache plus `MissingProfileWatcher` (which fetches missing kind 0s);
+/// tests pass one that fetches nothing.
+@MainActor
+protocol FreshProfileSource {
+    func cached(_ pubkey: String) -> ProfileData?
+    func observe(_ events: [NostrEvent])
+    func updates() -> AsyncStream<String>
+}
+
+@MainActor
+struct LiveFreshProfileSource: FreshProfileSource {
+    func cached(_ pubkey: String) -> ProfileData? { ProfileRepository.shared.get(pubkey) }
+    func observe(_ events: [NostrEvent]) { MissingProfileWatcher.shared.observe(events) }
+    func updates() -> AsyncStream<String> { MissingProfileWatcher.shared.updates }
+}
+
 /// The Fresh feed: the curated relay `wss://feed.zap.cooking`, free tier,
 /// read-only (build spec §2 "Fresh feed relay"). Behind
 /// `FeatureFlags.freshFeedEnabled`.
@@ -50,12 +67,19 @@ nonisolated enum FreshTailStatus: Equatable, Sendable {
 ///   and they are remembered so a later page or the tail can't bring them
 ///   back before the filter snapshot catches up.
 /// - **Own posts.** A new user is not on the curated list, so their post
-///   never comes back from the relay. Their own posts of the last 14 days
-///   are pinned from local sources (the event store and fresh publishes), in
-///   time order, unlabelled; the relay's copy replaces one by id.
-/// - **The tail.** Started after the first page, closed when the feed goes
-///   away, revived on foreground and pull-to-refresh, and retried with
-///   backoff while the app stays in the foreground.
+///   never comes back from the relay. Their own signed, public posts of the
+///   last 14 days are pinned from local sources (the event store, reloaded on
+///   refresh, and fresh publishes), in time order, unlabelled; the relay's
+///   copy replaces one by id, and long-form keeps the newest per coordinate.
+///   Private replies (`PrivateInteractionStore`) never appear.
+/// - **Lifecycle.** The socket is open only while Fresh is the selected kind.
+///   Leaving bumps `epoch`: work in flight is dropped before it can send a
+///   request or apply a result, and the next connection waits for the close.
+///   A first load cut short this way starts again on the next activation.
+/// - **The tail.** Started after page 1 from the newest post (clamped to now
+///   + skew), closed when the feed goes away, revived on foreground, restarted
+///   with an overlap on pull-to-refresh, and retried with backoff while the
+///   app stays in the foreground.
 ///
 /// Nothing about viewing leaves the device: the client names no reader, and
 /// the last-visit mark is device-local.
@@ -89,6 +113,11 @@ final class FreshFeedViewModel {
 
     var isEmpty: Bool { hasLoaded && posts.isEmpty && !loadFailed }
 
+    /// The "nothing yet" message. Once the end is reached the list shows
+    /// instead, so the caught-up line and the recipe row are visible even
+    /// when no post is.
+    var showsEmptyMessage: Bool { isEmpty && !finishLine.caughtUp }
+
     // MARK: Tunables
 
     nonisolated static let recipeRowLimit = 12
@@ -97,6 +126,9 @@ final class FreshFeedViewModel {
     /// Waits before each in-foreground revive of a lost tail. The last value
     /// repeats; any delivered post starts the sequence again.
     nonisolated static let tailRetryDelays: [Duration] = [.seconds(2), .seconds(5), .seconds(15), .seconds(30), .seconds(60)]
+    /// A full page whose posts are all filtered out adds no row to scroll to;
+    /// this many such pages in a row are fetched without waiting for a scroll.
+    nonisolated static let maxEmptyPageHops = 5
 
     // MARK: Dependencies
 
@@ -105,6 +137,7 @@ final class FreshFeedViewModel {
     @ObservationIgnored private let now: @Sendable () -> Int
     @ObservationIgnored private let rules: () -> SafetyFilterSnapshot?
     @ObservationIgnored private let isReportedCoordinate: (String) -> Bool
+    @ObservationIgnored private let isPrivate: (String) -> Bool
     @ObservationIgnored private let ownLocalPosts: () async -> [NostrEvent]
     @ObservationIgnored private let persist: ([NostrEvent]) -> Void
     @ObservationIgnored private let visitStorage: FreshVisitStorage?
@@ -112,15 +145,20 @@ final class FreshFeedViewModel {
     @ObservationIgnored private let center: NotificationCenter
     @ObservationIgnored private let retryDelays: [Duration]
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
-    @ObservationIgnored private let profileRepo: ProfileRepository?
+    @ObservationIgnored private let profileSource: FreshProfileSource
 
     // MARK: Internal state
 
-    @ObservationIgnored private var started = false
+    @ObservationIgnored private var observing = false
     /// The feed is the selected kind (its body is shown).
     @ObservationIgnored private(set) var isActive = false
     /// The app is in the foreground.
     @ObservationIgnored private var appActive = true
+    /// Bumped on every deactivation; async work captures it and stops when
+    /// it changes.
+    @ObservationIgnored private var epoch = 0
+    /// The close started by the last deactivation; new connections wait for it.
+    @ObservationIgnored private var pendingClose: Task<Void, Never>?
     /// The relay's posts in display order (spaced; tail posts placed by time).
     @ObservationIgnored private var relayPosts: [NostrEvent] = []
     /// Own posts from local sources, by id.
@@ -128,7 +166,7 @@ final class FreshFeedViewModel {
     /// `until` for the next page: the oldest event the last page returned,
     /// whatever the filters kept (so a page of muted posts can't stall paging).
     @ObservationIgnored private var pageCursor: Int?
-    @ObservationIgnored private var recipesRequested = false
+    @ObservationIgnored private var recipesLoaded = false
     /// Hidden by `.contentHidden` since this VM started; checked at ingest.
     @ObservationIgnored private var hiddenIds: Set<String> = []
     @ObservationIgnored private var hiddenPubkeys: Set<String> = []
@@ -137,6 +175,9 @@ final class FreshFeedViewModel {
     @ObservationIgnored private var retryTask: Task<Void, Never>?
     @ObservationIgnored private var retryAttempt = 0
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var pageTask: Task<Void, Never>?
+    @ObservationIgnored private var recipeTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var profileUpdatesTask: Task<Void, Never>?
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
@@ -147,6 +188,7 @@ final class FreshFeedViewModel {
         now: (@Sendable () -> Int)? = nil,
         rules: (() -> SafetyFilterSnapshot?)? = nil,
         isReportedCoordinate: ((String) -> Bool)? = nil,
+        isPrivate: ((String) -> Bool)? = nil,
         ownLocalPosts: (() async -> [NostrEvent])? = nil,
         persist: (([NostrEvent]) -> Void)? = nil,
         visitStorage: FreshVisitStorage? = UserDefaults.standard,
@@ -154,13 +196,14 @@ final class FreshFeedViewModel {
         notificationCenter: NotificationCenter = .default,
         retryDelays: [Duration] = FreshFeedViewModel.tailRetryDelays,
         sleep: (@Sendable (Duration) async throws -> Void)? = nil,
-        profileRepo: ProfileRepository? = nil
+        profileSource: FreshProfileSource? = nil
     ) {
         self.pubkey = pubkey
         self.client = client ?? FreshRelayClient()
         self.now = now ?? { NostrClock.now() }
         self.rules = rules ?? { SafetyFilter.shared.snapshot }
         self.isReportedCoordinate = isReportedCoordinate ?? { ReportedContent.shared.isHidden(coordinate: $0) }
+        self.isPrivate = isPrivate ?? { PrivateInteractionStore.shared.privateEventIds.contains($0) }
         self.ownLocalPosts = ownLocalPosts ?? {
             await EventStore.shared.loadRecentByAuthor(pubkey: pubkey, kinds: FreshPosts.feedKinds, limit: 100)
         }
@@ -173,13 +216,15 @@ final class FreshFeedViewModel {
         self.center = notificationCenter
         self.retryDelays = retryDelays.isEmpty ? FreshFeedViewModel.tailRetryDelays : retryDelays
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
-        self.profileRepo = profileRepo
+        self.profileSource = profileSource ?? LiveFreshProfileSource()
     }
 
     deinit {
         tailTask?.cancel()
         retryTask?.cancel()
         loadTask?.cancel()
+        pageTask?.cancel()
+        recipeTask?.cancel()
         profileUpdatesTask?.cancel()
         if let hideObserver { center.removeObserver(hideObserver) }
         if let publishObserver { center.removeObserver(publishObserver) }
@@ -189,20 +234,26 @@ final class FreshFeedViewModel {
 
     // MARK: - Lifecycle
 
-    /// The feed became the selected kind. First time: load page 1, then
-    /// start the tail. Later: start the tail again (the list is kept; no
-    /// page is re-requested).
+    /// The feed became the selected kind. Until page 1 has loaded: load it
+    /// (again, if a previous attempt was cut short), then start the tail.
+    /// After that: start the tail again; the list is kept and no page is
+    /// re-requested.
     func activate() {
         guard !isActive else { return }
         isActive = true
-        if !started {
-            started = true
+        if !observing {
+            observing = true
             observeContentHidden()
             observeOwnPublishes()
             ensureProfileUpdates()
-            loadTask = Task { [weak self] in await self?.loadFirstPage() }
-        } else if hasLoaded {
-            startTail(since: tailResumeSince())
+        }
+        if !hasLoaded {
+            guard loadTask == nil else { return }
+            let epoch = self.epoch
+            loadTask = Task { [weak self] in await self?.loadFirstPage(epoch: epoch) }
+        } else {
+            startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
+            if finishLine.caughtUp && !recipesLoaded { startRecipes() }
         }
     }
 
@@ -212,27 +263,39 @@ final class FreshFeedViewModel {
         await loadTask?.value
     }
 
-    /// The feed went away (another kind picked, or the screen closed): the
-    /// socket is closed and the tail stops. The list is kept.
+    /// The feed went away (another kind picked, or the screen closed): work
+    /// in flight is abandoned, the tail stops and the socket closes. The list
+    /// is kept.
     func deactivate() {
         guard isActive else { return }
         isActive = false
+        epoch += 1
         stopTail()
+        for task in [loadTask, pageTask, recipeTask] { task?.cancel() }
+        loadTask = nil
+        pageTask = nil
+        recipeTask = nil
+        isLoading = false
+        isPaging = false
         let client = self.client
-        Task { await client.close() }
+        let previous = pendingClose
+        pendingClose = Task {
+            await previous?.value
+            await client.close()
+        }
     }
 
     func deactivateAndWait() async {
-        guard isActive else { return }
-        isActive = false
-        stopTail()
-        await client.close()
+        deactivate()
+        await pendingClose?.value
     }
 
-    /// Foreground return (`MainView`'s scene-phase hook).
+    /// Foreground return (`MainView`'s scene-phase hook, forwarded whatever
+    /// the selected kind so `appActive` is always current).
     func appDidBecomeActive() {
         appActive = true
-        guard isActive, started else { return }
+        // Page 1 (or a refresh) starts the tail itself when it finishes.
+        guard isActive, hasLoaded, loadTask == nil, !refreshing else { return }
         retryAttempt = 0
         reviveOrRestartTail()
     }
@@ -244,23 +307,34 @@ final class FreshFeedViewModel {
         retryTask = nil
     }
 
-    /// Pull-to-refresh: page 1 again (from scratch), and the tail revived.
+    /// Pull-to-refresh: the tail is stopped first (so nothing it delivers is
+    /// marked seen and then lost), page 1 is loaded from scratch with own
+    /// posts reloaded from local storage, and a new tail starts from the new
+    /// page with the overlap.
     func refreshAndWait() async {
-        guard started else {
-            await activateAndWait()
+        guard hasLoaded else {
+            activate()
+            await loadTask?.value
             return
         }
+        guard isActive, !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        let epoch = self.epoch
+        stopTail()
+        pageTask?.cancel()
+        pageTask = nil
+        recipeTask?.cancel()
+        recipeTask = nil
+        await client.stopTail()
         await client.resetSeen()
-        relayPosts = []
-        pageCursor = nil
-        finishLine = .none
-        recipePicks = []
-        recipesRequested = false
-        await loadPage(first: true)
-        if isActive {
-            retryAttempt = 0
-            reviveOrRestartTail()
-        }
+        guard epoch == self.epoch else { return }
+        await loadOwnLocalPosts()
+        guard epoch == self.epoch else { return }
+        let fresh = await fetchPages(first: true, epoch: epoch)
+        guard fresh, epoch == self.epoch, isActive else { return }
+        retryAttempt = 0
+        startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
     }
 
     // MARK: - Paging
@@ -271,84 +345,110 @@ final class FreshFeedViewModel {
     }
 
     func loadMore() {
-        guard hasLoaded, !isPaging, !finishLine.caughtUp, pageCursor != nil else { return }
+        guard canPage else { return }
         isPaging = true
-        Task { [weak self] in
-            await self?.loadPage(first: false)
+        let epoch = self.epoch
+        pageTask = Task { [weak self] in
+            _ = await self?.fetchPages(first: false, epoch: epoch)
+            self?.pageTask = nil
         }
     }
 
     func loadMoreAndWait() async {
-        guard hasLoaded, !isPaging, !finishLine.caughtUp, pageCursor != nil else { return }
-        isPaging = true
-        await loadPage(first: false)
+        loadMore()
+        await pageTask?.value
     }
 
-    private func loadFirstPage() async {
-        visitMark = lastVisit.beginVisit(pubkey: pubkey, storage: visitStorage)
+    private var canPage: Bool {
+        isActive && hasLoaded && !isPaging && !refreshing && !finishLine.caughtUp && pageCursor != nil
+    }
+
+    private func loadFirstPage(epoch: Int) async {
+        if visitMark == nil {
+            visitMark = lastVisit.beginVisit(pubkey: pubkey, storage: visitStorage)
+        }
         isLoading = true
-        let floor = now() - FreshPosts.freeWindowSeconds
-        let local = await ownLocalPosts()
-        for event in local where isOwnCandidate(event, floor: floor) {
-            ownPosts[event.id] = event
-        }
-        await loadPage(first: true)
+        await loadOwnLocalPosts()
+        guard epoch == self.epoch else { return }
+        let applied = await fetchPages(first: true, epoch: epoch)
+        guard applied, epoch == self.epoch else { return }
         isLoading = false
+        loadTask = nil
         if isActive {
-            startTail(since: relayPosts.map(\.createdAt).max() ?? now())
+            startTail(since: tailAnchor())
         }
     }
 
-    private func loadPage(first: Bool) async {
-        let answer = await client.feedPage(until: first ? nil : pageCursor)
-        let accepted = answer.events.filter(accept)
-        if first {
-            relayPosts = FreshSpacing.spaceAuthors(before: [], incoming: collapseEdits(accepted, into: []))
-        } else {
-            relayPosts += FreshSpacing.spaceAuthors(before: relayPosts, incoming: collapseEdits(accepted, into: relayPosts))
-        }
-        if let oldest = answer.events.map(\.createdAt).min() { pageCursor = oldest }
-        persist(accepted)
-        switch answer.outcome {
-        case .floor:
-            reachEnd()
-        case .answered where answer.isShortPage:
-            reachEnd()
-        case .answered:
-            break
-        case .invalid, .failed, .timedOut:
-            // Kept what arrived; the next scroll or refresh asks again.
-            break
-        }
-        if first {
-            hasLoaded = true
+    /// One page, then more while a full page added no visible row (bounded,
+    /// and only while the cursor moves back). Returns false when abandoned.
+    private func fetchPages(first: Bool, epoch: Int) async -> Bool {
+        var replace = first
+        var hops = 0
+        while true {
+            await pendingClose?.value
+            guard epoch == self.epoch, !Task.isCancelled else { return false }
+            let previousCursor = replace ? nil : pageCursor
+            let answer = await client.feedPage(until: replace ? nil : pageCursor)
+            guard epoch == self.epoch, !Task.isCancelled else { return false }
+
+            let accepted = answer.events.filter(accept)
+            let incoming = collapseEdits(accepted, replacing: !replace)
+            if replace {
+                relayPosts = FreshSpacing.spaceAuthors(before: [], incoming: incoming)
+                pageCursor = nil
+                finishLine = .none
+            } else {
+                relayPosts += FreshSpacing.spaceAuthors(before: relayPosts, incoming: incoming)
+            }
+            if let oldest = answer.events.map(\.createdAt).min() { pageCursor = oldest }
+            persist(accepted)
+
+            if first && replace {
+                hasLoaded = true
+                switch answer.outcome {
+                case .answered, .floor: loadFailed = false
+                case .invalid, .failed, .timedOut: loadFailed = answer.events.isEmpty
+                }
+            }
+            let reachedEnd: Bool
             switch answer.outcome {
-            case .answered, .floor: loadFailed = false
-            case .invalid, .failed, .timedOut: loadFailed = answer.events.isEmpty
+            case .floor: reachedEnd = true
+            case .answered: reachedEnd = answer.isShortPage
+            case .invalid, .failed, .timedOut: reachedEnd = false
             }
-            if let newest = relayPosts.map(\.createdAt).max() {
-                lastVisit.recordNewest(newest, pubkey: pubkey, storage: visitStorage)
+            replace = false
+            emit()
+
+            if reachedEnd {
+                reachEnd()
+                break
             }
+            let cursorMoved = pageCursor.map { new in previousCursor.map { new < $0 } ?? true } ?? false
+            hops += 1
+            guard answer.outcome == .answered, incoming.isEmpty, cursorMoved, hops <= Self.maxEmptyPageHops else { break }
         }
         isPaging = false
-        emit()
+        return true
     }
 
     private func reachEnd() {
         finishLine = .of(reached: true)
-        guard !recipesRequested else { return }
-        recipesRequested = true
-        Task { [weak self] in await self?.loadRecipes() }
+        if !recipesLoaded { startRecipes() }
     }
 
-    /// Async form for tests.
-    func loadRecipesAndWait() async {
-        recipesRequested = true
-        await loadRecipes()
+    private func startRecipes() {
+        guard isActive, recipeTask == nil else { return }
+        let epoch = self.epoch
+        recipeTask = Task { [weak self] in
+            await self?.loadRecipes(epoch: epoch)
+        }
     }
 
-    private func loadRecipes() async {
+    private func loadRecipes(epoch: Int) async {
+        await pendingClose?.value
+        guard epoch == self.epoch, !Task.isCancelled else { return }
         let answer = await client.recipes()
+        guard epoch == self.epoch, !Task.isCancelled else { return }
         let rules = self.rules()
         var byCoordinate: [String: NostrEvent] = [:]
         for event in answer.events where FreshPosts.isRecipe(kind: event.kind, tags: event.tags) {
@@ -358,6 +458,8 @@ final class FreshFeedViewModel {
             byCoordinate[coordinate] = event
         }
         recipePicks = Array(FreshRelayClient.newestFirst(Array(byCoordinate.values)).prefix(Self.recipeRowLimit))
+        recipesLoaded = answer.outcome == .answered
+        recipeTask = nil
         observeProfiles(in: recipePicks)
     }
 
@@ -366,11 +468,15 @@ final class FreshFeedViewModel {
     private func startTail(since: Int) {
         stopTail()
         let client = self.client
+        let epoch = self.epoch
+        let close = pendingClose
         tailStatus = .live
         tailTask = Task { [weak self] in
+            await close?.value
+            guard let self, epoch == self.epoch, self.isActive, !Task.isCancelled else { return }
             let stream = await client.liveTail(since: since)
             for await update in stream {
-                guard let self, !Task.isCancelled else { return }
+                guard !Task.isCancelled, epoch == self.epoch else { return }
                 self.handleTail(update)
             }
         }
@@ -384,23 +490,25 @@ final class FreshFeedViewModel {
         tailStatus = .idle
     }
 
-    /// A new tail asks from the newest relay post minus the client's overlap;
-    /// the client's seen-set drops what is already shown.
-    private func tailResumeSince() -> Int {
-        let newest = relayPosts.map(\.createdAt).max() ?? now()
-        return newest - FreshRelayClient.tailResumeOverlapSeconds
+    /// The newest relay post, clamped to now + skew: a future-dated post must
+    /// not start a tail days ahead and miss everything until then.
+    private func tailAnchor() -> Int {
+        let ceiling = now() + FreshRelayClient.futureSkewSeconds
+        return min(relayPosts.map(\.createdAt).max() ?? now(), ceiling)
     }
 
     private func reviveOrRestartTail() {
         switch tailStatus {
         case .lost:
             let client = self.client
+            let epoch = self.epoch
             Task { [weak self] in
                 let revived = await client.reviveTail()
-                if !revived { self?.startTail(since: self?.tailResumeSince() ?? 0) }
+                guard let self, epoch == self.epoch, self.isActive else { return }
+                if !revived { self.startTail(since: self.tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds) }
             }
         case .ended, .idle:
-            startTail(since: tailResumeSince())
+            startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
         case .live:
             break
         }
@@ -412,16 +520,13 @@ final class FreshFeedViewModel {
             tailStatus = .live
             retryAttempt = 0
             guard accept(event) else { return }
+            persist([event])
             if event.kind == 30023, replaceEdit(event) {
                 emit()
                 return
             }
             let index = relayPosts.firstIndex { $0.createdAt < event.createdAt } ?? relayPosts.endIndex
             relayPosts.insert(event, at: index)
-            persist([event])
-            if let newest = relayPosts.map(\.createdAt).max() {
-                lastVisit.recordNewest(newest, pubkey: pubkey, storage: visitStorage)
-            }
             emit()
         case .lost:
             tailStatus = .lost
@@ -442,9 +547,10 @@ final class FreshFeedViewModel {
         retryAttempt += 1
         let sleep = self.sleep
         let client = self.client
+        let epoch = self.epoch
         retryTask = Task { [weak self] in
             do { try await sleep(delay) } catch { return }
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, epoch == self.epoch else { return }
             self.retryTask = nil
             guard self.isActive, self.appActive, self.tailStatus == .lost else { return }
             _ = await client.reviveTail()
@@ -473,10 +579,10 @@ final class FreshFeedViewModel {
         event.kind == 30023 || event.kind == 30024
     }
 
-    /// Long-form edits share a coordinate: keep the newest per coordinate,
-    /// within the incoming page and against what is already shown (an older
-    /// one already shown is replaced in place).
-    private func collapseEdits(_ incoming: [NostrEvent], into existing: [NostrEvent]) -> [NostrEvent] {
+    /// Long-form edits share a coordinate: keep the newest per coordinate
+    /// within the incoming page, and (when `replacing`) against what is
+    /// already shown, where an older row is replaced in place.
+    private func collapseEdits(_ incoming: [NostrEvent], replacing: Bool) -> [NostrEvent] {
         var newestByCoordinate: [String: NostrEvent] = [:]
         for event in incoming where event.kind == 30023 {
             let c = RecipeRepository.coordinate(event)
@@ -488,7 +594,7 @@ final class FreshFeedViewModel {
             if event.kind == 30023 {
                 let c = RecipeRepository.coordinate(event)
                 guard newestByCoordinate[c]?.id == event.id else { continue }
-                if replaceEdit(event) { continue }
+                if replacing, replaceEdit(event) { continue }
             }
             out.append(event)
         }
@@ -508,18 +614,38 @@ final class FreshFeedViewModel {
 
     // MARK: - Own posts
 
+    /// The user's own public, signed post in the window that passes the
+    /// filters. A private reply is persisted and broadcast as an unsigned
+    /// synthetic kind 1 (`PrivateReplyPublisher`); it must never show here.
     private func isOwnCandidate(_ event: NostrEvent, floor: Int) -> Bool {
         event.pubkey == pubkey
             && FreshPosts.feedKinds.contains(event.kind)
             && event.createdAt >= floor
+            && !event.sig.isEmpty
+            && !isPrivate(event.id)
             && accept(event)
+    }
+
+    /// Reload own posts from the event store (activation and refresh). This
+    /// is also how a recipe published from the editor arrives: the recipe
+    /// publisher persists it but posts no `.nostrEventPublished`.
+    private func loadOwnLocalPosts() async {
+        let floor = now() - FreshPosts.freeWindowSeconds
+        let local = await ownLocalPosts()
+        for event in local where isOwnCandidate(event, floor: floor) {
+            ownPosts[event.id] = event
+        }
     }
 
     private func observeOwnPublishes() {
         guard publishObserver == nil else { return }
         publishObserver = center.addObserver(forName: .nostrEventPublished, object: nil, queue: .main) { [weak self] note in
             guard let event = note.userInfo?["event"] as? NostrEvent else { return }
-            MainActor.assumeIsolated { self?.insertOwnPublished(event) }
+            let isPrivate = note.userInfo?["isPrivate"] as? Bool ?? false
+            MainActor.assumeIsolated {
+                guard !isPrivate else { return }
+                self?.insertOwnPublished(event)
+            }
         }
     }
 
@@ -559,41 +685,65 @@ final class FreshFeedViewModel {
     // MARK: - Emit
 
     private func emit() {
-        let relayIds = Set(relayPosts.map(\.id))
-        let oldestRelay = relayPosts.map(\.createdAt).min()
         let floor = now() - FreshPosts.freeWindowSeconds
+        let oldestRelay = relayPosts.map(\.createdAt).min()
+        var merged = relayPosts
+        var shownIds = Set(merged.map(\.id))
+        var rowByCoordinate: [String: Int] = [:]
+        for (i, event) in merged.enumerated() where event.kind == 30023 {
+            rowByCoordinate[RecipeRepository.coordinate(event)] = i
+        }
+
         // Own posts the relay didn't return, within the window, and not older
-        // than what is loaded (unless the end is reached): placed by time.
-        let pinned = ownPosts.values
-            .filter { !relayIds.contains($0.id) && $0.createdAt >= floor }
+        // than what is loaded (unless the end is reached), newest first.
+        // Long-form: one per coordinate, the newest of own and relay copies.
+        var candidates = ownPosts.values
+            .filter { !shownIds.contains($0.id) && $0.createdAt >= floor }
             .filter { own in finishLine.caughtUp || oldestRelay.map { own.createdAt >= $0 } ?? true }
             .sorted { $0.createdAt > $1.createdAt }
-        var merged = relayPosts
-        for own in pinned {
+        var seenOwnCoordinates: Set<String> = []
+        candidates = candidates.filter { own in
+            guard own.kind == 30023 else { return true }
+            let c = RecipeRepository.coordinate(own)
+            guard seenOwnCoordinates.insert(c).inserted else { return false }  // an older own edit
+            if let row = rowByCoordinate[c] {
+                if merged[row].createdAt < own.createdAt { merged[row] = own }
+                return false
+            }
+            return true
+        }
+        for own in candidates {
             let index = merged.firstIndex { $0.createdAt < own.createdAt } ?? merged.endIndex
             merged.insert(own, at: index)
+            shownIds.insert(own.id)
         }
         posts = merged
         observeProfiles(in: merged)
+
+        // The newest row shown is the next visit's mark (own posts and edits
+        // included), clamped like the tail anchor.
+        if isActive, appActive, let newest = merged.map(\.createdAt).max() {
+            let ceiling = now() + FreshRelayClient.futureSkewSeconds
+            lastVisit.recordNewest(min(newest, ceiling), pubkey: pubkey, storage: visitStorage)
+        }
     }
 
     // MARK: - Profiles
 
     private func observeProfiles(in events: [NostrEvent]) {
-        let repo = profileRepo ?? ProfileRepository.shared
         for pk in Set(events.map(\.pubkey)) where profiles[pk] == nil {
-            if let cached = repo.get(pk) { profiles[pk] = cached }
+            if let cached = profileSource.cached(pk) { profiles[pk] = cached }
         }
-        MissingProfileWatcher.shared.observe(events)
+        profileSource.observe(events)
     }
 
     private func ensureProfileUpdates() {
         guard profileUpdatesTask == nil else { return }
-        let repo = profileRepo ?? ProfileRepository.shared
+        let source = profileSource
         profileUpdatesTask = Task { @MainActor [weak self] in
-            for await pk in MissingProfileWatcher.shared.updates {
+            for await pk in source.updates() {
                 guard let self else { return }
-                if let p = repo.get(pk) { self.profiles[pk] = p }
+                if let p = source.cached(pk) { self.profiles[pk] = p }
             }
         }
     }

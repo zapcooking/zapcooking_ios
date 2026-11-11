@@ -62,9 +62,10 @@ enum FeedTabRouting {
         }
     }
 
-    /// Foreground hook. The VM ignores it unless Fresh is active.
-    static func resumeFreshIfActive(kind: FeedKind, fresh: FreshFeedViewModel) {
-        guard kind == .fresh else { return }
+    /// Foreground hook, forwarded whatever the selected kind: background is
+    /// always forwarded too, so the VM's app-active state must be as well.
+    /// The VM does network work only while Fresh is active.
+    static func freshDidBecomeActive(fresh: FreshFeedViewModel) {
         fresh.appDidBecomeActive()
     }
 

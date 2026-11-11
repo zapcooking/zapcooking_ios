@@ -207,7 +207,7 @@ struct MainView: View {
             case .active where wasBackgrounded:
                 wasBackgrounded = false
                 FeedTabRouting.resumeOnlyFoodIfActive(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
-                FeedTabRouting.resumeFreshIfActive(kind: viewModel.currentKind, fresh: freshFeedVM)
+                FeedTabRouting.freshDidBecomeActive(fresh: freshFeedVM)
             default:
                 break
             }
@@ -1862,7 +1862,7 @@ struct MainView: View {
                 .accessibilityLabel("Loading Fresh")
         } else if freshFeedVM.loadFailed && freshFeedVM.posts.isEmpty {
             freshMessage("Couldn't reach Fresh", detail: "Pull down to retry.")
-        } else if freshFeedVM.isEmpty {
+        } else if freshFeedVM.showsEmptyMessage {
             freshMessage("Nothing fresh yet", detail: "Pull down to refresh.")
         } else {
             freshList
