@@ -25,7 +25,11 @@ nonisolated enum Nip17 {
 
     enum Error: Swift.Error {
         case wrongKind
-        case decryptFailed
+        /// A decrypt round-trip failed. Carries the underlying error so
+        /// callers can tell a transient signer outage (timeout, offline)
+        /// from a deterministic refusal ("Invalid MAC") — DmGiftWrapIngestor
+        /// retries only the former.
+        indirect case decryptFailed(underlying: (any Swift.Error)?)
         case parseFailed
         case impersonation  // seal pubkey != rumor pubkey
     }
@@ -152,7 +156,7 @@ nonisolated enum Nip17 {
                 targetBits: bits,
                 onProgress: onPowProgress
             ) else {
-                throw Error.decryptFailed
+                throw Error.decryptFailed(underlying: nil)
             }
             wrapTags = mined.tags
             wrapFinalCreatedAt = mined.createdAt
@@ -224,7 +228,7 @@ nonisolated enum Nip17 {
                 targetBits: bits,
                 onProgress: onPowProgress
             ) else {
-                throw Error.decryptFailed
+                throw Error.decryptFailed(underlying: nil)
             }
             wrapTags = mined.tags
             wrapFinalCreatedAt = mined.createdAt
@@ -288,7 +292,7 @@ nonisolated enum Nip17 {
                 targetBits: bits,
                 onProgress: onPowProgress
             ) else {
-                throw Error.decryptFailed
+                throw Error.decryptFailed(underlying: nil)
             }
             wrapTags = mined.tags
             wrapFinalCreatedAt = mined.createdAt
@@ -315,7 +319,7 @@ nonisolated enum Nip17 {
                                                        peerXonlyPubkey32: hexToData(giftWrap.pubkey))
         let sealJSON: String
         do { sealJSON = try Nip44.decrypt(payload: giftWrap.content, conversationKey: wrapConvKey) }
-        catch { throw Error.decryptFailed }
+        catch { throw Error.decryptFailed(underlying: nil) }
 
         // Layer 2: parse the seal, decrypt with the seal's pubkey (real sender).
         guard let seal = NostrEvent.fromJSON(sealJSON), seal.kind == Kind.seal else { throw Error.parseFailed }
@@ -323,7 +327,7 @@ nonisolated enum Nip17 {
                                                        peerXonlyPubkey32: hexToData(seal.pubkey))
         let rumorJSON: String
         do { rumorJSON = try Nip44.decrypt(payload: seal.content, conversationKey: sealConvKey) }
-        catch { throw Error.decryptFailed }
+        catch { throw Error.decryptFailed(underlying: nil) }
 
         guard let rumor = parseRumor(rumorJSON) else { throw Error.parseFailed }
 
@@ -347,7 +351,7 @@ nonisolated enum Nip17 {
                 peerPubkey: giftWrap.pubkey,
                 payload: giftWrap.content
             )
-        } catch { throw Error.decryptFailed }
+        } catch { throw Error.decryptFailed(underlying: error) }
 
         // Layer 2: parse the seal, decrypt with the seal's pubkey (real sender).
         guard let seal = NostrEvent.fromJSON(sealJSON), seal.kind == Kind.seal else { throw Error.parseFailed }
@@ -358,7 +362,7 @@ nonisolated enum Nip17 {
                 peerPubkey: seal.pubkey,
                 payload: seal.content
             )
-        } catch { throw Error.decryptFailed }
+        } catch { throw Error.decryptFailed(underlying: error) }
 
         guard let rumor = parseRumor(rumorJSON) else { throw Error.parseFailed }
 

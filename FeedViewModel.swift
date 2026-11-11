@@ -18,6 +18,10 @@ enum FeedKind: Equatable, Hashable {
     /// `LiveStreamRepository.shared`, fed by discovery; the kind exists so
     /// the picker, pill label and persistence read one type.
     case liveVideo
+    /// Fresh: the curated feed relay (`FreshFeedViewModel`). Not served by
+    /// `FeedViewModel`; the kind exists so the picker, pill label and
+    /// persistence read one type. Behind `FeatureFlags.freshFeedEnabled`.
+    case fresh
 
     var displayName: String {
         switch self {
@@ -33,6 +37,8 @@ enum FeedKind: Equatable, Hashable {
             return "Extended Network"
         case .liveVideo:
             return "Live Video"
+        case .fresh:
+            return "Fresh"
         }
     }
 }
@@ -430,7 +436,7 @@ final class FeedViewModel {
             await loadUserProfile()
             isLoading = false
             return
-        case .liveVideo:
+        case .liveVideo, .fresh:
             await loadUserProfile()
             isLoading = false
             return
@@ -643,6 +649,20 @@ final class FeedViewModel {
         relayFeedStatus = .idle
     }
 
+    /// Select Fresh. Like OnlyFood, this VM does not serve it (`MainView`
+    /// renders `FreshFeedViewModel`): drop the live subscription, clear the
+    /// list, persist the explicit pick. Persisted before the same-kind guard
+    /// for the same reason as `selectOnlyFood`.
+    func selectFresh() {
+        guard FeatureFlags.freshFeedEnabled else { return }
+        FeedKindStore.persist(.fresh, pubkey: keypair.pubkey)
+        guard currentKind != .fresh else { return }
+        cancelLiveSubscription()
+        currentKind = .fresh
+        resetForKindSwitch()
+        relayFeedStatus = .idle
+    }
+
     /// Shared list reset for every kind switch.
     private func resetForKindSwitch() {
         events = []
@@ -655,7 +675,7 @@ final class FeedViewModel {
     /// by the explicit selectors and the cold-start landing path in `start()`.
     private func subscribeCurrentRelayKind() {
         switch currentKind {
-        case .follows, .onlyFood, .liveVideo:
+        case .follows, .onlyFood, .liveVideo, .fresh:
             return
         case .relay(let url):
             relayFeedStatus = .connecting
@@ -1071,8 +1091,8 @@ final class FeedViewModel {
             loadOlderFromDisk()
         case .relay, .relaySet, .extendedNetwork:
             loadMore()
-        case .onlyFood, .liveVideo:
-            break  // paged by OnlyFoodFeedViewModel / live discovery
+        case .onlyFood, .liveVideo, .fresh:
+            break  // paged by OnlyFoodFeedViewModel / live discovery / FreshFeedViewModel
         }
     }
 
@@ -1134,7 +1154,7 @@ final class FeedViewModel {
         guard loadMoreTask == nil else { return }
         let relays: [String]
         switch currentKind {
-        case .follows, .onlyFood, .liveVideo: return
+        case .follows, .onlyFood, .liveVideo, .fresh: return
         case .relay(let url): relays = [url]
         case .relaySet(let set): relays = set.relays
         case .extendedNetwork:
