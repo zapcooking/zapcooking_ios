@@ -6,8 +6,20 @@ import Foundation
 /// required to. Publish goes to both the user's write relays (so anyone pulling their
 /// outbox sees the deletion) and any relays we've actually seen the original event on
 /// (so those relays can drop their copy).
+extension Notification.Name {
+    /// Posted by `DeletionSender` after the user's kind 5 is published and
+    /// recorded in `DeletionTracker`. `userInfo["eventIds"]` names the posts.
+    /// Surfaces that pin the user's own posts (Fresh) drop them at once.
+    static let eventDeletionRecorded = Notification.Name("WispEventDeletionRecorded")
+}
+
 @MainActor
 final class DeletionSender {
+    private static func announce(_ deletion: NostrEvent) {
+        let ids = deletion.tags.filter { $0.count >= 2 && $0[0] == "e" }.map { $0[1] }
+        NotificationCenter.default.post(name: .eventDeletionRecorded, object: nil, userInfo: ["eventIds": ids])
+    }
+
     static let shared = DeletionSender()
     private init() {}
 
@@ -55,6 +67,7 @@ final class DeletionSender {
         // read "deleted by its author" immediately, not after some relay
         // happens to answer a kind-5 query.
         DeletionTracker.shared.ingest(event)
+        Self.announce(event)
     }
 
     /// Publish a kind-5 referencing `targetEvent.id`. The caller MUST verify `targetEvent.pubkey
@@ -93,5 +106,6 @@ final class DeletionSender {
         let succeeded = await RelayPool.publish(event: event, to: Array(set), timeout: 8)
         if succeeded.isEmpty { throw SendError.publishFailed }
         DeletionTracker.shared.ingest(event)
+        Self.announce(event)
     }
 }
