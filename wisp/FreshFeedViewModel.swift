@@ -1073,7 +1073,7 @@ final class FreshFeedViewModel {
                 topicHistory: { [weak self] in self?.specialsStore.loadTopicHistory() ?? [:] },
                 rng: specialsRng,
                 schedule: specialsSchedule ?? FreshSpotlightLoader.taskTimer,
-                onChange: { [weak self] in self?.decideSlots() },
+                onChange: { [weak self] in self?.spotlightChanged() },
                 // Never while the feed isn't shown: its socket is closed.
                 enabled: { [weak self] in (self?.specialsEnabled ?? false) && (self?.isActive ?? false) }
             ))
@@ -1090,6 +1090,15 @@ final class FreshFeedViewModel {
 
     /// Topics the spotlights used this session (tests).
     var spotlightUsedTopics: Set<String> { spotlights?.usedTopics ?? [] }
+
+    /// The loader finished a build: ask for the ready spotlight's profiles
+    /// now (before it is placed), then decide slots.
+    private func spotlightChanged() {
+        if case .spotlight(_, let posts)? = spotlights?.ready {
+            observeSpotlightProfiles(posts)
+        }
+        decideSlots()
+    }
 
     private func shownSpotlightIds() -> Set<String> {
         Set(specialsStore.loadShown(now: now()).keys)
@@ -1228,6 +1237,17 @@ final class FreshFeedViewModel {
             if let cached = profileSource.cached(pk) { profiles[pk] = cached }
         }
         profileSource.observe(events)
+    }
+
+    /// Spotlight posts: their authors and everyone their text mentions
+    /// (`referencedAuthorPubkeys`, the same set `MissingProfileWatcher`
+    /// fetches), so a tile shows names and avatars rather than short npubs.
+    /// Profiles that arrive later reach `profiles` through `updates()`.
+    private func observeSpotlightProfiles(_ posts: [NostrEvent]) {
+        for pk in Set(posts.flatMap(\.referencedAuthorPubkeys)) where profiles[pk] == nil {
+            if let cached = profileSource.cached(pk) { profiles[pk] = cached }
+        }
+        profileSource.observe(posts)
     }
 
     private func ensureProfileUpdates() {

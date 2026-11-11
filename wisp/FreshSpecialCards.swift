@@ -68,7 +68,8 @@ struct FreshSpotlightCard: View {
                             profile: profiles[event.pubkey],
                             canModerate: event.pubkey != me,
                             onTap: { onPostTap(event) },
-                            onProfileTap: { onProfileTap(event.pubkey) }
+                            onProfileTap: { onProfileTap(event.pubkey) },
+                            profiles: profiles
                         )
                         .frame(width: Self.tileWidth, height: tileHeight)
                     }
@@ -96,7 +97,10 @@ struct FreshSpotlightTile: View {
 
     private var name: String { profile?.displayString ?? Nip19.shortNpub(hex: event.pubkey) }
     private var image: URL? { FreshSpotlightTile.firstImage(event).flatMap(URL.init(string:)) }
-    private var text: String { FreshSpotlightTile.plainText(event.content) }
+    /// Every profile the card knows (the author's and anyone mentioned).
+    var profiles: [String: ProfileData] = [:]
+
+    private var text: String { FreshSpotlightTile.plainText(event, profiles: profiles) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -199,11 +203,35 @@ struct FreshSpotlightTile: View {
         return nil
     }
 
-    /// The text without links (the picture shows on its own), whitespace
-    /// collapsed.
-    nonisolated static func plainText(_ content: String) -> String {
-        let range = NSRange(content.startIndex..., in: content)
-        let stripped = urlRegex.stringByReplacingMatches(in: content, range: range, withTemplate: "")
-        return stripped.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    /// The tile's text, from the app's own parse (`ContentParser`):
+    /// - a profile mention (`nostr:npub…` / `nprofile…`) reads "@name", by
+    ///   the same rule as the feed (`RichInlineTextView.mentionName`: the
+    ///   display name, else a short npub);
+    /// - note, event and address references (`nostr:note…` / `nevent…` /
+    ///   `naddr…`), links, media and invoices are dropped (the picture shows
+    ///   on its own);
+    /// - hashtags keep their "#", custom emoji their ":shortcode:";
+    /// - whitespace collapsed.
+    static func plainText(_ event: NostrEvent, profiles: [String: ProfileData]) -> String {
+        var out = ""
+        for segment in ContentParser.parse(content: event.content, tags: event.tags) {
+            switch segment {
+            case .text(let text):
+                out += text
+            case .nostrProfile(let pubkey, _):
+                let profile = profiles[pubkey] ?? ProfileRepository.shared.get(pubkey)
+                out += "@" + RichInlineTextView.mentionName(pubkey: pubkey, profile: profile)
+            case .hashtag(let tag):
+                out += "#" + tag
+            case .customEmoji(let shortcode, _):
+                out += ":\(shortcode):"
+            case .lightningAddress(let address):
+                out += address
+            case .nostrNote, .nostrAddressable, .link, .inlineLink, .image, .video, .audio,
+                 .unknownMedia, .lightningInvoice, .lnurlPayable:
+                out += " "
+            }
+        }
+        return out.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 }

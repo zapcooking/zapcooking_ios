@@ -48,7 +48,8 @@ import Testing
     /// `answerTopics`); otherwise `scripted.previews` answers them.
     func makeRig(enabled: Bool = true, previewsOverSocket: Bool = false,
                  pubkey: String = String(repeating: "c", count: 64),
-                 visitStore: Base.Store = Base.Store()) -> Rig {
+                 visitStore: Base.Store = Base.Store(),
+                 profiles: FreshProfileSource? = nil) -> Rig {
         let transport = FakeGroupTransport()
         let client = FreshRelayClient(
             transport: transport, now: { Self.now }, silenceTimeout: 5,
@@ -72,7 +73,7 @@ import Testing
             persist: { _ in },
             visitStorage: visitStore, lastVisit: FreshLastVisit(),
             notificationCenter: center, retryDelays: [.milliseconds(30)],
-            profileSource: Base.NoProfiles(),
+            profileSource: profiles ?? Base.NoProfiles(),
             specialsEnabled: enabled,
             specialsStore: store,
             specialsRng: seeded.rng,
@@ -430,5 +431,110 @@ import Testing
         scroll(rig.vm, to: firstAt + 6)
         _ = await t.eventually { self.cards(rig.vm).count == 2 }
         #expect(cards(rig.vm).allSatisfy { $0.special.type == .recipe })
+    }
+
+    // MARK: - Device-pass fixes (2026-11-11)
+
+    /// A profile source the test drives: a cache, a record of what was asked
+    /// for, and the updates stream (a profile arriving later).
+    final class Profiles: FreshProfileSource {
+        var cache: [String: ProfileData] = [:]
+        var observed: [String] = []
+        let stream: AsyncStream<String>
+        let continuation: AsyncStream<String>.Continuation
+        init() { (stream, continuation) = AsyncStream<String>.makeStream() }
+        func cached(_ pubkey: String) -> ProfileData? { cache[pubkey] }
+        func observe(_ events: [NostrEvent]) { observed += events.flatMap(\.referencedAuthorPubkeys) }
+        func updates() -> AsyncStream<String> { stream }
+        func arrive(_ pubkey: String, name: String) {
+            cache[pubkey] = ProfileData(pubkey: pubkey, json: ["display_name": name])
+            continuation.yield(pubkey)
+        }
+    }
+
+    static func hex(_ s: String) -> [UInt8] { Hex.decode(s).map { Array($0) } ?? [] }
+
+    @Test("tile text: profile mentions read @name (short npub until known); note, event and address references and links are dropped")
+    func tileTextRendersMentions() throws {
+        let named = try Base.Author(), unnamed = try Base.Author(), quoted = try Base.Author()
+        let npub = try #require(Nip19.npubEncode(pubkey: Self.hex(named.pubkey)))
+        let nprofile = try #require(Nip19.nprofileEncode(pubkey32: Self.hex(unnamed.pubkey), relays: ["wss://relay.example"]))
+        let note = try quoted.event(Self.now - 500)
+        let noteRef = try #require(Nip19.noteEncode(eventId: Self.hex(note.id)))
+        let neventRef = try #require(Nip19.neventEncode(eventId32: Self.hex(note.id), author32: Self.hex(quoted.pubkey)))
+        let naddrRef = try #require(Nip19.naddrEncode(kind: 30023, pubkeyHex: quoted.pubkey, dTag: "pie"))
+        let post = try Base.Author().event(Self.now - 100, content:
+            "Bread with nostr:\(npub) and nostr:\(nprofile) today nostr:\(noteRef)\nsee nostr:\(neventRef) nostr:\(naddrRef) https://img.example/loaf.jpg #sourdough")
+        let profiles = [named.pubkey: ProfileData(pubkey: named.pubkey, json: ["display_name": "Theo  "])]
+        let text = FreshSpotlightTile.plainText(post, profiles: profiles)
+        #expect(text == "Bread with @Theo and @\(Nip19.shortNpub(hex: unnamed.pubkey)) today see #sourdough")
+        #expect(!text.contains("nostr:"))
+    }
+
+    @Test("a prepared spotlight asks for its authors' and mentioned people's profiles before it is placed; cached ones show at once")
+    func spotlightRequestsProfiles() async throws {
+        let source = Profiles()
+        let rig = makeRig(profiles: source)
+        let mentioned = try Base.Author()
+        let npub = try #require(Nip19.npubEncode(pubkey: Self.hex(mentioned.pubkey)))
+        var spot = try Self.page(3, newest: Self.now - 3_000, step: 60)
+        spot[0] = try Base.Author().event(Self.now - 2_900, content: "Crumb shot for nostr:\(npub)")
+        source.cache[spot[1].pubkey] = ProfileData(pubkey: spot[1].pubkey, json: ["display_name": "Cached Cook"])
+        for topic in Self.groups.flatMap(\.topics) { rig.scripted.previews[topic.slug] = spot }
+        try await start(rig, page: try Self.page(FreshRelayClient.pageSize), recipes: try Self.oldRecipes(6))
+        await rig.vm.prepareSpotlightAndWait()
+        // Not placed yet (the slot is out of reach), but already asked for.
+        #expect(cards(rig.vm).count == 1)
+        let wanted = Set(spot.map(\.pubkey) + [mentioned.pubkey])
+        #expect(wanted.isSubset(of: Set(source.observed)))
+        #expect(rig.vm.profiles[spot[1].pubkey]?.displayString == "Cached Cook")
+    }
+
+    @Test("a tile whose profiles arrive after it is on screen updates: author name and mention resolve")
+    func lateProfilesReachTheTile() async throws {
+        let source = Profiles()
+        let rig = makeRig(profiles: source)
+        let mentioned = try Base.Author()
+        let npub = try #require(Nip19.npubEncode(pubkey: Self.hex(mentioned.pubkey)))
+        var spot = try Self.page(3, newest: Self.now - 3_000, step: 60)
+        spot[0] = try Base.Author().event(Self.now - 2_900, content: "Ask nostr:\(npub) about the levain")
+        for topic in Self.groups.flatMap(\.topics) { rig.scripted.previews[topic.slug] = spot }
+        try await start(rig, page: try Self.page(FreshRelayClient.pageSize), recipes: try Self.oldRecipes(6))
+        await rig.vm.prepareSpotlightAndWait()
+        let firstAt = rig.vm.posts.firstIndex { $0.id == cards(rig.vm).first?.after } ?? 0
+        scroll(rig.vm, to: firstAt + 2)
+        _ = await t.eventually { self.cards(rig.vm).count == 2 }
+        let card = try #require(cards(rig.vm).last)
+        let posts = Self.spotlightPosts(card.special)
+        let tilePost = try #require(posts.first { $0.id == spot[0].id })
+        rig.vm.cardAppeared(key: rig.vm.placedSlots.last!.key)
+        // On screen with nothing known: short npub for the mention, no author name.
+        #expect(rig.vm.profiles[tilePost.pubkey] == nil)
+        #expect(FreshSpotlightTile.plainText(tilePost, profiles: rig.vm.profiles)
+                == "Ask @\(Nip19.shortNpub(hex: mentioned.pubkey)) about the levain")
+        // The profiles arrive.
+        source.arrive(tilePost.pubkey, name: "Theo Brandt")
+        source.arrive(mentioned.pubkey, name: "June Okafor")
+        #expect(await t.eventually { rig.vm.profiles[tilePost.pubkey]?.displayString == "Theo Brandt" })
+        #expect(await t.eventually { rig.vm.profiles[mentioned.pubkey] != nil })
+        #expect(FreshSpotlightTile.plainText(tilePost, profiles: rig.vm.profiles) == "Ask @June Okafor about the levain")
+    }
+
+    @Test("an article tagged zapcooking (no recipe template) never becomes a recipe-box card")
+    func boxSkipsTaggedArticles() async throws {
+        let rig = makeRig()
+        let article = try Base.Author().event(Self.now - 30 * Self.day, kind: 30023,
+                                              content: "Arkade.Money and ZapCooking, now running Branta.",
+                                              tags: [["d", "branta"], ["t", "zapcooking"]])
+        let recipe = try Self.oldRecipes(1)
+        try await start(rig, page: try Self.page(FreshRelayClient.pageSize), recipes: [article] + recipe)
+        let card = try #require(cards(rig.vm).first)
+        guard case .recipe(let boxed) = card.special else { Issue.record("not a recipe"); return }
+        #expect(boxed.id == recipe[0].id)
+        // Its pool is used up: the next slot can't take the article either.
+        let firstAt = rig.vm.posts.firstIndex { $0.id == card.after } ?? 0
+        scroll(rig.vm, to: firstAt + 6)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!cards(rig.vm).contains { if case .recipe(let e) = $0.special { return e.id == article.id }; return false })
     }
 }

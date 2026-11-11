@@ -105,7 +105,13 @@ enum FreshScreenshotFixtures {
         ]),
     ]
 
+    /// A cook's `npub`, for a mention (the tile shows it as "@name").
+    private static func npub(_ cook: Int) -> String {
+        Hex.decode(cooks[cook].pubkey).flatMap { Nip19.npubEncode(pubkey: Array($0)) } ?? ""
+    }
+
     /// Each topic's preview: three posts from three cooks, none in the feed.
+    /// One mentions another cook.
     static let previews: [String: [NostrEvent]] = [
         "sourdough": [
             sign(1, minutesAgo: 240, "Levain peaked at 6am, mixed by 7. Long autolyse today and the dough already feels silky."),
@@ -113,7 +119,7 @@ enum FreshScreenshotFixtures {
             sign(5, minutesAgo: 2_000, "Semolina sourdough for the first time. Golden crumb, nutty crust, slightly too proud of it."),
         ].compactMap { $0 },
         "japanese": [
-            sign(2, minutesAgo: 300, "Dashi from scratch: kombu cold-steeped overnight, katsuobushi for one minute. That's the whole secret."),
+            sign(2, minutesAgo: 300, "Dashi from scratch, the way nostr:\(npub(3)) taught me: kombu cold-steeped overnight, katsuobushi for one minute."),
             sign(0, minutesAgo: 1_100, "Okonomiyaki night. Cabbage, a little pork belly, too much kewpie. Perfect."),
             sign(4, minutesAgo: 2_400, "Onigiri for the road: umeboshi, salmon, and one with leftover curry nobody asked for."),
         ].compactMap { $0 },

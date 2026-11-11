@@ -66,4 +66,12 @@ import Testing
         #expect(placed == [.recipe, .spotlight], "\(types()) posts \(vm.posts.count)")
         await vm.deactivateAndWait()
     }
+
+    @Test("a spotlight fixture mentions a cook, and the tile reads it as @name")
+    func fixtureSpotlightMention() throws {
+        let post = try #require(FreshScreenshotFixtures.previews["japanese"]?.first)
+        #expect(post.content.contains("nostr:npub1"))
+        let text = FreshSpotlightTile.plainText(post, profiles: FreshScreenshotFixtures.profiles)
+        #expect(text.hasPrefix("Dashi from scratch, the way @June Okafor taught me:"), "\(text)")
+    }
 }

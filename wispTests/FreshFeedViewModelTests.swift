@@ -30,7 +30,11 @@ import Testing
             var tags: [[String]] = [["d", d]]
             if let publishedAt { tags.append(["published_at", String(publishedAt)]) }
             if recipe { tags.append(["t", "zapcooking"]) }
-            return try event(createdAt, kind: 30023, content: "long form \(d) \(createdAt)", tags: tags)
+            // A recipe carries the recipe template (`RecipeParser.isRecipe`).
+            let content = recipe
+                ? "## Chef's notes\n\n\(d) \(createdAt)\n\n## Ingredients\n\n- flour\n- water\n\n## Directions\n\n1. Mix.\n2. Bake."
+                : "long form \(d) \(createdAt)"
+            return try event(createdAt, kind: 30023, content: content, tags: tags)
         }
     }
 
