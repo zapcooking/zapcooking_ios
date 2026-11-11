@@ -262,7 +262,7 @@ struct MainView: View {
                 RelaySettingsRepository.isAuthApproved(url, pubkey: activePubkey)
             }
             RelayPool.authSigner = { url, challenge in
-                try? Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: activeKeypair)
+                try await Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: activeKeypair)
             }
 
             // Drain pending AUTH challenges into the approval sheet state.
@@ -295,8 +295,8 @@ struct MainView: View {
             // and individual VMs (which call observe / observePubkeys); also runs
             // a periodic sweep over registered event sources at 3s/8s/15s/120s.
             MissingProfileWatcher.shared.start(activePubkey: keypair.pubkey)
-            if let priv = privkey32 {
-                MuteRepository.shared.startSync(privkey32: priv)
+            if Signer.canSign(keypair) {
+                MuteRepository.shared.startSync(keypair: keypair)
             }
             Task.detached(priority: .utility) {
                 guard await SafetyPreferences.shared.wotFilterEnabled,
@@ -655,6 +655,11 @@ struct MainView: View {
                     // multi-account user back through the splash login / signup flow
                     // on every logout.
                     let currentPubkey = keypair.pubkey
+                    // Remote signer: tell it the session is over and drop the
+                    // app key (NIP-46 "Ending a session").
+                    if keypair.isRemote {
+                        await Nip46Manager.shared.endSession(pubkey: currentPubkey)
+                    }
                     let nextPubkey = NostrKey.accounts().first { $0 != currentPubkey }
                     if let nextPubkey, let nextKp = NostrKey.switchAccount(pubkey: nextPubkey) {
                         NostrKey.deleteAccount(pubkey: currentPubkey)
@@ -1565,33 +1570,37 @@ struct MainView: View {
     /// the general feed; OnlyFood has its own loading / empty / relay-miss
     /// states. Both share the top bar, the picker and `feedPath`.
     ///
-    /// Both bodies stay mounted once shown (`KeptMountedFeedBodies`, §7):
+    /// Every body stays mounted once shown (`KeptMountedFeedBodies`, keyed
+    /// by `FeedTabRouting.Body`, §7):
     /// a `@ViewBuilder` switch here tore down OnlyFood's `ScrollView` on
     /// every kind change, and its notes — kept by the view model — came back
     /// scrolled to the top.
     @ViewBuilder
     private var feedContent: some View {
         let active = FeedTabRouting.body(for: viewModel.currentKind)
-        KeptMountedFeedBodies(active: active) {
-            onlyFoodBody
-        } general: {
-            VStack(spacing: 0) {
-                relayFeedStatusBanner
-                feedBody
+        KeptMountedFeedBodies(active: active) { key in
+            switch key {
+            case .onlyFood:
+                onlyFoodBody
+            case .general:
+                VStack(spacing: 0) {
+                    relayFeedStatusBanner
+                    feedBody
+                }
+            case .liveVideo:
+                LiveVideoFeedView(
+                    isActive: active == .liveVideo,
+                    onSelect: { stream in
+                        feedPath.append(LiveStreamRoute(
+                            aTagValue: stream.aTagValue,
+                            hostPubkey: stream.activity.hostPubkey,
+                            dTag: stream.activity.dTag,
+                            relayHints: stream.activity.relayHints
+                        ))
+                    },
+                    onRefresh: { viewModel.refreshLiveDiscovery() }
+                )
             }
-        } live: {
-            LiveVideoFeedView(
-                isActive: active == .liveVideo,
-                onSelect: { stream in
-                    feedPath.append(LiveStreamRoute(
-                        aTagValue: stream.aTagValue,
-                        hostPubkey: stream.activity.hostPubkey,
-                        dTag: stream.activity.dTag,
-                        relayHints: stream.activity.relayHints
-                    ))
-                },
-                onRefresh: { viewModel.refreshLiveDiscovery() }
-            )
         }
     }
 

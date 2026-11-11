@@ -153,7 +153,9 @@ final class DmConversationViewModel: EmojiComposing {
         let relays = scopedRelaySet()
         guard !relays.isEmpty else { return }
         let filter = NostrFilter(kinds: [Nip17.Kind.giftWrap], pTags: [keypair.pubkey])
-        let sub = RelayPool.subscribe(relays: relays, filter: filter, id: "dm-conv-\(instanceId)")
+        // Post-yield dedupe, same as the global DM subscription.
+        let sub = RelayPool.subscribe(relays: relays, filter: filter, id: "dm-conv-\(instanceId)",
+                                      dedupeBeforeYield: false)
         scopedSub = sub
         scopedListener = Task { [weak self] in
             for await (event, relayUrl) in sub.events {
