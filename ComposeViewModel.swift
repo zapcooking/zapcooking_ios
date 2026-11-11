@@ -244,7 +244,8 @@ final class ComposeViewModel {
         guard !trimmed.isEmpty || !uploaded.isEmpty else { return nil }
         var payload: [String: Any] = [
             "content": content,
-            "explicit": explicit
+            "explicit": explicit,
+            "powEnabled": powEnabled
         ]
         if let ts = scheduleAt?.timeIntervalSince1970 {
             payload["scheduleAt"] = ts
@@ -347,8 +348,8 @@ final class ComposeViewModel {
         attachments = restored
         mentions = restoredMentions
         explicit = payload["explicit"] as? Bool ?? false
-        // An older autosave may carry "powEnabled" from the removed shield;
-        // it is ignored so a restored draft can't mine with no visible control.
+        // The per-post override; an autosave without it keeps the Settings default.
+        if let pow = payload["powEnabled"] as? Bool { powEnabled = pow }
         if let ts = payload["scheduleAt"] as? TimeInterval {
             scheduleAt = Date(timeIntervalSince1970: ts)
         }
@@ -423,6 +424,11 @@ final class ComposeViewModel {
     }
 
     func toggleNsfw() { explicit.toggle() }
+
+    /// Per-compose Proof of Work: seeded from the Settings default
+    /// (`PowPreferences.snapshot().noteEnabled`), toggled here for this post
+    /// only — the difficulty always comes from settings.
+    func togglePow() { powEnabled.toggle() }
     /// Toggle the "Private" reply state. No-op when locked (replying to a
     /// rumor that's already private) — the chain stays encrypted end-to-end.
     func togglePrivate() {
@@ -1121,32 +1127,23 @@ final class ComposeViewModel {
         }
     }
 
-    /// Re-host a GIF picked from Giphy on the user's Blossom servers and
-    /// add it as an attachment slot — the URL never touches the editor
-    /// text, exactly like picker-uploaded media. Falls back to the
-    /// original Giphy URL if the rehost fails so the user always gets a
-    /// working link.
-    func attachGifFromGiphy(_ giphyURL: String) async {
-        uploadProgress = "Uploading GIF…"
-        defer { uploadProgress = nil }
-        let outcome = await GifBlossomUploader.rehost(
-            giphyURL: giphyURL,
-            keypair: signingKeypair,
-            servers: blossomServers
-        )
-        let id = UUID()
+    /// Attach a GIF picked from gifs.nostr.build. Every result is already
+    /// hosted on a Nostr media host, so the URL is attached as-is — nothing
+    /// is uploaded, exactly like picker-uploaded media the URL never touches
+    /// the editor text. The GIF's own title seeds the alt description, so a
+    /// picked GIF publishes with a NIP-92 `imeta` `alt` slot unless the
+    /// writer clears it.
+    func attachPickedGif(_ gif: Gif) {
         attachments.append(ComposeAttachment(
-            id: id,
-            url: outcome.url,
-            mime: "image/gif",
-            dim: .zero,
+            id: UUID(),
+            url: gif.url,
+            mime: gif.mime,
+            dim: CGSize(width: gif.width, height: gif.height),
             durationSec: nil,
             sha256Hex: nil,
-            localBytes: nil
+            localBytes: nil,
+            altText: gif.title.isEmpty ? nil : gif.title
         ))
-        if !outcome.didRehost {
-            lastError = "Couldn't re-host GIF on your Blossom server — using the Giphy link instead."
-        }
     }
 
     // MARK: - Publish

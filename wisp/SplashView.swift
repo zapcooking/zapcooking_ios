@@ -321,6 +321,25 @@ private struct AnimatedLogo: View {
 /// `SplashScreen.kt`): ostrich + title + body, nsec/npub field with
 /// show/hide + QR trailing icons, "Log In" primary button, divider,
 /// "Create new account" outlined button.
+/// Outlined-button accents for the login sheet, matching the Android
+/// SplashScreen.kt sheet (which hardcodes these hexes rather than theme
+/// tokens): signer in the zap orange, create in purple.
+enum NostrSheetAccent {
+    static let signer = Color.hex(0xFFFF7A3D)
+    static let createText = Color.hex(0xFFB98CFF)
+    static let createBorder = Color.hex(0xFF8E30EB)
+}
+
+/// Android's OutlinedButton look for the login sheet: transparent fill,
+/// 1pt capsule border, tinted label.
+func nostrSheetOutlinedCapsule(_ title: String, content: Color, border: Color) -> some View {
+    Text(title)
+        .font(.body.weight(.semibold))
+        .foregroundStyle(content)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .overlay(Capsule().strokeBorder(border, lineWidth: 1))
+}
+
 struct NostrLoginSheet: View {
     /// Given on the splash; recorded with whichever key this sheet stores.
     let acceptance: TermsAcceptance
@@ -329,10 +348,22 @@ struct NostrLoginSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nsecInput = ""
+    @State private var bunkerLoginTask: Task<Void, Never>?
+    /// Only used when the key field holds an `ncryptsec1…` (NIP-49) backup —
+    /// decryption needs the encryption password. Mirrors `LoginView`.
+    @State private var ncryptsecPassword = ""
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
+    @State private var decryptTask: Task<Void, Never>?
     @State private var showQRScanner = false
+    @State private var showRemoteSigner = false
+
+    private var isNcryptsec: Bool {
+        nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("ncryptsec1")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -345,7 +376,7 @@ struct NostrLoginSheet: View {
                 .foregroundStyle(Color.wispOnSurface)
                 .padding(.top, 12)
 
-            Text("Your key never leaves the device.")
+            Text("Enter your existing key, or create a new account. Your key never leaves the device.")
                 .font(.subheadline)
                 .foregroundStyle(Color.wispOnSurfaceVariant)
                 .multilineTextAlignment(.center)
@@ -356,15 +387,18 @@ struct NostrLoginSheet: View {
             HStack(spacing: 8) {
                 Group {
                     if isSecure {
-                        SecureField("nsec or npub…", text: $nsecInput)
+                        SecureField("nsec, ncryptsec, npub, or bunker://…", text: $nsecInput)
                     } else {
-                        TextField("nsec or npub…", text: $nsecInput)
+                        TextField("nsec, ncryptsec, npub, or bunker://…", text: $nsecInput)
                     }
                 }
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .onChange(of: nsecInput) { _, _ in error = nil }
+                .onChange(of: nsecInput) { _, _ in
+                    error = nil
+                    if !isNcryptsec { ncryptsecPassword = "" }
+                }
 
                 Button {
                     isSecure.toggle()
@@ -383,6 +417,15 @@ struct NostrLoginSheet: View {
                 .buttonStyle(.plain)
             }
             .padding(.top, 20)
+
+            if isNcryptsec {
+                SecureField("Password", text: $ncryptsecPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onChange(of: ncryptsecPassword) { _, _ in error = nil }
+                    .padding(.top, 8)
+            }
 
             NsecIdentityPreview(nsecInput: nsecInput)
                 .padding(.top, 12)
@@ -407,8 +450,18 @@ struct NostrLoginSheet: View {
             .buttonStyle(.borderedProminent)
             .tint(.wispPrimary)
             .clipShape(Capsule())
-            .disabled(nsecInput.isEmpty || isLoading)
+            .disabled(nsecInput.isEmpty || isLoading || (isNcryptsec && ncryptsecPassword.isEmpty))
             .padding(.top, 12)
+
+            Button {
+                showRemoteSigner = true
+            } label: {
+                nostrSheetOutlinedCapsule("Login with Signer",
+                                          content: NostrSheetAccent.signer,
+                                          border: NostrSheetAccent.signer)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
 
             HStack(spacing: 0) {
                 Rectangle()
@@ -417,14 +470,15 @@ struct NostrLoginSheet: View {
             }
             .padding(.vertical, 20)
 
-            Button(action: onCreateAccount) {
-                Text("Create new account")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 48)
+            Button {
+                decryptTask?.cancel()
+                onCreateAccount()
+            } label: {
+                nostrSheetOutlinedCapsule("Create new account",
+                                          content: NostrSheetAccent.createText,
+                                          border: NostrSheetAccent.createBorder)
             }
-            .buttonStyle(.bordered)
-            .tint(.wispPrimary)
-            .clipShape(Capsule())
+            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
         }
@@ -432,13 +486,12 @@ struct NostrLoginSheet: View {
         .padding(.bottom, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.wispBackground)
-        // Just a touch taller than `.medium`: the previous default left
-        // the ostrich crowded against the top edge, and the identity
-        // preview's 64pt reserved slot pushed the bottom controls under
-        // the safe-area inset. This bump fits both without covering the
-        // discovery grid above. `.large` is offered as a secondary
-        // detent for users who want more room.
-        .presentationDetents([.height(500), .large])
+        // Tall enough for the key field, the identity preview's reserved
+        // slot, and all three buttons (Log In / signer / create) without
+        // covering the discovery grid above. `.large` is offered as a
+        // secondary detent for users who want more room.
+        .presentationDetents([.height(600), .large])
+        .onDisappear { bunkerLoginTask?.cancel() }
         .presentationBackground(Color.wispBackground)
         .presentationDragIndicator(.visible)
         .fullScreenCover(isPresented: $showQRScanner) {
@@ -448,13 +501,66 @@ struct NostrLoginSheet: View {
             )
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $showRemoteSigner) {
+            Nip46LoginView(
+                onLogin: { kp in
+                    showRemoteSigner = false
+                    onLogin(kp)
+                },
+                acceptance: acceptance
+            )
+        }
         .onAppear { nsecPasteAllowed = true }
-        .onDisappear { nsecPasteAllowed = false }
+        .onDisappear {
+            nsecPasteAllowed = false
+            decryptTask?.cancel()
+        }
     }
 
     private func login() {
         error = nil
         let trimmed = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed)
+            return
+        }
+
+        if isNcryptsec {
+            isLoading = true
+            let password = ncryptsecPassword
+            decryptTask?.cancel()
+            decryptTask = Task {
+                do {
+                    // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
+                    // of CPU — keep it off the main actor so the spinner spins.
+                    let privkey = try await Task.detached(priority: .userInitiated) {
+                        try Nip49.decrypt(trimmed, password: password)
+                    }.value
+                    // Dismissed (or superseded) while scrypt ran: don't save or switch accounts.
+                    guard !Task.isCancelled else { return }
+                    guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
+                        error = "That ncryptsec decrypted to an invalid private key."
+                        isLoading = false
+                        return
+                    }
+                    let keypair = Keypair(privkey: Hex.encode(Data(privkey)), pubkey: Hex.encode(pub))
+                    NostrKey.save(keypair, acceptance: acceptance)
+                    isLoading = false
+                    onLogin(keypair)
+                } catch Nip49.CryptoError.wrongPassword {
+                    guard !Task.isCancelled else { return }
+                    error = "Wrong password for that ncryptsec key."
+                    isLoading = false
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.error = "Couldn't read that ncryptsec key. Check the password and try again."
+                    isLoading = false
+                }
+            }
+            return
+        }
+
         if let keypair = NostrKey.parseNsec(trimmed) {
             isLoading = true
             NostrKey.save(keypair, acceptance: acceptance)
@@ -468,12 +574,21 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an npub / nprofile to browse watch-only, or a 64-character hex private key."
+        error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an ncryptsec (\"ncryptsec1…\"), an npub / nprofile to browse watch-only, or a 64-character hex private key."
     }
 
     private func handleScanned(_ value: String) {
         showQRScanner = false
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // An ncryptsec QR can't be decrypted without its password — drop the
+        // payload into the key field so the password field appears and the
+        // user signs in through the normal Log In path.
+        if trimmed.lowercased().hasPrefix("ncryptsec1") {
+            nsecInput = trimmed
+            return
+        }
+
         if let keypair = NostrKey.parseNsec(trimmed) {
             NostrKey.save(keypair, acceptance: acceptance)
             onLogin(keypair)
@@ -485,7 +600,30 @@ struct NostrLoginSheet: View {
             onLogin(Keypair(privkey: "", pubkey: pubkeyHex))
             return
         }
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, bunker link, or hex private key."
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect it
+    /// inline — spinner while the user approves in their signer app.
+    private func connectSignerURI(_ input: String) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        bunkerLoginTask = Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                guard !Task.isCancelled else { return }
+                isLoading = false
+                onLogin(keypair)
+            } catch is CancellationError {
+                isLoading = false
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
+        }
     }
 }
 

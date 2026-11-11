@@ -187,7 +187,7 @@ struct RichInlineTextView: UIViewRepresentable {
         if let w = proposedWidth, w.isFinite, w > 0 {
             resolvedWidth = w
         } else {
-            resolvedWidth = max(1, UIScreen.main.bounds.width - 32)
+            resolvedWidth = max(1, mediaLayoutScreenWidth() - 32)
         }
         // Constrain the text container so wrapping happens at the resolved width.
         uiView.textContainer.size = CGSize(width: resolvedWidth, height: .greatestFiniteMagnitude)

@@ -13,6 +13,15 @@ enum FeedKind: Equatable, Hashable {
     case relay(url: String)
     case relaySet(RelaySet)
     case extendedNetwork
+    /// The Live Video feed: discovered NIP-53 streams, Sidecar-style. Not
+    /// served by `FeedViewModel` — the list comes from
+    /// `LiveStreamRepository.shared`, fed by discovery; the kind exists so
+    /// the picker, pill label and persistence read one type.
+    case liveVideo
+    /// Fresh: the curated feed relay (`FreshFeedViewModel`). Not served by
+    /// `FeedViewModel`; the kind exists so the picker, pill label and
+    /// persistence read one type. Behind `FeatureFlags.freshFeedEnabled`.
+    case fresh
 
     var displayName: String {
         switch self {
@@ -26,6 +35,10 @@ enum FeedKind: Equatable, Hashable {
             return set.name
         case .extendedNetwork:
             return "Extended Network"
+        case .liveVideo:
+            return "Live Video"
+        case .fresh:
+            return "Fresh"
         }
     }
 }
@@ -143,6 +156,8 @@ final class FeedViewModel {
     /// Follows list.
     @ObservationIgnored private(set) var didStart = false
     @ObservationIgnored private var liveSubscription: RelaySubscription?
+    /// The running Follows load, ended (and logged) when it is replaced.
+    @ObservationIgnored private var followsLoad: FollowsLoadSettle?
     @ObservationIgnored private var liveConsumer: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
     @ObservationIgnored private var firstEventDeadline: Task<Void, Never>?
@@ -227,6 +242,17 @@ final class FeedViewModel {
         var bootstrapRelaySets: @MainActor (Keypair) async -> Void
         var pruneEventStore: @MainActor (_ protectedPubkey: String) async -> Void
         var queryIndexers: @MainActor (NostrFilter) async -> [NostrEvent]
+        /// Opens the Follows feed's persistent subscription (`loadFeed`).
+        /// Injectable so `FollowsSinceTests` can read the `since` a load
+        /// sends without a socket (#188).
+        var openFollowsSubscription: @MainActor (
+            _ queries: [RelayQuery], _ id: String, _ observer: RelayBacklogObserver?
+        ) -> RelaySubscription
+        /// Fetches kind-0s for authors with no cached profile
+        /// (`hydrateProfiles`), and hands events to the missing-profile
+        /// sweep. Injectable so view-model tests stay off the indexers.
+        var ensureProfiles: @MainActor (_ pubkeys: [String]) async -> [String: ProfileData]
+        var observeMissingProfiles: @MainActor (_ events: [NostrEvent]) -> Void
 
         static var live: StartupServices {
             StartupServices(
@@ -237,7 +263,12 @@ final class FeedViewModel {
                 pruneEventStore: { await EventStore.shared.prune(protectedPubkey: $0) },
                 queryIndexers: {
                     await RelayPool.query(relays: FeedViewModel.indexerRelays, filter: $0, waitForAllRelays: true)
-                }
+                },
+                openFollowsSubscription: { queries, id, observer in
+                    RelayPool.subscribe(queries: queries, id: id, observer: observer)
+                },
+                ensureProfiles: { await ProfileRepository.shared.ensure($0) },
+                observeMissingProfiles: { MissingProfileWatcher.shared.observe($0) }
             )
         }
     }
@@ -412,6 +443,10 @@ final class FeedViewModel {
             await loadUserProfile()
             isLoading = false
             return
+        case .liveVideo, .fresh:
+            await loadUserProfile()
+            isLoading = false
+            return
         case .relay, .relaySet, .extendedNetwork:
             isLoading = false
             subscribeCurrentRelayKind()
@@ -457,24 +492,21 @@ final class FeedViewModel {
         // 2. Calculate since timestamp for incremental sync
         let follows = FollowsCache.shared.follows(for: keypair.pubkey)
         let scoreBoard = RelayScoreBoard.load(pubkey: keypair.pubkey)
-        // Exclude our own pubkey: if the only stored kind-1 is the user's
-        // freshly-published intro note, `since` would clamp to "intro_ts - 5m"
-        // and hide every older note from follows on the first feed load.
-        let newestStored = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
-        let since = calculateSince(newestStored: newestStored, followCount: follows.count)
+        // From where Follows itself last settled a load (`FollowsSyncCursor`),
+        // never from the newest note in the shared event store (#188).
+        let now = Int(Date().timeIntervalSince1970)
+        let since = FollowsSince.coldStart(
+            anchor: FollowsSyncCursor.load(pubkey: keypair.pubkey, now: now),
+            followCount: follows.count, now: now
+        )
 
         // 3. Open relay sockets immediately, then fetch profiles concurrently.
         //    loadFeed fires tasks and returns — no need to gate it on profile fetch.
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
         await loadUserProfile()
-        MissingProfileWatcher.shared.observe(events)
+        services.observeMissingProfiles(events)
 
         isLoading = false
-
-        // 4. Save latest timestamp for next session
-        if let newest = events.first {
-            UserDefaults.standard.set(newest.createdAt, forKey: "latest_feed_ts_\(keypair.pubkey)")
-        }
     }
 
     func refresh() async {
@@ -493,19 +525,16 @@ final class FeedViewModel {
         let follows = FollowsCache.shared.follows(for: keypair.pubkey)
         let scoreBoard = RelayScoreBoard.load(pubkey: keypair.pubkey)
 
-        let since: Int?
-        if let newest = events.first {
-            since = newest.createdAt - 60
-        } else {
-            since = await eventStore.newestTimestamp(excludingPubkey: keypair.pubkey)
-        }
+        let now = Int(Date().timeIntervalSince1970)
+        let since = FollowsSince.refresh(
+            listNewest: events.first?.createdAt,
+            anchor: FollowsSyncCursor.load(pubkey: keypair.pubkey, now: now),
+            followCount: follows.count,
+            now: now
+        )
 
         loadFeed(follows: follows, scoreBoard: scoreBoard, since: since)
-        MissingProfileWatcher.shared.observe(events)
-
-        if let newest = events.first {
-            UserDefaults.standard.set(newest.createdAt, forKey: "latest_feed_ts_\(keypair.pubkey)")
-        }
+        services.observeMissingProfiles(events)
     }
 
     func stop() {
@@ -582,8 +611,9 @@ final class FeedViewModel {
         guard !missing.isEmpty else { return }
         let pks = Array(missing)
         Task { @MainActor [weak self] in
-            let dict = await ProfileRepository.shared.ensure(pks)
-            guard let self, !dict.isEmpty else { return }
+            guard let self else { return }
+            let dict = await self.services.ensureProfiles(pks)
+            guard !dict.isEmpty else { return }
             var merged = self.profiles
             for (pk, profile) in dict { merged[pk] = profile }
             self.profiles = merged
@@ -627,6 +657,20 @@ final class FeedViewModel {
         relayFeedStatus = .idle
     }
 
+    /// Select Fresh. Like OnlyFood, this VM does not serve it (`MainView`
+    /// renders `FreshFeedViewModel`): drop the live subscription, clear the
+    /// list, persist the explicit pick. Persisted before the same-kind guard
+    /// for the same reason as `selectOnlyFood`.
+    func selectFresh() {
+        guard FeatureFlags.freshFeedEnabled else { return }
+        FeedKindStore.persist(.fresh, pubkey: keypair.pubkey)
+        guard currentKind != .fresh else { return }
+        cancelLiveSubscription()
+        currentKind = .fresh
+        resetForKindSwitch()
+        relayFeedStatus = .idle
+    }
+
     /// Shared list reset for every kind switch.
     private func resetForKindSwitch() {
         events = []
@@ -639,7 +683,7 @@ final class FeedViewModel {
     /// by the explicit selectors and the cold-start landing path in `start()`.
     private func subscribeCurrentRelayKind() {
         switch currentKind {
-        case .follows, .onlyFood:
+        case .follows, .onlyFood, .liveVideo, .fresh:
             return
         case .relay(let url):
             relayFeedStatus = .connecting
@@ -736,7 +780,20 @@ final class FeedViewModel {
         subscribeCurrentRelayKind()
     }
 
+    /// The Live Video feed: nothing to subscribe in this VM (discovery feeds
+    /// `LiveStreamRepository`, kicked here and re-kicked by the view's
+    /// on-appear refresh).
+    func selectLiveVideo() {
+        cancelLiveSubscription()
+        currentKind = .liveVideo
+        resetForKindSwitch()
+        FeedKindStore.persist(.liveVideo, pubkey: keypair.pubkey)
+        startLiveDiscovery()
+    }
+
     private func cancelLiveSubscription() {
+        followsLoad?.end()
+        followsLoad = nil
         liveSubscription?.cancel()
         liveSubscription = nil
         liveConsumer?.cancel()
@@ -784,7 +841,7 @@ final class FeedViewModel {
             // that when the user finally taps the pill, the merge into
             // `events` is fully populated.
             Task { await EventPersistQueue.shared.enqueue(pendingInserts) }
-            MissingProfileWatcher.shared.observe(pendingInserts)
+            services.observeMissingProfiles(pendingInserts)
             if relayFeedStatus != .streaming { relayFeedStatus = .streaming }
             return
         }
@@ -817,7 +874,7 @@ final class FeedViewModel {
         // inflight / exhausted sets, batches into one kind-0 fan-out per 150
         // pubkeys, and yields back through `updates` so our `profiles` dict
         // hydrates as profiles land. Replaces the per-VM batched fetcher.
-        MissingProfileWatcher.shared.observe(batch)
+        services.observeMissingProfiles(batch)
     }
 
     /// Toggle the hold-new-posts flag from the view layer. Set true while
@@ -1042,8 +1099,8 @@ final class FeedViewModel {
             loadOlderFromDisk()
         case .relay, .relaySet, .extendedNetwork:
             loadMore()
-        case .onlyFood:
-            break  // paged by OnlyFoodFeedViewModel
+        case .onlyFood, .liveVideo, .fresh:
+            break  // paged by OnlyFoodFeedViewModel / live discovery / FreshFeedViewModel
         }
     }
 
@@ -1105,7 +1162,7 @@ final class FeedViewModel {
         guard loadMoreTask == nil else { return }
         let relays: [String]
         switch currentKind {
-        case .follows, .onlyFood: return
+        case .follows, .onlyFood, .liveVideo, .fresh: return
         case .relay(let url): relays = [url]
         case .relaySet(let set): relays = set.relays
         case .extendedNetwork:
@@ -1143,7 +1200,9 @@ final class FeedViewModel {
 
     /// Kick off NIP-53 live activity + chat discovery. Uses the user's NIP-65 read relays
     /// when available, falling back to the top relays from the score board for new users.
+    /// No-op when the "Show live streams" setting is off.
     private func startLiveDiscovery() {
+        guard AppSettings.shared.showsLiveContent else { return }
         services.startLiveDiscovery(keypair.pubkey)
     }
 
@@ -1157,8 +1216,33 @@ final class FeedViewModel {
                let board = RelayScoreBoard.load(pubkey: pubkey) {
                 relays = board.scoredRelays.prefix(10).map(\.url)
             }
+            // The relay lookup suspends: the switch may have gone off meanwhile.
+            guard AppSettings.shared.showsLiveContent else { return }
             LiveStreamCoordinator.shared.startDiscovery(myPubkey: pubkey, readRelays: relays)
         }
+    }
+
+    /// Called from `MainView` when the "Show live streams" setting flips, so the
+    /// change takes effect immediately instead of on next app start.
+    func liveContentSettingChanged(_ enabled: Bool) {
+        if enabled {
+            startLiveDiscovery()
+        } else {
+            LiveStreamCoordinator.shared.stopDiscovery()
+            // Nothing live may keep playing or sit in memory with the switch
+            // off: end any inline/PiP playback and drop the discovered streams.
+            LivePlayerStore.shared.releaseAll()
+            LiveStreamRepository.shared.clear()
+        }
+    }
+
+    /// Re-issue discovery for the Live Video feed (appear / pull-to-refresh).
+    /// `startDiscovery` is a no-op while its subscriptions are open, so a
+    /// refresh restarts them to actually resend the requests.
+    func refreshLiveDiscovery() {
+        guard AppSettings.shared.showsLiveContent else { return }
+        LiveStreamCoordinator.shared.stopDiscovery()
+        startLiveDiscovery()
     }
 
     func requestProfileIfNeeded(_ pubkey: String) async {
@@ -1174,30 +1258,6 @@ final class FeedViewModel {
         if let resolved = await MissingProfileWatcher.shared.forceFetch(pubkey) {
             profiles[pubkey] = resolved
         }
-    }
-
-    // MARK: - Since Calculation
-
-    private func calculateSince(newestStored: Int?, followCount: Int) -> Int? {
-        let now = Int(Date().timeIntervalSince1970)
-
-        let defaultWindow: Int
-        switch followCount {
-        case ...10:  defaultWindow = 7 * 24 * 3600
-        case ...30:  defaultWindow = 5 * 24 * 3600
-        case ...75:  defaultWindow = 3 * 24 * 3600
-        case ...150: defaultWindow = 2 * 24 * 3600
-        case ...300: defaultWindow = 36 * 3600
-        default:     defaultWindow = 24 * 3600
-        }
-
-        let defaultSince = now - defaultWindow
-
-        if let stored = newestStored, stored > 0 {
-            return max(stored - 5 * 60, defaultSince)
-        }
-
-        return defaultSince
     }
 
     // MARK: - Private
@@ -1315,33 +1375,50 @@ final class FeedViewModel {
         //    after EOSE — matches Android's SharedFlow behavior.
         cancelLiveSubscription()
         let subId = "follows-feed-\(UUID().uuidString.prefix(8).lowercased())"
-        let sub = RelayPool.subscribe(queries: queries, id: subId)
+        // The cursor advances only when every relay asked here has ended its
+        // backlog (`FollowsLoadSettle`).
+        let settle = FollowsLoadSettle(
+            pubkey: keypair.pubkey,
+            askedRelays: Set(queries.compactMap { RelayPool.wsURL($0.relayUrl)?.absoluteString })
+        )
+        let sub = services.openFollowsSubscription(queries, subId, settle)
         liveSubscription = sub
+        followsLoad = settle
 
         liveConsumer = Task { [weak self] in
             for await (event, _) in sub.events {
                 guard let self else { return }
                 if Task.isCancelled { return }
-                // Same gate as every other feed write path (startSubscription,
-                // seed, loadOlder, loadMore). A followed author is in the WoT
-                // network by definition, but their kind-6 can wrap a stranger's
-                // note — `shouldDrop` fail-closes on the inner author, and this
-                // was the one live path that skipped it.
-                if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { continue }
-                // Kind 5 is a deletion request, not feed content — feed it to
-                // the tracker and drop it before it can reach the render path.
-                // This runs AFTER shouldDrop so the tracker has already learned
-                // about the deletion from the `shouldDrop` call above for any
-                // matching event id; this ingestion is for future events.
-                if event.kind == Nip09.kindDeletion {
-                    DeletionTracker.shared.ingest(event)
-                    continue
-                }
-                guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { continue }
-                guard self.seenIds.insert(event.id).inserted else { continue }
-                self.enqueueLiveEvent(event)
+                // Every element is reported, accepted or not: the load's
+                // cursor waits until its backlog has all been through here
+                // (`FollowsLoadSettle.consumed`).
+                settle.consumed(event, accepted: self.acceptFollowsEvent(event))
             }
         }
+    }
+
+    /// One element of the Follows subscription: gate it, and buffer it for
+    /// the next flush. Returns whether it went into the feed.
+    private func acceptFollowsEvent(_ event: NostrEvent) -> Bool {
+        // Same gate as every other feed write path (startSubscription,
+        // seed, loadOlder, loadMore). A followed author is in the WoT
+        // network by definition, but their kind-6 can wrap a stranger's
+        // note — `shouldDrop` fail-closes on the inner author, and this
+        // was the one live path that skipped it.
+        if SafetyFilter.shared.shouldDrop(event: event, context: .feed) { return false }
+        // Kind 5 is a deletion request, not feed content — feed it to
+        // the tracker and drop it before it can reach the render path.
+        // This runs AFTER shouldDrop so the tracker has already learned
+        // about the deletion from the `shouldDrop` call above for any
+        // matching event id; this ingestion is for future events.
+        if event.kind == Nip09.kindDeletion {
+            DeletionTracker.shared.ingest(event)
+            return false
+        }
+        guard Self.isFeedRenderable(event, includeReplies: AppSettings.shared.includeRepliesInFeed) else { return false }
+        guard self.seenIds.insert(event.id).inserted else { return false }
+        enqueueLiveEvent(event)
+        return true
     }
 
     // MARK: - Follows cache

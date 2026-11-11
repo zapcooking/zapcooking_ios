@@ -67,6 +67,8 @@ final class AppSettings {
         static let notificationSoundsEnabled = "wisp_settings_notification_sounds_enabled"
         static let notificationFeedStyle = "wisp_settings_notification_feed_style"
         static let startupScreen = "wisp_settings_startup_screen"
+        static let replySoundName = "wisp_settings_sound_reply"
+        static let activitySoundName = "wisp_settings_sound_activity"
         static let postUndoTimerEnabled = "wisp_settings_post_undo_timer_enabled"
         static let postUndoTimerSeconds = "wisp_settings_post_undo_timer_seconds"
         static let postUndoTimerForReplies = "wisp_settings_post_undo_timer_for_replies"
@@ -74,6 +76,7 @@ final class AppSettings {
         static let videoLoop = "wisp_settings_video_loop"
         static let autoTranslate = "wisp_settings_auto_translate"
         static let includeRepliesInFeed = "wisp_settings_include_replies_in_feed"
+        static let showsLiveContent = "wisp_settings_shows_live_content"
         static func quickZapEnabled(for pubkey: String?) -> String {
             pubkey.map { "wisp_settings_quick_zap_enabled_\($0)" } ?? "wisp_settings_quick_zap_enabled"
         }
@@ -130,6 +133,9 @@ final class AppSettings {
     var fiatCurrency: String {
         didSet { UserDefaults.standard.set(fiatCurrency, forKey: Keys.fiatCurrency) }
     }
+    /// Master switch — when off, every in-app notification sound is
+    /// silenced. Shared with the Notifications screen's speaker toggle, as
+    /// Android shares its `notif_sound_enabled` key between the two.
     var notificationSoundsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationSoundsEnabled, forKey: Keys.notificationSoundsEnabled) }
     }
@@ -144,6 +150,14 @@ final class AppSettings {
     /// changing it never switches tabs under the user mid-session.
     var startupScreen: StartupScreen {
         didSet { UserDefaults.standard.set(startupScreen.rawValue, forKey: Keys.startupScreen) }
+    }
+    /// Tone for replies and DMs. `NotificationSound.none` is silent.
+    var replySoundName: String {
+        didSet { UserDefaults.standard.set(replySoundName, forKey: Keys.replySoundName) }
+    }
+    /// Tone for reactions, reposts, mentions and votes.
+    var activitySoundName: String {
+        didSet { UserDefaults.standard.set(activitySoundName, forKey: Keys.activitySoundName) }
     }
     /// When true, publishing a top-level post (and optionally replies — see
     /// `postUndoTimerForReplies`) waits `postUndoTimerSeconds` before sending,
@@ -209,6 +223,11 @@ final class AppSettings {
             UserDefaults.standard.set(quickZapMessage, forKey: Keys.quickZapMessage(for: pk))
         }
     }
+    /// Master switch for live-stream surfaces: the home feed's LIVE pill row and
+    /// NIP-53 live activity/chat discovery. Off hides live content entirely.
+    var showsLiveContent: Bool {
+        didSet { UserDefaults.standard.set(showsLiveContent, forKey: Keys.showsLiveContent) }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -226,6 +245,10 @@ final class AppSettings {
         let notifStyleRaw = defaults.string(forKey: Keys.notificationFeedStyle) ?? NotificationFeedStyle.expanded.rawValue
         self.notificationFeedStyle = NotificationFeedStyle(rawValue: notifStyleRaw) ?? .expanded
         self.startupScreen = Self.decodeStartupScreen(defaults.string(forKey: Keys.startupScreen))
+        self.replySoundName = NotificationSound.resolve(
+            stored: defaults.string(forKey: Keys.replySoundName), fallback: NotificationSound.defaultReply)
+        self.activitySoundName = NotificationSound.resolve(
+            stored: defaults.string(forKey: Keys.activitySoundName), fallback: NotificationSound.defaultActivity)
         self.postUndoTimerEnabled = defaults.object(forKey: Keys.postUndoTimerEnabled) as? Bool ?? true
         let storedSeconds = defaults.object(forKey: Keys.postUndoTimerSeconds) as? Int ?? 10
         self.postUndoTimerSeconds = Self.postUndoTimerOptions.contains(storedSeconds) ? storedSeconds : 10
@@ -234,6 +257,7 @@ final class AppSettings {
         self.videoLoop = defaults.object(forKey: Keys.videoLoop) as? Bool ?? true
         self.autoTranslate = defaults.object(forKey: Keys.autoTranslate) as? Bool ?? false
         self.includeRepliesInFeed = defaults.object(forKey: Keys.includeRepliesInFeed) as? Bool ?? false
+        self.showsLiveContent = defaults.object(forKey: Keys.showsLiveContent) as? Bool ?? true
         let qzPubkey = NostrKey.load()?.pubkey
         self.quickZapEnabled = defaults.object(forKey: Keys.quickZapEnabled(for: qzPubkey)) as? Bool ?? false
         let storedQuickInt = defaults.integer(forKey: Keys.quickZapAmountSats(for: qzPubkey))

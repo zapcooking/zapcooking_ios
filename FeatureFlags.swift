@@ -34,6 +34,15 @@ enum FeatureFlags {
     /// surfaces render a message, never a "tap to subscribe" link.
     static let membershipLinkoutEnabled: Bool = false
 
+    /// Fresh, the curated feed from `wss://feed.zap.cooking` (build spec §2
+    /// "Fresh feed relay"), as an entry in the feed picker. Operational, not
+    /// a compliance switch: Fresh is free tier only and never logs in. While
+    /// `false` the picker has no Fresh entry and a stored `FRESH` landing
+    /// falls back to OnlyFood. On: Fresh leads the picker and is the landing
+    /// feed for accounts that sign in after this build
+    /// (`FeedDefaultMigration`); accounts already on the device keep theirs.
+    static let freshFeedEnabled: Bool = true
+
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
     /// flow. Nothing on the URL path is gated or sold, so this is a plain
@@ -77,6 +86,21 @@ enum FeatureFlags {
     /// "Generate with AI" action (and its Cook+ label) disappears from the
     /// editor and manual entry remains.
     static let altTextAiEnabled: Bool = false
+
+    /// Member login (NIP-42) to the curated feed relay,
+    /// `wss://feed.zap.cooking`. **`false` on iOS (Guideline 2.1(b))**, same
+    /// reason as `cheffyEnabled`: the relay serves everyone the last 14 days,
+    /// and a logged-in Cook+ member the full history, full topic feeds and
+    /// the archive views. Those are paid unlocks sold off-app, so iOS must
+    /// not reach them. Logging in is also the only thing that tells that
+    /// relay who is reading. REVERSIBLE on the same condition as the other
+    /// Cook+ flags (a region-gated external purchase link). When `false`,
+    /// `Nip42.buildAuthEvent` refuses to sign a challenge for that host, so
+    /// no relay path in the app (the shared pool, the group pool, Lazarus)
+    /// can answer its AUTH. Consulted through `Nip42.loginAllowed`, never
+    /// directly. `nonisolated` because the signing paths run off the main
+    /// actor.
+    nonisolated static let feedRelayLoginEnabled: Bool = false
 
     /// Lightning credit purchase for Note Review (21-sat pay-per-use LLM).
     /// **Hard `false` on iOS, and the purchase code path is intentionally NOT

@@ -5,9 +5,13 @@ struct LoginView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var nsecInput = ""
+    /// Only used when the key field holds an `ncryptsec1…` (NIP-49) backup —
+    /// decryption needs the encryption password.
+    @State private var ncryptsecPassword = ""
     @State private var error: String?
     @State private var isSecure = true
     @State private var isLoading = false
+    @State private var decryptTask: Task<Void, Never>?
     /// The QR scanner and Create a new account, each presented on the
     /// agreement its tap gave (Log In takes its own at the tap). This screen
     /// is the account switcher's entry point, so it gates like the splash
@@ -15,6 +19,13 @@ struct LoginView: View {
     /// `PendingAgreement`, not a Bool beside an optional — see its doc.
     @State private var qrScan: PendingAgreement?
     @State private var signUp: PendingAgreement?
+    @State private var remoteSigner: PendingAgreement?
+
+    private var isNcryptsec: Bool {
+        nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("ncryptsec1")
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,15 +45,15 @@ struct LoginView: View {
                     .font(.title.bold())
                     .foregroundStyle(Color.wispOnSurface)
 
-                Text("Enter your nsec key")
+                Text(isNcryptsec ? "Enter the password for your ncryptsec key" : "Enter your nsec key")
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 12) {
                     Group {
                         if isSecure {
-                            SecureField("nsec1...", text: $nsecInput)
+                            SecureField("nsec, ncryptsec, or bunker://…", text: $nsecInput)
                         } else {
-                            TextField("nsec1...", text: $nsecInput)
+                            TextField("nsec, ncryptsec, or bunker://…", text: $nsecInput)
                         }
                     }
                     .textFieldStyle(.roundedBorder)
@@ -65,7 +76,18 @@ struct LoginView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onChange(of: nsecInput) { _, _ in error = nil }
+                .onChange(of: nsecInput) { _, _ in
+                    error = nil
+                    if !isNcryptsec { ncryptsecPassword = "" }
+                }
+
+                if isNcryptsec {
+                    SecureField("Password", text: $ncryptsecPassword)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: ncryptsecPassword) { _, _ in error = nil }
+                }
 
                 NsecIdentityPreview(nsecInput: nsecInput)
 
@@ -89,24 +111,31 @@ struct LoginView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.wispPrimary)
                 .controlSize(.large)
-                .disabled(nsecInput.isEmpty || isLoading)
+                .disabled(nsecInput.isEmpty || isLoading || (isNcryptsec && ncryptsecPassword.isEmpty))
 
-                HStack(spacing: 8) {
-                    Rectangle().fill(.tertiary).frame(height: 1)
-                    Text("OR").font(.caption.bold()).foregroundStyle(.tertiary)
-                    Rectangle().fill(.tertiary).frame(height: 1)
+                Button {
+                    remoteSigner = PendingAgreement(.now())
+                } label: {
+                    nostrSheetOutlinedCapsule("Login with Signer",
+                                              content: NostrSheetAccent.signer,
+                                              border: NostrSheetAccent.signer)
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+
+                Rectangle()
+                    .fill(Color.wispOutline.opacity(0.5))
+                    .frame(height: 1)
+                    .padding(.vertical, 16)
 
                 Button {
                     signUp = PendingAgreement(.now())
                 } label: {
-                    Label("Create a new account", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
+                    nostrSheetOutlinedCapsule("Create new account",
+                                              content: NostrSheetAccent.createText,
+                                              border: NostrSheetAccent.createBorder)
                 }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
-                .controlSize(.large)
+                .buttonStyle(.plain)
 
                 TermsAgreementNotice()
                     .padding(.top, 4)
@@ -146,6 +175,15 @@ struct LoginView: View {
                     onLogin(kp)
                 }
             }
+            .sheet(item: $remoteSigner) { pending in
+                Nip46LoginView(
+                    onLogin: { kp in
+                        remoteSigner = nil
+                        onLogin(kp)
+                    },
+                    acceptance: pending.acceptance
+                )
+            }
         }
         .presentationDetents([.large])
         // Paint the sheet's container background so the wisp color is in
@@ -154,12 +192,44 @@ struct LoginView: View {
         // to jump as the background settles in around them.
         .presentationBackground(Color.wispBackground)
         .onAppear { nsecPasteAllowed = true }
-        .onDisappear { nsecPasteAllowed = false }
+        .onDisappear {
+            nsecPasteAllowed = false
+            decryptTask?.cancel()
+        }
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect
+    /// it inline (spinner while the user approves in their signer), with the
+    /// same friendly diagnosis the dedicated screen gives.
+    private func connectSignerURI(_ input: String, acceptance: TermsAcceptance) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                isLoading = false
+                onLogin(keypair)
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
+        }
     }
 
     private func handleScanned(_ value: String, acceptance: TermsAcceptance) {
         qrScan = nil
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // An ncryptsec QR can't be decrypted without its password — drop the
+        // payload into the key field so the password field appears and the
+        // user signs in through the normal Log In path.
+        if trimmed.lowercased().hasPrefix("ncryptsec1") {
+            nsecInput = trimmed
+            return
+        }
 
         // nsec1… or 64-char hex private key — reuse existing parse + save path.
         if let keypair = NostrKey.parseNsec(trimmed) {
@@ -179,7 +249,12 @@ struct LoginView: View {
             return
         }
 
-        error = "Unrecognized format. Scan an nsec, npub, nprofile, or hex private key."
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed, acceptance: acceptance)
+            return
+        }
+
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, bunker link, or hex private key."
     }
 
     private func login() {
@@ -190,11 +265,51 @@ struct LoginView: View {
         // carry a trailing newline, which fails parseNsec on add-account
         // while the QR path and first-run login both trim and succeed.
         let input = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Nip46LoginViewModel.isSignerURI(input) {
+            connectSignerURI(input, acceptance: acceptance)
+            return
+        }
+
+        if isNcryptsec {
+            let password = ncryptsecPassword
+            decryptTask?.cancel()
+            decryptTask = Task {
+                do {
+                    // scrypt at log_n ≥ 16 burns 64 MB+ and a few hundred ms
+                    // of CPU — keep it off the main actor so the spinner spins.
+                    let privkey = try await Task.detached(priority: .userInitiated) {
+                        try Nip49.decrypt(input, password: password)
+                    }.value
+                    // Dismissed (or superseded) while scrypt ran: don't save or switch accounts.
+                    guard !Task.isCancelled else { return }
+                    guard let pub = Secp256k1.publicKey(from: Data(privkey)) else {
+                        error = "That ncryptsec decrypted to an invalid private key."
+                        isLoading = false
+                        return
+                    }
+                    let keypair = Keypair(privkey: Hex.encode(Data(privkey)), pubkey: Hex.encode(pub))
+                    NostrKey.save(keypair, acceptance: acceptance)
+                    isLoading = false
+                    onLogin(keypair)
+                } catch Nip49.CryptoError.wrongPassword {
+                    guard !Task.isCancelled else { return }
+                    error = "Wrong password for that ncryptsec key."
+                    isLoading = false
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.error = "Couldn't read that ncryptsec key. Check the password and try again."
+                    isLoading = false
+                }
+            }
+            return
+        }
+
         Task {
             let result = NostrKey.parseNsec(input)
             isLoading = false
             guard let keypair = result else {
-                error = "Couldn't read that key. Paste an nsec (\"nsec1…\") or a 64-character hex private key."
+                error = "Couldn't read that key. Paste an nsec (\"nsec1…\"), an ncryptsec (\"ncryptsec1…\"), or a 64-character hex private key."
                 return
             }
             NostrKey.save(keypair, acceptance: acceptance)

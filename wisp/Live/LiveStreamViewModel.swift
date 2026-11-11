@@ -30,6 +30,25 @@ final class LiveStreamViewModel: EmojiComposing {
     @ObservationIgnored private var consumerTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var started = false
 
+    // MARK: Chat history paging (sidecar-style)
+    /// Newest page only on open; each scroll-back pulls one more page until the
+    /// in-memory cap or the stream's first message is reached.
+    var isLoadingOlder = false
+    @ObservationIgnored private var reachedOldestHistory = false
+    var hasMoreChatHistory: Bool { !reachedOldestHistory }
+    var isZapTotalUncertain: Bool {
+        LiveStreamRepository.shared.zapTotalsUncertain.contains(aTagValue)
+    }
+
+    private static let chatPageSize = 50
+    private static let zapScanPageSize = 1000
+    /// Public relays that archive kind-9735 receipts for popular streams
+    /// (sidecar's ZAP_ARCHIVE_RELAYS) — chat relays alone only hold recent zaps.
+    private static let zapArchiveRelays = [
+        "wss://nostr21.com", "wss://relay.ditto.pub", "wss://nostr-01.yakihonne.com",
+        "wss://relay.nostr.net", "wss://soloco.nl"
+    ]
+
     init(aTagValue: String, hostPubkey: String, dTag: String, naddrRelayHints: [String], keypair: Keypair) {
         self.aTagValue = aTagValue
         self.hostPubkey = hostPubkey
@@ -51,19 +70,39 @@ final class LiveStreamViewModel: EmojiComposing {
     }
 
     func start() async {
-        guard !started else { return }
+        guard !started, AppSettings.shared.showsLiveContent else { return }
         started = true
         LiveStreamRepository.shared.setCurrent(aTagValue)
 
         await resolveChatRelays()
-        guard !chatRelays.isEmpty else {
+        guard started, !Task.isCancelled else { return }
+        if chatRelays.isEmpty {
             chatRelays = ["wss://nos.lol", "wss://relay.primal.net"]
-            return
+        }
+
+        // Recent history first: long-running streams carry months of kind-1311,
+        // and backfilling them wholesale stalls the chat for seconds. Pull the
+        // newest page up front and page older history on scroll (sidecar-style).
+        let initial = await RelayPool.query(
+            relays: chatRelays,
+            filter: NostrFilter(kinds: [Nip53.kindLiveChatMessage], aTags: [aTagValue], limit: Self.chatPageSize),
+            timeout: 8
+        )
+        // Leaving the stream during the fetch ran `cleanup()` already; don't
+        // install subscriptions for a dismissed view.
+        guard started, !Task.isCancelled else { return }
+        for event in initial.sorted(by: { $0.createdAt < $1.createdAt }) {
+            LiveStreamRepository.shared.addChatMessage(event)
         }
 
         let chat = RelayPool.subscribe(
             relays: chatRelays,
-            filter: NostrFilter(kinds: [Nip53.kindLiveChatMessage], aTags: [aTagValue], limit: 200),
+            filter: NostrFilter(
+                kinds: [Nip53.kindLiveChatMessage],
+                aTags: [aTagValue],
+                limit: 100,
+                since: NostrClock.now() - 10
+            ),
             id: "live-chat-\(dTag)"
         )
         let react = RelayPool.subscribe(
@@ -81,7 +120,7 @@ final class LiveStreamViewModel: EmojiComposing {
         let aTag = aTagValue
         consumerTasks.append(Task {
             for await (event, _) in chat.events {
-                await MainActor.run { LiveStreamRepository.shared.addChatMessage(event) }
+                await MainActor.run { _ = LiveStreamRepository.shared.addChatMessage(event) }
             }
         })
         consumerTasks.append(Task {
@@ -104,6 +143,97 @@ final class LiveStreamViewModel: EmojiComposing {
                 await MainActor.run { LiveStreamRepository.shared.addStreamZap(event, aTag: aTag) }
             }
         })
+
+        // The live zap sub only sees receipts delivered while watching (plus a
+        // small backfill) — a fraction of a popular stream's lifetime total.
+        // Scan chat + archive relays once for a much closer number.
+        consumerTasks.append(Task { [weak self] in
+            await self?.refreshZapTotal()
+        })
+    }
+
+    /// One-shot kind-9735 scan across the chat relays plus zap-archive relays,
+    /// deduped by event id in the repository. Bounded sample: mark the total
+    /// uncertain (rendered "+") when relays went quiet or hit the page limit.
+    func refreshZapTotal() async {
+        var relays = chatRelays
+        for url in Self.zapArchiveRelays where !relays.contains(url) {
+            relays.append(url)
+        }
+        if relays.count > 12 {
+            relays = Array(relays.prefix(12))
+        }
+        let (events, responded) = await RelayPool.queryDetailed(
+            relays: relays,
+            filter: NostrFilter(kinds: [9735], aTags: [aTagValue], limit: Self.zapScanPageSize),
+            timeout: 12
+        )
+        guard !events.isEmpty, started, !Task.isCancelled else { return }
+        // Announcements only for receipts as recent as the loaded chat; older
+        // ones count toward the total without occupying the chat buffer.
+        let loaded = LiveStreamRepository.shared.messages(for: aTagValue)
+        let announceFrom = loaded.first(where: { !$0.isZapAnnouncement })?.createdAt ?? 0
+        LiveStreamRepository.shared.addArchivedZaps(events, aTag: aTagValue, announceFrom: announceFrom)
+        if events.count >= Self.zapScanPageSize || responded < relays.count {
+            LiveStreamRepository.shared.zapTotalsUncertain.insert(aTagValue)
+        }
+    }
+
+    /// Loads one older page of chat (scroll-back). Pages by count from the
+    /// oldest loaded chat message; `until` is inclusive so boundary-second
+    /// messages aren't skipped, and the repository dedupes the overlap.
+    ///
+    /// - A page that adds nothing new while full means more messages share the
+    ///   boundary second than the limit: the limit grows (within the buffer
+    ///   cap) until that second is drained, rather than moving the cursor.
+    /// - A short page only ends history when every queried relay answered; a
+    ///   timeout leaves paging retryable.
+    func loadOlderMessages() async {
+        guard !isLoadingOlder, !reachedOldestHistory, !chatRelays.isEmpty else { return }
+        let existing = LiveStreamRepository.shared.messages(for: aTagValue)
+        guard let oldest = existing.first(where: { !$0.isZapAnnouncement })?.createdAt else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+
+        var limit = Self.chatPageSize
+        while true {
+            let (page, responded) = await RelayPool.queryDetailed(
+                relays: chatRelays,
+                filter: NostrFilter(
+                    kinds: [Nip53.kindLiveChatMessage],
+                    aTags: [aTagValue],
+                    limit: limit,
+                    until: oldest
+                ),
+                timeout: 8
+            )
+            guard started, !Task.isCancelled else { return }
+            var added = 0
+            for event in page.sorted(by: { $0.createdAt < $1.createdAt })
+            where LiveStreamRepository.shared.addChatMessage(event) {
+                added += 1
+            }
+            let allAnswered = responded >= chatRelays.count
+            if LiveStreamRepository.shared.messages(for: aTagValue).count >= LiveStreamRepository.maxChatMessages {
+                reachedOldestHistory = true
+                return
+            }
+            if added > 0 {
+                if page.count < limit && allAnswered { reachedOldestHistory = true }
+                return
+            }
+            if page.count >= limit {
+                // A full page of already-loaded messages: widen and retry.
+                guard limit < LiveStreamRepository.maxChatMessages else {
+                    reachedOldestHistory = true
+                    return
+                }
+                limit = min(limit * 2, LiveStreamRepository.maxChatMessages)
+                continue
+            }
+            if allAnswered { reachedOldestHistory = true }
+            return
+        }
     }
 
     func setReplyTarget(_ msg: LiveChatMessage?) {
@@ -126,15 +256,23 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Sign + publish a kind-1311 chat message. Optimistic — clears the input and adds the
     /// message to the local repo immediately, then publishes in a detached background task
     /// so the UI never blocks on slow/dead relays.
-    func sendMessage() {
+    private(set) var isSending = false
+
+    func sendMessage() async {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        guard let privkey32 = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
+        // One in-flight send: a remote signer can take seconds to approve,
+        // and re-taps would request duplicate signatures for the same draft.
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
 
         var tags: [[String]] = [
             ["a", aTagValue, chatRelays.first ?? ""],
             ["p", hostPubkey]
         ]
+        let replyId = replyTarget?.id
         if let reply = replyTarget {
             tags.append(["e", reply.id, "", "reply"])
         }
@@ -146,11 +284,9 @@ final class LiveStreamViewModel: EmojiComposing {
 
         let event: NostrEvent
         do {
-            event = try NostrEvent.sign(
-                privkey32: privkey32,
-                pubkey: keypair.pubkey,
+            event = try await Signer.sign(
+                keypair: keypair,
                 kind: Nip53.kindLiveChatMessage,
-                createdAt: NostrClock.now(),
                 tags: tags,
                 content: text
             )
@@ -159,10 +295,15 @@ final class LiveStreamViewModel: EmojiComposing {
             return
         }
 
-        // Optimistic: render immediately, clear input, dismiss reply.
+        // Optimistic: render immediately, clear input, dismiss reply. A remote
+        // signer can take a while to approve, so only clear what we just sent.
         LiveStreamRepository.shared.addChatMessage(event)
-        messageText = ""
-        replyTarget = nil
+        if messageText.trimmingCharacters(in: .whitespacesAndNewlines) == text {
+            messageText = ""
+        }
+        if replyTarget?.id == replyId {
+            replyTarget = nil
+        }
 
         // Fire-and-forget publish.
         let relays = chatRelays
@@ -174,7 +315,7 @@ final class LiveStreamViewModel: EmojiComposing {
     /// Sign + publish a kind-7 reaction event targeting a chat message. Optimistically updates
     /// the local reaction map before the network round-trip.
     func sendReaction(messageId: String, targetPubkey: String, emoji: String) async {
-        guard let privkey32 = Hex.decode(keypair.privkey) else { return }
+        guard Signer.canSign(keypair) else { return }
         LiveStreamRepository.shared.addReaction(
             aTag: aTagValue,
             messageId: messageId,
@@ -194,11 +335,9 @@ final class LiveStreamViewModel: EmojiComposing {
 
         let event: NostrEvent
         do {
-            event = try NostrEvent.sign(
-                privkey32: privkey32,
-                pubkey: keypair.pubkey,
+            event = try await Signer.sign(
+                keypair: keypair,
                 kind: 7,
-                createdAt: NostrClock.now(),
                 tags: tags,
                 content: emoji
             )

@@ -26,8 +26,6 @@ final class DraftsViewModel {
     var selectedTab: Tab = .drafts
     var errorMessage: String?
 
-    @ObservationIgnored private var conversationKey: Data?
-
     init(keypair: Keypair) {
         self.keypair = keypair
     }
@@ -57,14 +55,18 @@ final class DraftsViewModel {
             latestByDTag[dTag] = e
         }
 
-        guard let convKey = ensureConversationKey() else {
+        guard Signer.canSign(keypair) else {
             errorMessage = "Couldn't derive draft encryption key."
             return
         }
 
+        // Self-encrypted, so the peer is our own pubkey. Routed through `Signer`
+        // so remote-signer (NIP-46) accounts decrypt via their signer app.
         var parsed: [Nip37.Draft] = []
         for wrapper in latestByDTag.values {
-            guard let plaintext = try? Nip44.decrypt(payload: wrapper.content, conversationKey: convKey) else { continue }
+            guard let plaintext = try? await Signer.nip44Decrypt(
+                keypair: keypair, peerPubkey: keypair.pubkey, payload: wrapper.content
+            ) else { continue }
             // Empty plaintext from a successfully decrypted but empty payload is also a tombstone.
             if plaintext.isEmpty { continue }
             guard let draft = Nip37.parseDraft(wrapper: wrapper, decryptedJSON: plaintext) else { continue }
@@ -95,38 +97,35 @@ final class DraftsViewModel {
     /// (b) an empty-content NIP-37 replacement (covers clients that don't honor NIP-09).
     func deleteDraft(dTag: String) async {
         drafts.removeAll { $0.dTag == dTag }
-        guard let privkey = Hex.decode(keypair.privkey),
-              let convKey = ensureConversationKey() else { return }
+        guard Signer.canSign(keypair) else { return }
 
         let now = NostrClock.now()
         let relays = topWriteRelays()
 
         // (a) NIP-09 addressable deletion.
         let delTags = Nip09.deletionTagsForAddressable(kind: Nip37.kindDraft, pubkey: keypair.pubkey, dTag: dTag)
-        if let delEvent = try? NostrEvent.sign(
-            privkey32: privkey, pubkey: keypair.pubkey,
-            kind: Nip09.kindDeletion, createdAt: now, tags: delTags, content: ""
+        if let delEvent = try? await Signer.sign(
+            keypair: keypair,
+            kind: Nip09.kindDeletion, tags: delTags, content: "", createdAt: now
         ) {
             _ = await RelayPool.publish(event: delEvent, to: relays, timeout: 6)
         }
 
-        // (b) Empty-content NIP-37 replacement.
-        if let emptyCipher = try? Nip44.encrypt(plaintext: " ", conversationKey: convKey) {
-            // Encrypt a single space so NIP-44's non-empty-plaintext rule is satisfied;
-            // parseDraft will see content "" after we strip the inner empty content.
-            let innerJSON = Nip37.serializeInner(
-                pubkeyHex: keypair.pubkey, innerKind: 1, content: "", tags: [], createdAt: now
-            )
-            if let realCipher = try? Nip44.encrypt(plaintext: innerJSON, conversationKey: convKey) {
-                let wrapperTags = Nip37.wrapperTags(dTag: dTag, innerKind: 1)
-                if let wrapper = try? NostrEvent.sign(
-                    privkey32: privkey, pubkey: keypair.pubkey,
-                    kind: Nip37.kindDraft, createdAt: now, tags: wrapperTags, content: realCipher
-                ) {
-                    _ = await RelayPool.publish(event: wrapper, to: relays, timeout: 6)
-                }
+        // (b) Empty-content NIP-37 replacement. The inner JSON is non-empty, so
+        // NIP-44's non-empty-plaintext rule is satisfied; parseDraft sees content "".
+        let innerJSON = Nip37.serializeInner(
+            pubkeyHex: keypair.pubkey, innerKind: 1, content: "", tags: [], createdAt: now
+        )
+        if let realCipher = try? await Signer.nip44Encrypt(
+            keypair: keypair, peerPubkey: keypair.pubkey, plaintext: innerJSON
+        ) {
+            let wrapperTags = Nip37.wrapperTags(dTag: dTag, innerKind: 1)
+            if let wrapper = try? await Signer.sign(
+                keypair: keypair,
+                kind: Nip37.kindDraft, tags: wrapperTags, content: realCipher, createdAt: now
+            ) {
+                _ = await RelayPool.publish(event: wrapper, to: relays, timeout: 6)
             }
-            _ = emptyCipher
         }
     }
 
@@ -182,12 +181,11 @@ final class DraftsViewModel {
     /// scheduler relay via the AUTH-aware retry path.
     func deleteScheduledPost(eventId: String) async {
         scheduledPosts.removeAll { $0.id == eventId }
-        guard let privkey = Hex.decode(keypair.privkey) else { return }
-        let now = NostrClock.now()
+        guard Signer.canSign(keypair) else { return }
         let tags = Nip09.deletionTagsForEvent(id: eventId, kind: 1)
-        guard let event = try? NostrEvent.sign(
-            privkey32: privkey, pubkey: keypair.pubkey,
-            kind: Nip09.kindDeletion, createdAt: now, tags: tags, content: ""
+        guard let event = try? await Signer.sign(
+            keypair: keypair,
+            kind: Nip09.kindDeletion, tags: tags, content: ""
         ) else { return }
         let relay = Self.schedulerRelay
         await GroupRelayPool.shared.ensureRelay(relay, keypair: keypair)
@@ -195,15 +193,6 @@ final class DraftsViewModel {
     }
 
     // MARK: - Helpers
-
-    private func ensureConversationKey() -> Data? {
-        if let conversationKey { return conversationKey }
-        guard let priv = Hex.decode(keypair.privkey),
-              let pub = Hex.decode(keypair.pubkey),
-              let key = try? Nip44.getConversationKey(privkey32: priv, peerXonlyPubkey32: pub) else { return nil }
-        conversationKey = key
-        return key
-    }
 
     private func topWriteRelays() -> [String] {
         if let board = RelayScoreBoard.load(pubkey: keypair.pubkey) {

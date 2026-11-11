@@ -53,6 +53,7 @@ struct SidebarDrawerView: View {
 
     @Environment(AppSettings.self) private var settings
     @Environment(WalletStore.self) private var walletStore
+    @Environment(\.theme) private var theme
 
     @State private var settingsExpanded = false
     @State private var showAccountSwitcher = false
@@ -62,8 +63,8 @@ struct SidebarDrawerView: View {
     @State private var statusDraft = ""
     @State private var userStatus: String? = nil
     @State private var torEnabled = false
-    @State private var avatarTapCount = 0
-    @State private var avatarTapResetTask: Task<Void, Never>?
+    @State private var crashTapCount = 0
+    @State private var crashTapResetTask: Task<Void, Never>?
 
     private var hasEmbeddedWallet: Bool { false }
     private var displayName: String { profile?.displayString ?? truncatedPubkey }
@@ -119,8 +120,12 @@ struct SidebarDrawerView: View {
     }
 
     private func publishStatus(_ content: String) async {
-        guard let priv = Hex.decode(keypair.privkey) else { return }
-        guard let event = try? Nip38.buildStatus(privkey32: priv, pubkey: pubkey, content: content) else { return }
+        guard let event = try? await Signer.sign(
+            keypair: keypair,
+            kind: Nip38.kindUserStatus,
+            tags: Nip38.buildStatusTags(),
+            content: content
+        ) else { return }
         var relays = await RelayListRepository.shared.getWriteRelays(pubkey)
         if relays.isEmpty { relays = ["wss://relay.primal.net"] }
         _ = await RelayPool.publish(event: event, to: relays, timeout: 6)
@@ -183,12 +188,17 @@ struct SidebarDrawerView: View {
             Button("Cancel", role: .cancel) {}
             Button("Logout", role: .destructive) { onLogout() }
         } message: {
-            if keypair.isWatchOnly {
+            if keypair.isRemote {
+                // The key never lived here, and logging out ends the signer
+                // session (endSession tells the signer, then the app key is
+                // deleted) — so the backup warnings below don't apply.
+                Text("Your private key stays in your signer app, and logging out ends the session there too. Sign back in with a fresh bunker link from your signer app anytime.")
+            } else if keypair.isWatchOnly {
                 Text("Sign back in with your npub anytime to resume watching this account.")
             } else if hasEmbeddedWallet {
-                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec), so back it up before logging out.\n\nBack up your wallet recovery phrase. Without it, your funds cannot be recovered.")
             } else {
-                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec) \u{2014} back it up before logging out.")
+                Text("This removes the account from this device. If you created it with Continue with Apple, you can restore it with Apple and your PIN. Otherwise you\u{2019}ll need your private key (nsec), so back it up before logging out.")
             }
         }
         .alert("Update Status", isPresented: $showStatusEditor) {
@@ -236,40 +246,45 @@ struct SidebarDrawerView: View {
 
     // MARK: - Header
 
+    /// Dark mode sinks the pill below the drawer surface — Tailwind gray-950
+    /// (`#030712`), a step darker than the palette's gray-900 background — so
+    /// the avatar reads as a punch-out. Light keeps the palette surface.
+    private var accountPillBackground: Color {
+        theme.isDark ? Color.hex(0xFF030712) : theme.palette.surfaceVariant
+    }
+
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Button(action: handleAvatarTap) {
-                    CachedAvatarView(url: profile?.picture, size: 64, alwaysLoad: true)
+                // Avatar + account count in one capsule: the whole pill is a
+                // single tap target that opens the account switcher (switch
+                // or add an account), with a "+N" badge counting the other
+                // accounts when more than one is signed in. The avatar runs
+                // the full height of the capsule and sits flush with the
+                // leading edge — its circle IS the capsule's left cap.
+                let otherCount = accounts.count - 1
+                Button {
+                    showAccountSwitcher = true
+                } label: {
+                    HStack(spacing: 8) {
+                        CachedAvatarView(url: profile?.picture, size: 56, alwaysLoad: true)
+                        Image(systemName: "person.2")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                        if otherCount > 0 {
+                            Text("+\(otherCount)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color.secondary)
+                        }
+                    }
+                    .padding(.trailing, 14)
+                    .background(accountPillBackground, in: Capsule())
                 }
                 .buttonStyle(.plain)
-
-            // Icon-only affordance that opens the account switcher sheet. Same
-            // action (switch or add an account) regardless of how many
-            // accounts are signed in; shows a "+N" badge counting the other
-            // accounts when more than one is signed in.
-            let otherCount = accounts.count - 1
-            Button {
-                showAccountSwitcher = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
-                    if otherCount > 0 {
-                        Text("+\(otherCount)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.secondary)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.wispSurfaceVariant, in: Capsule())
-            }
-            .buttonStyle(.plain)
+                .accessibilityLabel("Switch account")
+                .accessibilityIdentifier("drawer-account-switcher")
 
                 Spacer()
-
                 HStack(spacing: 4) {
                     Button {
                         torEnabled.toggle()
@@ -339,20 +354,6 @@ struct SidebarDrawerView: View {
                     }
                 }
                 .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func handleAvatarTap() {
-        avatarTapCount += 1
-        if avatarTapCount >= 7 {
-            fatalError("Test crash")
-        }
-        avatarTapResetTask?.cancel()
-        avatarTapResetTask = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !Task.isCancelled {
-                avatarTapCount = 0
             }
         }
     }
@@ -452,17 +453,41 @@ struct SidebarDrawerView: View {
     }
 
     private var versionFooter: some View {
-        HStack(spacing: 6) {
-            Image("ZcLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 16, height: 16)
-                .opacity(0.3)
-            Text(versionString)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary.opacity(0.5))
+        // Crash-reporting QA hook: 7 taps within 2 s of each other crash the
+        // app on purpose ("Test crash"). The version label is the
+        // conventional multi-tap spot and has no competing action — the
+        // hook's previous home was the drawer avatar, which now opens the
+        // account switcher.
+        Button {
+            handleCrashTestTap()
+        } label: {
+            HStack(spacing: 6) {
+                Image("ZcLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .opacity(0.3)
+                Text(versionString)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+    }
+
+    private func handleCrashTestTap() {
+        crashTapCount += 1
+        if crashTapCount >= 7 {
+            fatalError("Test crash")
+        }
+        crashTapResetTask?.cancel()
+        crashTapResetTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled {
+                crashTapCount = 0
+            }
+        }
     }
 
 }

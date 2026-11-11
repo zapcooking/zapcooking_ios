@@ -129,42 +129,55 @@ struct AltTextEditorView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                previewImage
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Scrollable: the content (180pt preview + explainer + field +
+            // AI action) exceeds the sheet's height at the medium detent and
+            // when the keyboard is up, and an overflowing VStack is what
+            // drew the nav title over the preview. Scrolling keeps every
+            // item reachable no matter how little room the sheet has.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    previewImage
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Text("A short description makes your photo accessible to screen reader users — and gives everyone context if the image doesn't load.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("A short description helps screen reader users and gives context to everyone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                TextEditor(text: $text)
-                    .frame(minHeight: 96)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(alignment: .bottomTrailing) {
-                        Text("\(remaining) remaining")
-                            .font(.caption2)
-                            .foregroundStyle(remaining < 100 ? .orange : .secondary)
-                            .padding(8)
-                            .allowsHitTesting(false)
-                    }
-                    .onChange(of: text) { _, newValue in
-                        if newValue.count > Self.maxCharacters {
-                            text = String(newValue.prefix(Self.maxCharacters))
+                    TextEditor(text: $text)
+                        .frame(minHeight: 96)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                        .onChange(of: text) { _, newValue in
+                            if newValue.count > Self.maxCharacters {
+                                text = String(newValue.prefix(Self.maxCharacters))
+                            }
                         }
+
+                    aiRow
+
+                    if case .notice(let message) = phase {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-
-                aiSection
-
-                Spacer(minLength: 0)
+                }
+                .padding(16)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("Description")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let initial = target.initialText, !initial.isEmpty {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Clear", role: .destructive) {
+                            onSave(nil)
+                            dismiss()
+                        }
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
@@ -206,14 +219,21 @@ struct AltTextEditorView: View {
         }
     }
 
-    /// The Cook+ action. The generated text lands in the field as an editable
-    /// draft — never applied to the attachment directly (the member reviews it
-    /// first). Membership is enforced server-side; a denial renders
-    /// message-only, no upsell link (build spec §4.3).
+    /// The remaining-count and the Cook+ action share one row — the count
+    /// moved out of the field's overlay so it stays readable while typing
+    /// (parity with the Android editor). The generated text still lands in
+    /// the field as an editable draft — never applied to the attachment
+    /// directly (the member reviews it first). Membership is enforced
+    /// server-side; a denial renders message-only, no upsell link (build
+    /// spec §4.3).
     @ViewBuilder
-    private var aiSection: some View {
-        if FeatureFlags.altTextAiEnabled, keypair != nil {
-            VStack(alignment: .leading, spacing: 8) {
+    private var aiRow: some View {
+        HStack(spacing: 8) {
+            Text("\(remaining) remaining")
+                .font(.caption2)
+                .foregroundStyle(remaining < 100 ? .orange : .secondary)
+            Spacer(minLength: 8)
+            if FeatureFlags.altTextAiEnabled, keypair != nil {
                 Button {
                     generateWithAI()
                 } label: {
@@ -231,17 +251,10 @@ struct AltTextEditorView: View {
                             .background(Color.wispPrimary.opacity(0.15), in: Capsule())
                             .foregroundStyle(Color.wispPrimary)
                     }
-                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .disabled(phase == .generating)
                 .accessibilityLabel("Generate description with AI, Cook+ feature")
-
-                if case .notice(let message) = phase {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }

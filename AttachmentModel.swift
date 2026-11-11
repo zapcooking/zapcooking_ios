@@ -127,7 +127,7 @@ enum AttachmentModel {
         return tokens
     }
 
-    /// Bare http(s) URLs offered as attachment slots: every URL occurrence
+    /// Direct image/video URLs offered as attachment slots: every media URL occurrence
     /// on a line that contains ONLY URLs (whitespace-separated) — so a run
     /// of pasted links all surface, duplicates included (each accept
     /// consumes one occurrence), and accepting one leaves the rest as
@@ -136,17 +136,34 @@ enum AttachmentModel {
     ///
     /// Deliberately more liberal than `stripBoundaryAttachmentLines`: the
     /// migration strip only takes exact single-URL lines because it guesses;
-    /// this feeds an explicit user-tapped offer, so no guess is involved.
+    /// this feeds an explicit user-tapped offer for a recognized media path.
     /// Paste itself inserts text — the offer is the only thing that converts.
     static func attachableUrlCandidates(_ text: String) -> [String] {
         guard !text.isEmpty else { return [] }
         var out: [String] = []
         for line in text.components(separatedBy: "\n") {
             if let tokens = urlOnlyLineTokens(line) {
-                out.append(contentsOf: tokens)
+                out.append(contentsOf: tokens.filter(isMediaUrl))
             }
         }
         return out
+    }
+
+    // Match the image/video formats supported by ContentParser. Inspect only
+    // the parsed path: a page's query, fragment, or hostname is not a media
+    // filename. Unknown/extensionless links stay as text rather than guessing
+    // from their host or fetching ordinary web pages as attachments.
+    private static let mediaExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "svg",
+        "mp4", "mov", "webm", "m3u8",
+    ]
+
+    private static func isMediaUrl(_ token: String) -> Bool {
+        guard let url = URL(string: token),
+              let host = url.host, !host.isEmpty,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return false }
+        return mediaExtensions.contains(url.pathExtension.lowercased())
     }
 
     /// Remove the FIRST occurrence of `url` as a whitespace-delimited token

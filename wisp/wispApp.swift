@@ -16,7 +16,6 @@ struct wispApp: App {
         #endif
         NsecPasteGuard.setUp()
         try? ObjectBoxSetup.setUp()
-        GiphyConfig.bootstrap()
         // Estimate device-clock skew so outgoing event `created_at` is correct even
         // when the wall clock is off (relays reject future timestamps). Re-syncs on
         // foreground entry, throttled inside NostrClock.
@@ -49,6 +48,12 @@ struct wispApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-ComposerDragHarness") {
                 ComposerDragHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-EmojiLibraryHarness") {
+                EmojiLibraryHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-EmojiReactionHarness") {
+                EmojiReactionHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-WalletAddressHarness") {
+                WalletAddressHarness()
             } else {
                 rootContent
             }

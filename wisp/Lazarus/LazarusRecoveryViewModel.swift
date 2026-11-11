@@ -160,6 +160,14 @@ final class LazarusRecoveryViewModel {
             // The screen went away during the relay-list lookup: stop here,
             // so the fetch can't open fresh sockets after `close()`.
             guard token == self.generation, !Task.isCancelled else { return }
+            // Queries may authenticate only to the user's own relays
+            // (spec 0.6.2): the lookup ran without any, the scan gets the
+            // list's relays now. Without a found list, `write` holds default
+            // stand-ins, which are publish targets but not the user's own.
+            if let client = io as? LazarusRelayClient {
+                let own = plan.user.status == .found ? plan.user.read + plan.user.write : plan.user.read
+                await client.setQueryAuthRelays(Set(own))
+            }
             let page = await engine.fetch(kind: profile.kind, pubkey: pubkey, relays: plan.relays)
             let prepared = await Task.detached(priority: .userInitiated) {
                 let decrypted = Self.decrypt(page.tagged.map(\.event), with: decryptor, profile: profile, known: [:], failed: [])
@@ -317,6 +325,20 @@ final class LazarusRecoveryViewModel {
 
     /// Where the restore would go: the write relays it's judged on, and the
     /// best-effort extras.
+    /// Present when the version under review serializes larger than a
+    /// remote signer will accept — the restore attempt would fail, so the
+    /// screen says so up front. See
+    /// `LazarusPublisher.remoteSignerSafeEventBytes`.
+    var restoreSizeWarning: String? {
+        guard keypair.isRemote, let candidate = reviewCandidate else { return nil }
+        let draft = Lazarus.draft(chosen: candidate.event, current: review?.reviewedCurrent, now: NostrClock.now())
+        let bytes = LazarusPublisher.serializedBytes(
+            pubkey: keypair.pubkey, createdAt: draft.createdAt, kind: draft.kind,
+            tags: draft.tags, content: draft.content
+        )
+        return LazarusPublisher.sizeWarningIfTooLarge(serializedBytes: bytes)
+    }
+
     var reviewTargets: (judged: [String], extra: [String])? {
         guard let candidate = reviewCandidate, let plan, let scan else { return nil }
         return Lazarus.publishRelays(
@@ -440,8 +462,12 @@ final class LazarusRecoveryViewModel {
             return "The active account changed, so nothing was restored. Switch back to this account to restore its list."
         case .noWriteRelays:
             return "Your relay list couldn't be fetched, so there are no write relays to publish to. Scan again when your connection is back."
-        case .signFailed:
+        case .signFailed(let reason):
+            if let reason { return "Signing failed: \(reason). Nothing was published." }
             return "Signing failed, so nothing was published."
+        case .tooLargeForRemoteSigner(let bytes):
+            return LazarusPublisher.sizeWarningIfTooLarge(serializedBytes: bytes)
+                ?? "Signing failed, so nothing was published."
         case .notAccepted:
             return "None of your write relays accepted the restore, so it didn't take effect. Nothing changed on your write relays."
         }

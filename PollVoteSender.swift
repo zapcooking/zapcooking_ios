@@ -29,17 +29,16 @@ enum PollVoteSender {
         if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
 
         let now = NostrClock.now()
-        guard let privkeyBytes = Hex.decode(keypair.privkey) else { return .failure(.signingFailed) }
+        guard Signer.canSign(keypair) else { return .failure(.signingFailed) }
 
         let signed: NostrEvent
         do {
-            signed = try NostrEvent.sign(
-                privkey32: privkeyBytes,
-                pubkey: keypair.pubkey,
+            signed = try await Signer.sign(
+                keypair: keypair,
                 kind: Nip88.kindPollResponse,
-                createdAt: now,
                 tags: tags,
-                content: ""
+                content: "",
+                createdAt: now
             )
         } catch {
             return .failure(.signingFailed)

@@ -21,7 +21,7 @@ struct EmojiReactionPicker: View {
 
     private let cellSize: CGFloat = 36
     private let columns: Int = 6
-    private let maxVisible: Int = 18  // 3 rows × 6 columns
+    private let maxVisible: Int = 24  // 4 rows × 6 columns — the full canonical set
 
     /// Quick reactions, plus any of the user's existing reactions that aren't
     /// already shown — so a reaction can always be found and removed even if it

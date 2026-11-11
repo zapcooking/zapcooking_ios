@@ -37,7 +37,10 @@ struct FeedStartTests {
             queryIndexers: { _ in
                 calls.indexerQueries += 1
                 return []
-            }
+            },
+            openFollowsSubscription: { _, id, _ in RelaySubscription(id: id) },
+            ensureProfiles: { _ in [:] },
+            observeMissingProfiles: { _ in }
         )
         let kp = Keypair(privkey: String(repeating: "1", count: 64), pubkey: pubkey)
         return (FeedViewModel(keypair: kp, services: services), calls)
@@ -54,6 +57,9 @@ struct FeedStartTests {
 
     @Test func onlyFoodLanding_startTwice_runsSharedSetupOnce() async {
         let pk = freshPubkey()
+        // An OnlyFood landing (Fresh is the default for new sign-ins now).
+        UserDefaults.standard.set("ONLY_FOOD", forKey: FeedKindStore.typeKey(pk))
+        defer { UserDefaults.standard.removeObject(forKey: FeedKindStore.typeKey(pk)) }
         let (vm, calls) = makeVM(pubkey: pk)
         #expect(vm.currentKind == .onlyFood)
 

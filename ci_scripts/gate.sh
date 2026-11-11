@@ -32,6 +32,12 @@
 #   code and re-open the freeze; a gate run against a HEAD that is not the
 #   gate-file commit is refused (#47/#48 shipped a crash through exactly
 #   that gap).
+# - Pre-boot the simulator before the run (`sh ci_scripts/preboot-sim.sh
+#   <udid>`; done here automatically when GATE_DEST names `id=`). On the
+#   Studio's iOS 27.2 simulator SpringBoard sometimes aborts during a cold
+#   boot; if xcodebuild has already launched the test host, the host is left
+#   with no window scene and ~17 hosted render tests fail together ("drew
+#   nothing", "did not lay out"). `HostSceneProbeTests` names that state.
 set -eu
 
 REPO="${GATE_REPO:-$HOME/Development/zapcooking_ios}"
@@ -109,6 +115,9 @@ for f in s.get("testFailures", []) or []:
         unexpected.append(name)
         text = str(f.get("failureText") or "?")[:160]
         print(f"gate:   NEW     {name}  ({text})")
+if any("hostApp_hasAForegroundScene" in n for n in unexpected):
+    print("gate:   HINT    HostSceneProbeTests failed: the host app had no foreground scene, so every hosted render")
+    print("gate:           failure above is the simulator, not the branch. Run ci_scripts/preboot-sim.sh <udid>, then re-run.")
 rc = 0
 if total == 0:
     print("gate: FAIL — zero tests in the bundle. A gate that runs nothing is not green."); rc = 6
@@ -178,6 +187,9 @@ fi
 # xcodebuild exits non-zero whenever any test fails — including the known
 # ones — so its status is recorded but the verdict is the bundle's.
 rm -rf "$BUNDLE"
+case "$DEST" in
+  *id=*) sh ci_scripts/preboot-sim.sh "$(echo "$DEST" | sed -E 's/.*id=([0-9A-Fa-f-]+).*/\1/')" ;;
+esac
 set +e
 xcodebuild test -project wisp.xcodeproj -scheme wisp \
   -destination "$DEST" \

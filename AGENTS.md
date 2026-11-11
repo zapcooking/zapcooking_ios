@@ -17,7 +17,6 @@ SwiftPM dependencies (resolved via Xcode, no `Package.swift` exists):
 - `objectbox-swift-spm` — embedded event database
 - `swift-secp256k1` (21-DOT-DEV) — Schnorr signing/verification + ECDH
 - `breez-sdk-spark-swift` — Spark (self-custodial Lightning) wallet
-- `giphy-ios-sdk` — GIF picker
 
 ## Build / run / test
 
@@ -29,6 +28,24 @@ xcodebuild -project wisp.xcodeproj -scheme wisp -destination 'platform=iOS Simul
 ```
 
 Tests under `wispTests/` use the Swift Testing framework (`import Testing`, `@Test`), not XCTest. Substantive coverage lives in `Nip44Tests`, `NSpamTests`, `RelaySettingsTests`, `SafetyTests`. UI tests under `wispUITests/` are XCTest.
+
+## Dev / QA hooks
+
+- **Crash-reporting test hook**: tapping the drawer's version footer ("Zap Cooking vX", under Logout) 7 times — each tap within 2 s of the previous, or the counter resets — fires `fatalError("Test crash")` on purpose, to exercise crash reporting. Lives in `SidebarDrawerView.handleCrashTestTap()`.
+
+## Screenshots for UI changes (required)
+
+Any change that alters what a screen looks like — layout, styling, new/removed controls, gesture behavior — ships simulator screenshots in the same PR, committed under `docs/screenshots/<area>/` (`composer/`, `live/`, `lazarus/` exist; add a folder for new areas). Unit tests alone are not sufficient evidence for a UI change.
+
+Capture from the real app on a simulator, not a mockup. The reusable path is a UI test driving the DEBUG harnesses (`-ComposerDragHarness` hosts the real composer without login) with `XCTAttachment(screenshot:)` at `.keepAlways` — see `ComposerUrlOfferScreenshotsUITests` — then export and copy:
+
+```
+xcodebuild test -project wisp.xcodeproj -scheme wisp -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:wispUITests/<YourScreenshotTests> -resultBundlePath /tmp/shots.xcresult
+xcrun xcresulttool export attachments --path /tmp/shots.xcresult --output-path /tmp/shots
+```
+
+Name files for the behavior they show (`composer-url-gating-plain-url.png`), reference them in the PR description, and re-shoot when a later change alters the same screen so the folder reflects current UI.
 
 ## Source layout — important
 
@@ -44,9 +61,9 @@ The Xcode project mixes two file-management styles:
 API keys ship as gitignored text files in `wisp/Resources/`:
 
 - `wisp/Resources/breez-api-key.txt` (Breez Spark SDK)
-- `wisp/Resources/giphy-api-key.txt` (Giphy)
+- `wisp/Resources/gifs-nostr-build-api-key.txt` (gifs.nostr.build GIF search)
 
-Both have `.example` siblings checked in. `.gitignore` excludes the real files. `BreezConfig` and `GiphyConfig` read them from the bundle at startup, falling back to empty/hardcoded values. Do **not** introduce xcconfig + Info.plist injection for new secrets — follow the bundled-resource pattern.
+Both have `.example` siblings checked in. `.gitignore` excludes the real files. `BreezConfig` and `GifsNostrBuildConfig` read them from the bundle at startup, falling back to empty values. Do **not** introduce xcconfig + Info.plist injection for new secrets — follow the bundled-resource pattern.
 
 `wisp/Resources/nspam/` ships the on-device LightGBM spam model (`model.txt`, `calibration.npz`) and is checked in. `wisp/Resources/bip39-english.txt` is the BIP-39 wordlist.
 
@@ -64,6 +81,16 @@ splash → (login via nsec/mnemonic) → onboarding → main
 Account state is keyed by hex pubkey throughout. `NostrKey` stores the active keypair plus a per-pubkey list in the iOS Keychain (service `com.wisp.nostr`), and uses `UserDefaults` keys of the form `onboarding_done_<pubkey>`, `follow_pubkeys_<pubkey>`, `relay_scoreboard_v1_<pubkey>`, `latest_feed_ts_<pubkey>`, `profile_<pubkey>`, etc.
 
 ## Architecture
+
+### Never hardcode the damus relay
+
+`wss://relay.damus.io` must **not** be added to any hardcoded relay set
+(`RelayDefaults`, `defaultNostrConnectRelays`, fallback lists, DM
+relays, backup relays). It aggressively rate-limits and its operator
+threatened IP blocks during the signing-flood incident (#185, fixed by
+the one-AUTH-per-connection change). A user may still keep it in their
+own relay settings — we just never dial it by default. Reference:
+`gates/183-nip46-remote-signing.md`.
 
 ### Outbox-model relay routing (NIP-65)
 
@@ -132,10 +159,10 @@ The `Nip*.swift` files at the repo root each implement one NIP. Quick map: 04 (l
 - **NWC** is a home-grown NIP-47 implementation (`NwcWallet`, `NwcConnection`) over a relay socket — no SDK. Uses NIP-04 if the wallet doesn't support NIP-44 v2.
 - **Zaps** (`ZapSender`, `Nip57`): resolve LNURL from recipient's `lud16`, build signed kind-9734 zap request, fetch bolt11 invoice from LNURL callback, pay via active wallet. `paymentHash → recipientPubkey` is recorded in UserDefaults for history.
 
-### Blossom media + Giphy
+### Blossom media + GIF search
 
 - `BlossomClient.upload` walks the user's server list and tries `/media` then `/upload` per server, returning on first success. Server list is a kind-10063 event published to write relays, cached in UserDefaults; default fallback `https://blossom.primal.net`. Edited via `MediaServersView`.
-- Giphy is a separate path: the GIPHY iOS SDK shows the picker, and `GifBlossomUploader.rehost` downloads the Giphy CDN bytes and re-uploads to Blossom, falling back to the original Giphy URL on failure.
+- GIFs are a separate, upload-free path: the composer's `GifPickerView` searches gifs.nostr.build directly (`GifSearch`/`GifSearchClient`, Bearer key from the bundled resource — native clients may hold the key, unlike browsers). Every result is already hosted on a Nostr media host, so picking attaches the URL as-is with the GIF's title seeded as the alt; un-publishable results (http links, mp4s, junk shapes) are dropped at parse time.
 
 ### NSpam (on-device LightGBM) + WoT filtering
 

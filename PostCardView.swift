@@ -227,7 +227,7 @@ struct PostCardView: View {
     /// must never be uploaded to the endpoint or replied to publicly), and
     /// a kind-1 target (the feed also renders polls / gallery events here).
     private var noteReviewEligible: Bool {
-        guard let keypair = NostrKey.load(), !keypair.privkey.isEmpty,
+        guard let keypair = NostrKey.load(), Signer.canSign(keypair),
               !NostrKey.isWatchOnly(pubkey: keypair.pubkey) else { return false }
         let target = resolveRepost().event
         return !isPrivate

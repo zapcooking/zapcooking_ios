@@ -26,6 +26,6 @@ write_secret() {
 }
 
 write_secret BREEZ_API_KEY breez-api-key.txt
-write_secret GIPHY_API_KEY giphy-api-key.txt
+write_secret GIFS_NOSTR_BUILD_API_KEY gifs-nostr-build-api-key.txt
 write_secret GOOGLE_WEB_CLIENT_ID google-web-client-id.txt
 write_secret GOOGLE_IOS_CLIENT_ID google-ios-client-id.txt
