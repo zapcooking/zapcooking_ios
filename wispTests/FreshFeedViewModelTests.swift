@@ -466,7 +466,7 @@ import Testing
         FeedKindStore.persist(.fresh, pubkey: pk, defaults: defaults)
         #expect(defaults.string(forKey: FeedKindStore.typeKey(pk)) == "FRESH")
         #expect(FeedKindStore.resolveInitial(pubkey: pk, defaults: defaults, freshEnabled: true) { _ in nil } == .fresh)
-        #expect(FeedKindStore.resolveInitial(pubkey: pk, defaults: defaults, freshEnabled: false) { _ in nil } == FeedKindStore.defaultKind)
+        #expect(FeedKindStore.resolveInitial(pubkey: pk, defaults: defaults, freshEnabled: false) { _ in nil } == FeedKindStore.legacyDefaultKind)
         #expect(FeedTabRouting.body(for: .fresh) == .fresh)
         #expect(FeedTabRouting.composeSuggestions(for: .fresh).isEmpty)
         #expect(FeedKind.fresh.displayName == "Fresh")
@@ -475,9 +475,10 @@ import Testing
         #expect(FeedTabRouting.repinTarget(afterObserving: .fresh, tracker: &tracker) == nil)
     }
 
-    @Test("ships off: no picker entry, and selectFresh is inert")
-    func shipsOff() {
-        #expect(FeatureFlags.freshFeedEnabled == false)
+    @Test("ships on: Fresh is in the picker and the default for new sign-ins")
+    func shipsOn() {
+        #expect(FeatureFlags.freshFeedEnabled == true)
+        #expect(FeedKindStore.defaultKind == .fresh)
     }
 
     @Test("account wipe removes the Fresh last-visit mark")

@@ -1482,6 +1482,7 @@ struct MainView: View {
             .background(Color.wispSurfaceVariant.opacity(0.5), in: RoundedRectangle(cornerRadius: 20))
             .foregroundStyle(Color.primary)
         }
+        .accessibilityIdentifier("feed-picker")
     }
 
     // MARK: - Feed Content

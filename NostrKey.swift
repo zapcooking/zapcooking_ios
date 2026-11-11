@@ -144,6 +144,12 @@ enum NostrKey {
             "latest_feed_ts_\(pubkey)",
             // Fresh: the device-local "new since your last visit" mark
             FreshLastVisit.key(pubkey: pubkey),
+            // Feed choice and the Fresh-default marker: a removed and
+            // re-added account starts as a new sign-in (FeedDefaultMigration).
+            FeedKindStore.typeKey(pubkey),
+            FeedKindStore.relayUrlKey(pubkey),
+            FeedKindStore.relaySetKey(pubkey),
+            FeedDefaultMigration.markerKey(pubkey),
             // Safety: mute lists, blocked users, muted threads, mute event timestamp
             "muted_words_\(pubkey)",
             "blocked_pubkeys_\(pubkey)",
