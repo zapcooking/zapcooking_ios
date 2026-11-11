@@ -120,3 +120,9 @@ and `LiveStreamReviewTests` green. No `project.pbxproj` diff
 - No line is written if the app is killed while a load is unsettled.
 - Device pass: pick Follows after an OnlyFood landing on a fresh install,
   confirm the list fills, and read the `follows-sync` line in Console.
+
+## Device pass (Seth, 2026-11-11): passed
+Recorded after merge (66bd7a2). Follows load, refresh, feed switching,
+notifications, DMs, threads and profiles passed. This record does not
+say whether the `follows-sync` Console line (the device-pass item under
+Not gated) was read.
