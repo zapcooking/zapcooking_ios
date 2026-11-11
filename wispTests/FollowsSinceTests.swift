@@ -152,7 +152,8 @@ import Testing
         }
     }
 
-    /// The picker path: land on OnlyFood (the default), which stores
+    /// The picker path: land on OnlyFood (an existing account's stored
+    /// feed; new accounts land on Fresh since #209), which stores
     /// strangers' notes, then pick Follows with no follow notes cached.
     /// `selectFollows` → `reseedFollowsFeed` → `refresh()`.
     @Test func pickingFollowsAfterOnlyFood_asksForTheWholeDefaultWindow() async throws {
@@ -160,6 +161,9 @@ import Testing
         let account = makeAccount()
         let stranger = try await persistNote()
         let captured = Captured()
+        // Since #209 a new account lands on Fresh, so the OnlyFood landing
+        // this test is about is the stored choice of an existing account.
+        FeedKindStore.persist(.onlyFood, pubkey: account.me)
         let vm = makeVM(account, captured: captured)
         #expect(vm.currentKind == .onlyFood)
 
