@@ -4,10 +4,11 @@ import XCTest
 /// changes"): a brand-new account's first screen, the feed picker, the
 /// last-visit divider and the finish line, on iPhone and on iPad in both
 /// orientations. Drives the real app through `FreshScreenshotHarness`: a
-/// watch-only account (it cannot sign, so nothing is published) reading the
-/// live feed relay read-only. Network-dependent and slow, so it is not part
-/// of the gate; run it with `-only-testing:wispUITests/FreshScreenshotsUITests`
-/// on a simulator with no saved account.
+/// watch-only account (it cannot sign, so nothing is published) and invented
+/// content (`FreshScreenshotFixtures`, an in-app relay; no real user). Slow,
+/// so it is not part of the gate; run it with
+/// `-only-testing:wispUITests/FreshScreenshotsUITests` on a simulator with no
+/// saved account.
 final class FreshScreenshotsUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = true
@@ -17,7 +18,7 @@ final class FreshScreenshotsUITests: XCTestCase {
 
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-FreshScreenshotAccount"] + extra
+        app.launchArguments = ["-FreshScreenshotAccount", "-FreshScreenshotFixtures"] + extra
         app.launch()
         return app
     }
@@ -36,7 +37,7 @@ final class FreshScreenshotsUITests: XCTestCase {
         let picker = app.buttons["feed-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 60), "feed never appeared:\n\(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Fresh"].waitForExistence(timeout: 10), "landing feed is not Fresh")
-        sleep(8)
+        sleep(3)
     }
 
     /// The system's notification prompt covers the feed on first launch.
@@ -51,12 +52,17 @@ final class FreshScreenshotsUITests: XCTestCase {
     private func bring(_ element: XCUIElement, in app: XCUIApplication,
                        low: CGFloat, high: CGFloat, max: Int = 80) -> Bool {
         let window = app.windows.firstMatch.frame
+        var lastY: CGFloat?
         for _ in 0..<max {
             if element.exists {
                 let y = element.frame.midY / window.height
                 if y >= low && y <= high { return true }
+                // The end of the list: it can't go any higher.
+                if y > high, let lastY, abs(lastY - y) < 0.01 { return true }
+                lastY = y
                 drag(app, by: y > high ? -0.25 : 0.15)
             } else {
+                lastY = nil
                 drag(app, by: -0.35)
             }
         }
@@ -87,10 +93,10 @@ final class FreshScreenshotsUITests: XCTestCase {
             shot("picker", orientation)
             app.terminate()
 
-            // 2. The divider: the last visit was 16 hours ago.
+            // 2. The divider: the last visit was 16 hours ago (six newer posts).
             app = launch(["-FreshVisitMarkSecondsAgo", "57600"])
             waitForFresh(app)
-            let divider = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'new since your last visit'")).firstMatch
+            let divider = app.descendants(matching: .any)["fresh-new-since-divider"].firstMatch
             if bring(divider, in: app, low: 0.35, high: 0.6) {
                 sleep(3)
                 shot("divider", orientation)
@@ -99,11 +105,11 @@ final class FreshScreenshotsUITests: XCTestCase {
             }
             app.terminate()
 
-            // 3. The finish line: an 8-hour window ends after one short page.
-            app = launch(["-FreshDebugWindowSeconds", "28800"])
+            // 3. The finish line: the fixture window is one short page.
+            app = launch([])
             waitForFresh(app)
-            let caughtUp = app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'caught up'")).firstMatch
-            if bring(caughtUp, in: app, low: 0.2, high: 0.4, max: 120) {
+            let caughtUp = app.descendants(matching: .any)["fresh-caught-up"].firstMatch
+            if bring(caughtUp, in: app, low: 0.2, high: 0.45, max: 120) {
                 sleep(4)
                 shot("finish-line", orientation)
             } else {

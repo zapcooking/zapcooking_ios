@@ -2,8 +2,8 @@ import Foundation
 
 #if DEBUG
 /// DEBUG-only launch arguments for `FreshScreenshotsUITests` (AGENTS.md
-/// "Screenshots for UI changes"): the real app, the live feed relay
-/// (read-only, as always), and a brand-new account that can't publish.
+/// "Screenshots for UI changes"): the real app with a brand-new account that
+/// can't publish, and invented content.
 ///
 /// - `-FreshScreenshotAccount`: when no account is saved, create a
 ///   **watch-only** account with a random pubkey (it holds no private key, so
@@ -14,12 +14,11 @@ import Foundation
 /// - `-FreshScreenshotNewAccount` (with the above): create a new one even
 ///   when an account is saved, for a brand-new account's first screen in each
 ///   orientation.
+/// - `-FreshScreenshotFixtures`: Fresh reads `FreshScreenshotFixtures` (six
+///   invented cooks, served by an in-app relay) instead of the feed relay;
+///   no real user appears and nothing is stored.
 /// - `-FreshVisitMarkSecondsAgo N`: set that account's last-visit mark to
 ///   now − N, so the "new since your last visit" divider has a place to go.
-/// - `-FreshDebugWindowSeconds N`: the feed relay client asks for the last N
-///   seconds instead of 14 days, so a short window reaches the finish line
-///   without scrolling through the whole free window. Only ever narrower
-///   than the relay's window; never sent in a release build.
 nonisolated enum FreshScreenshotHarness {
     static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
@@ -30,11 +29,7 @@ nonisolated enum FreshScreenshotHarness {
         return Int(arguments[i + 1])
     }
 
-    /// A narrower feed window for the screenshot run, or nil.
-    static var windowSecondsOverride: Int? {
-        guard isOn, let seconds = intArgument("-FreshDebugWindowSeconds"), seconds > 0 else { return nil }
-        return min(seconds, FreshRelayClient.freeWindowSeconds)
-    }
+    static var usesFixtures: Bool { isOn && arguments.contains("-FreshScreenshotFixtures") }
 
     /// Returns the new watch-only account when one was created (the caller
     /// routes to it), nil otherwise. Applies the visit-mark argument to the
@@ -55,6 +50,13 @@ nonisolated enum FreshScreenshotHarness {
             FreshLastVisit.shared.resetSession()
         }
         return created
+    }
+}
+extension FreshFeedViewModel {
+    /// The screenshot run's view model (invented content), else nil.
+    @MainActor
+    static func screenshotFixture(pubkey: String) -> FreshFeedViewModel? {
+        FreshScreenshotHarness.usesFixtures ? FreshScreenshotFixtures.viewModel(pubkey: pubkey) : nil
     }
 }
 #endif

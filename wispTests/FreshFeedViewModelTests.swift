@@ -964,4 +964,20 @@ import Testing
         for kind in [1, 30023, 1068] { #expect(FreshFeedViewModel.showsPendingRow(kind: kind)) }
         for kind in [20, 21, 22, 6] { #expect(!FreshFeedViewModel.showsPendingRow(kind: kind)) }
     }
+
+    // MARK: - #209 follow-ups
+
+    @Test("the recipe row leaves out recipes the feed already shows, by id and by coordinate")
+    func recipeRowExcludesFeedRecipes() async throws {
+        let a = try Author(), b = try Author()
+        let rig = makeRig()
+        let inFeed = try a.longForm(Self.now - 100, d: "bisque", recipe: true)
+        _ = try await start(rig, page: [inFeed, try b.event(Self.now - 200)])
+        let recipesReq = try #require(await eventually { self.reqs(rig.transport.latest).contains { $0.kinds == [30023] } } ? reqs(rig.transport.latest).first { $0.kinds == [30023] } : nil)
+        let olderEdit = try a.longForm(Self.now - 30 * Self.day, d: "bisque", recipe: true)   // same coordinate
+        let other = try b.longForm(Self.now - 40 * Self.day, d: "bread", recipe: true)
+        answer(rig.transport, recipesReq, [inFeed, olderEdit, other])
+        #expect(await eventually { rig.vm.recipePicks.map(\.id) == [other.id] })
+        #expect(rig.vm.recipePool.count == 2, "the pool keeps one per coordinate; the row filters")
+    }
 }

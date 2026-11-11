@@ -230,15 +230,7 @@ actor FreshRelayClient {
 
     /// The start of the free window, by the corrected clock. The relay's own
     /// clock decides; a disagreement shows up as `.floor` on a page.
-    var floor: Int { now() - Self.windowSeconds }
-
-    /// The free window, or (DEBUG screenshot runs only) a narrower one.
-    nonisolated static var windowSeconds: Int {
-        #if DEBUG
-        if let override = FreshScreenshotHarness.windowSecondsOverride { return override }
-        #endif
-        return freeWindowSeconds
-    }
+    var floor: Int { now() - Self.freeWindowSeconds }
 
     // MARK: - Feed page
 

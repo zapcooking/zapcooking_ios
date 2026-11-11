@@ -165,7 +165,12 @@ struct MainView: View {
         _searchVM = State(initialValue: SearchViewModel(keypair: keypair))
         _walletStore = State(initialValue: WalletStore(keypair: keypair))
         _onlyfoodFeedVM = State(initialValue: OnlyFoodFeedViewModel(pubkey: keypair.pubkey))
+        #if DEBUG
+        _freshFeedVM = State(initialValue: FreshFeedViewModel.screenshotFixture(pubkey: keypair.pubkey)
+            ?? FreshFeedViewModel(pubkey: keypair.pubkey))
+        #else
         _freshFeedVM = State(initialValue: FreshFeedViewModel(pubkey: keypair.pubkey))
+        #endif
         // Read once here, so changing the setting applies on the next launch
         // (or the next login) instead of switching tabs mid-session.
         _selectedTab = State(initialValue: AppSettings.shared.startupScreen == .feed ? .feed : .recipes)
@@ -1884,6 +1889,7 @@ struct MainView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: FreshFeedLayout.maxContentWidth)
             .frame(maxWidth: .infinity)
         }
         .refreshable { await freshFeedVM.refreshAndWait() }
@@ -1952,6 +1958,9 @@ struct MainView: View {
                         FreshRecipeRow(recipes: freshFeedVM.recipePicks)
                     }
                 }
+                // Readable width on iPad, centred (no effect on iPhone).
+                .frame(maxWidth: FreshFeedLayout.maxContentWidth)
+                .frame(maxWidth: .infinity)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .refreshable { await freshFeedVM.refreshAndWait() }

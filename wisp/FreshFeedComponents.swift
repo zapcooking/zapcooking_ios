@@ -5,6 +5,14 @@ import SwiftUI
 // anywhere in Fresh, mentions membership, logging in or older posts
 // (`FreshCopyTests` scans for it).
 
+/// Layout for the Fresh list.
+enum FreshFeedLayout {
+    /// The list's maximum content width, centred: on iPad (landscape most of
+    /// all) one post would otherwise fill the screen. iPhones are narrower,
+    /// so nothing changes there. Close to UIKit's readable content width.
+    static let maxContentWidth: CGFloat = 680
+}
+
 /// "N new since your last visit": a hairline either side of a small label,
 /// placed before the first post the reader already saw.
 struct FreshNewSinceDivider: View {
