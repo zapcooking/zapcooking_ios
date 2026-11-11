@@ -42,4 +42,11 @@ import Testing
         #expect(recipes.events.count == FreshScreenshotFixtures.recipes.count)
         await client.close()
     }
+
+    @Test("every fixture recipe is a recipe by the app's rule (the recipe row takes nothing else)")
+    func fixtureRecipesPassTheRecipeRule() {
+        for recipe in FreshScreenshotFixtures.recipes {
+            #expect(RecipeParser.isRecipe(recipe), "\(RecipeParser.dTag(recipe))")
+        }
+    }
 }
