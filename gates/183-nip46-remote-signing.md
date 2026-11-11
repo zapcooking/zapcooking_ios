@@ -86,3 +86,27 @@ so the diff is needed, but `gate.sh` stops on it. Moving the files under
 
 Not covered by this gate: a device pass against a real NIP-46 signer
 (Clave / Amber / Primal). Nothing hermetic exercises one.
+
+## Merge and device pass (2026-11-10)
+
+**Gate 6 accepted for this PR.** Seth accepted the `project.pbxproj` diff
+for #183: it is the six file registrations above and nothing else. #183 merged
+as b680867.
+
+**Device pass, real remote signer, after the `Signer.swift` fix (c2e39ba).**
+Seth device-tested on 2026-11-10 against a real NIP-46 remote signer. All of
+these passed:
+
+| flow | result |
+|---|---|
+| Sign-in | pass |
+| Post | pass |
+| React | pass |
+| Save recipe | pass |
+| Create list | pass |
+| Mute | pass |
+| Block | pass |
+
+This closes the "not covered" line above. The hermetic regression cover for
+the `created_at` comparison follows in its own PR
+(`RemoteSignerCreatedAtTests`).
