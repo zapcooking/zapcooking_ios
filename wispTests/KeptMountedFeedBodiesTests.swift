@@ -13,7 +13,7 @@ import UIKit
 struct KeptMountedFeedBodiesTests {
 
     @Test func bodyOrder_isAllCasesOrder() {
-        #expect(FeedTabRouting.Body.allCases == [.onlyFood, .general, .liveVideo])
+        #expect(FeedTabRouting.Body.allCases == [.onlyFood, .general, .liveVideo, .fresh])
     }
 
     @Test func eachBody_mountsOnFirstSelection_andKeepsItsScrollView() {
@@ -93,6 +93,7 @@ private func rowCount(_ key: FeedTabRouting.Body) -> Int {
     case .onlyFood: return 60
     case .general: return 40
     case .liveVideo: return 20
+    case .fresh: return 30
     }
 }
 
@@ -120,6 +121,7 @@ private struct KeyedHarness: View {
                 case .onlyFood: KeyedList(rows: rowCount(.onlyFood))
                 case .general: KeyedList(rows: rowCount(.general))
                 case .liveVideo: KeyedList(rows: rowCount(.liveVideo))
+                case .fresh: KeyedList(rows: rowCount(.fresh))
                 }
             }
         }

@@ -142,6 +142,8 @@ enum NostrKey {
             "relay_scoreboard_v1_\(pubkey)",
             "relay_list_repair_done_\(pubkey)",
             "latest_feed_ts_\(pubkey)",
+            // Fresh: the device-local "new since your last visit" mark
+            FreshLastVisit.key(pubkey: pubkey),
             // Safety: mute lists, blocked users, muted threads, mute event timestamp
             "muted_words_\(pubkey)",
             "blocked_pubkeys_\(pubkey)",
