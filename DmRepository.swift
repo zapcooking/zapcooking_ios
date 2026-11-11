@@ -23,6 +23,12 @@ final class DmRepository {
     /// Track gift wrap ids we've already processed (across multiple relays). Hydrated
     /// from disk on `bind` so a relay re-stream after restart doesn't re-decrypt.
     private var seenGiftWraps: Set<String> = []
+    /// Wrap ids the signer REFUSED ("Invalid MAC" — spam tagged to us but
+    /// encrypted to someone else, or garbage). Persisted per account: these
+    /// can never decrypt, so a relaunch must not re-request them and ping
+    /// the signer app again.
+    private var refusedGiftWraps: Set<String> = []
+    private nonisolated static let refusedWrapsKeyPrefix = "dm_refused_wraps_"
     /// rumorId → (conversationKey, messageId), used to attach reactions/zaps.
     private var rumorIndex: [String: (convKey: String, msgId: String)] = [:]
     /// Reactions whose target message hasn't arrived yet (gift wraps stream out of
@@ -74,6 +80,9 @@ final class DmRepository {
         rumorIndex = [:]
         pendingReactions = [:]
         failedGiftWraps = [:]
+        refusedGiftWraps = Set(UserDefaults.standard.stringArray(
+            forKey: Self.refusedWrapsKeyPrefix + activePubkey
+        ) ?? [])
         hydratedFor = ""
     }
 
@@ -237,7 +246,21 @@ final class DmRepository {
 
     /// Read-only check used by the ingest path before attempting (expensive) decrypt.
     func isGiftWrapSeen(_ giftWrapId: String) -> Bool {
-        seenGiftWraps.contains(giftWrapId)
+        seenGiftWraps.contains(giftWrapId) || refusedGiftWraps.contains(giftWrapId)
+    }
+
+    /// Persist a wrap the signer refused. Deterministic failures can never
+    /// succeed, so this survives relaunches — otherwise every launch re-asks
+    /// the signer to decrypt the same spam and re-triggers its notifications.
+    func markGiftWrapRefused(_ giftWrapId: String) {
+        guard refusedGiftWraps.insert(giftWrapId).inserted else { return }
+        seenGiftWraps.insert(giftWrapId)
+        guard !activePubkey.isEmpty else { return }
+        let key = Self.refusedWrapsKeyPrefix + activePubkey
+        var ids = UserDefaults.standard.stringArray(forKey: key) ?? []
+        ids.append(giftWrapId)
+        if ids.count > 1000 { ids = Array(ids.suffix(500)) }
+        UserDefaults.standard.set(ids, forKey: key)
     }
 
     /// Pre-seed dedup for self-wraps we publish, so the relay echo doesn't re-insert.

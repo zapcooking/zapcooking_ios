@@ -905,7 +905,8 @@ private struct LiveChatInputBar: View {
                         .padding(10)
                         .background(Color.wispPrimary, in: Circle())
                 }
-                .disabled(vm.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(vm.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || vm.isSending)
                 .buttonStyle(.plain)
             }
         }
@@ -916,7 +917,7 @@ private struct LiveChatInputBar: View {
 
     private func send() {
         hideKeyboard()
-        vm.sendMessage()
+        Task { await vm.sendMessage() }
     }
 }
 
