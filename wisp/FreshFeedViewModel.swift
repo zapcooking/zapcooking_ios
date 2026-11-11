@@ -109,11 +109,8 @@ final class FreshFeedViewModel {
     /// above it (by id or by coordinate, so another edit of the same recipe
     /// counts as shown), at most `recipeRowLimit`.
     var recipePicks: [NostrEvent] {
-        let shownIds = Set(posts.map(\.id))
-        let shownCoordinates = Set(posts.filter { $0.kind == 30023 }.map(RecipeRepository.coordinate))
-        return Array(recipePool.lazy
-            .filter { !shownIds.contains($0.id) && !shownCoordinates.contains(RecipeRepository.coordinate($0)) }
-            .prefix(Self.recipeRowLimit))
+        // No box cards yet (`freshSpecialsEnabled` is off): nothing taken.
+        FreshRecipeBox.rowPicks(pool: recipePool, feed: posts, boxTaken: [], limit: Self.recipeRowLimit)
     }
     /// This session's previous-visit mark (`FreshLastVisit`).
     private(set) var visitMark: Int?
@@ -380,9 +377,26 @@ final class FreshFeedViewModel {
 
     // MARK: - Paging
 
+    /// `currentIndex` is the appearing row's index in `rows`, which is what
+    /// the list enumerates. Rows also hold the divider (and special cards),
+    /// so the threshold counts the posts up to that row: comparing the row
+    /// index with `posts.count` paged one post early per non-post row above.
     func loadMoreIfNeeded(currentIndex: Int) {
-        guard currentIndex >= posts.count - Self.loadMorePrefetch else { return }
+        guard let position = Self.postPosition(ofRow: currentIndex, in: rows),
+              position >= posts.count - Self.loadMorePrefetch else { return }
         loadMore()
+    }
+
+    /// The 0-based position among posts of the post at `rowIndex`, or nil
+    /// when that row is not a post (the divider, a special card) or is out
+    /// of range.
+    nonisolated static func postPosition(ofRow rowIndex: Int, in rows: [FreshDividedRow<FreshRow>]) -> Int? {
+        guard rows.indices.contains(rowIndex),
+              case .row(let row) = rows[rowIndex], !row.isSpecialCard else { return nil }
+        return rows[..<rowIndex].reduce(0) { count, r in
+            if case .row(let other) = r, !other.isSpecialCard { return count + 1 }
+            return count
+        }
     }
 
     func loadMore() {

@@ -145,6 +145,11 @@ enum NostrKey {
             FollowsSyncCursor.key(pubkey),
             // Fresh: the device-local "new since your last visit" mark
             FreshLastVisit.key(pubkey: pubkey),
+            // Fresh special cards: what this account has been shown
+            // (spotlight posts, recipe-box recipes, spotlight topics)
+            FreshSpecialsStore.shownKey(pubkey),
+            FreshSpecialsStore.recipeBoxSeenKey(pubkey),
+            FreshSpecialsStore.topicHistoryKey(pubkey),
             // Feed choice and the Fresh-default marker: a removed and
             // re-added account starts as a new sign-in (FeedDefaultMigration).
             FeedKindStore.typeKey(pubkey),

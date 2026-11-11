@@ -448,6 +448,43 @@ import Testing
 
     // MARK: - Last visit
 
+    /// The list calls `loadMoreIfNeeded(currentIndex:)` with the row's index
+    /// in `rows` (MainView enumerates `rows`), and rows hold the divider.
+    /// The prefetch threshold is a count of posts: with the divider above,
+    /// the post seven from the end must not page, and the sixth must.
+    @Test("paging counts posts, not rows: with the divider above, the 7th post from the end does not page; the 6th does")
+    func pagingThresholdCountsPostsNotRows() async throws {
+        let a = try Author(), b = try Author()
+        let store = Store()
+        let pubkey = String(repeating: "e", count: 64)
+        // Posts at now-10, now-20, …: the first two are new, so the divider
+        // sits after them, above everything the threshold looks at.
+        store.data[FreshLastVisit.key(pubkey: pubkey)] = String(Self.now - 25)
+        let rig = makeRig(pubkey: pubkey, store: store)
+        let page1 = try (0..<30).map { i in try (i % 2 == 0 ? a : b).event(Self.now - 10 - i * 10) }
+        _ = try await start(rig, page: page1)
+        #expect(await eventually { rig.vm.posts.count == 30 })
+        func rowIndex(_ id: String) -> Int? {
+            rig.vm.rows.firstIndex { row in
+                if case .row(let r) = row { return r.id == id }
+                return false
+            }
+        }
+        let prefetch = FreshFeedViewModel.loadMorePrefetch
+        let seventh = rig.vm.posts[rig.vm.posts.count - prefetch - 1]
+        let sixth = rig.vm.posts[rig.vm.posts.count - prefetch]
+        let seventhRow = try #require(rowIndex(seventh.id))
+        #expect(seventhRow == rig.vm.posts.count - prefetch, "the divider shifts the row index by one")
+        let sent = reqs(rig.transport.latest).count
+
+        rig.vm.loadMoreIfNeeded(currentIndex: seventhRow)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(reqs(rig.transport.latest).count == sent, "paged one post early: the row index was compared with the post count")
+
+        rig.vm.loadMoreIfNeeded(currentIndex: try #require(rowIndex(sixth.id)))
+        #expect(await eventually { self.reqs(rig.transport.latest).count == sent + 1 }, "the 6th post from the end pages")
+    }
+
     @Test("last visit: the divider sits before the first post already seen; the newest shown is stored")
     func lastVisitDivider() async throws {
         let a = try Author(), b = try Author()
