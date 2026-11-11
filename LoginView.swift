@@ -19,6 +19,7 @@ struct LoginView: View {
     /// `PendingAgreement`, not a Bool beside an optional — see its doc.
     @State private var qrScan: PendingAgreement?
     @State private var signUp: PendingAgreement?
+    @State private var remoteSigner: PendingAgreement?
 
     private var isNcryptsec: Bool {
         nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,9 +51,9 @@ struct LoginView: View {
                 HStack(spacing: 12) {
                     Group {
                         if isSecure {
-                            SecureField("nsec1… / ncryptsec1…", text: $nsecInput)
+                            SecureField("nsec, ncryptsec, or bunker://…", text: $nsecInput)
                         } else {
-                            TextField("nsec1… / ncryptsec1…", text: $nsecInput)
+                            TextField("nsec, ncryptsec, or bunker://…", text: $nsecInput)
                         }
                     }
                     .textFieldStyle(.roundedBorder)
@@ -112,22 +113,29 @@ struct LoginView: View {
                 .controlSize(.large)
                 .disabled(nsecInput.isEmpty || isLoading || (isNcryptsec && ncryptsecPassword.isEmpty))
 
-                HStack(spacing: 8) {
-                    Rectangle().fill(.tertiary).frame(height: 1)
-                    Text("OR").font(.caption.bold()).foregroundStyle(.tertiary)
-                    Rectangle().fill(.tertiary).frame(height: 1)
+                Button {
+                    remoteSigner = PendingAgreement(.now())
+                } label: {
+                    nostrSheetOutlinedCapsule("Login with Signer",
+                                              content: NostrSheetAccent.signer,
+                                              border: NostrSheetAccent.signer)
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+
+                Rectangle()
+                    .fill(Color.wispOutline.opacity(0.5))
+                    .frame(height: 1)
+                    .padding(.vertical, 16)
 
                 Button {
                     signUp = PendingAgreement(.now())
                 } label: {
-                    Label("Create a new account", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
+                    nostrSheetOutlinedCapsule("Create new account",
+                                              content: NostrSheetAccent.createText,
+                                              border: NostrSheetAccent.createBorder)
                 }
-                .buttonStyle(.bordered)
-                .tint(.wispPrimary)
-                .controlSize(.large)
+                .buttonStyle(.plain)
 
                 TermsAgreementNotice()
                     .padding(.top, 4)
@@ -167,6 +175,15 @@ struct LoginView: View {
                     onLogin(kp)
                 }
             }
+            .sheet(item: $remoteSigner) { pending in
+                Nip46LoginView(
+                    onLogin: { kp in
+                        remoteSigner = nil
+                        onLogin(kp)
+                    },
+                    acceptance: pending.acceptance
+                )
+            }
         }
         .presentationDetents([.large])
         // Paint the sheet's container background so the wisp color is in
@@ -178,6 +195,27 @@ struct LoginView: View {
         .onDisappear {
             nsecPasteAllowed = false
             decryptTask?.cancel()
+        }
+    }
+
+    /// A `bunker://` link was typed or scanned into the key field. Connect
+    /// it inline (spinner while the user approves in their signer), with the
+    /// same friendly diagnosis the dedicated screen gives.
+    private func connectSignerURI(_ input: String, acceptance: TermsAcceptance) {
+        if let problem = Nip46LoginViewModel.bunkerInputProblem(input) {
+            error = problem
+            return
+        }
+        isLoading = true
+        Task {
+            do {
+                let keypair = try await Nip46LoginViewModel.logIn(bunkerURI: input, acceptance: acceptance)
+                isLoading = false
+                onLogin(keypair)
+            } catch let e {
+                isLoading = false
+                error = Nip46LoginViewModel.message(for: e)
+            }
         }
     }
 
@@ -211,7 +249,12 @@ struct LoginView: View {
             return
         }
 
-        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, or hex private key."
+        if Nip46LoginViewModel.isSignerURI(trimmed) {
+            connectSignerURI(trimmed, acceptance: acceptance)
+            return
+        }
+
+        error = "Unrecognized format. Scan an nsec, ncryptsec, npub, nprofile, bunker link, or hex private key."
     }
 
     private func login() {
@@ -222,6 +265,11 @@ struct LoginView: View {
         // carry a trailing newline, which fails parseNsec on add-account
         // while the QR path and first-run login both trim and succeed.
         let input = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Nip46LoginViewModel.isSignerURI(input) {
+            connectSignerURI(input, acceptance: acceptance)
+            return
+        }
 
         if isNcryptsec {
             let password = ncryptsecPassword

@@ -10,6 +10,13 @@ enum Nip38 {
     static let kindUserStatus: Int = 30315
     static let dTagGeneral: String = "general"
 
+    /// Tags for a kind-30315 status event, for signing via `Signer`.
+    static func buildStatusTags(dTag: String = dTagGeneral) -> [[String]] {
+        var tags: [[String]] = [["d", dTag]]
+        if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
+        return tags
+    }
+
     /// Build & sign a kind-30315 status event. Empty content is a valid
     /// "clear" — relays will replace any earlier 30315/general event.
     static func buildStatus(
@@ -19,14 +26,12 @@ enum Nip38 {
         dTag: String = dTagGeneral,
         createdAt: Int = NostrClock.now()
     ) throws -> NostrEvent {
-        var tags: [[String]] = [["d", dTag]]
-        if let clientTag = NostrEvent.clientTagIfEnabled() { tags.append(clientTag) }
-        return try NostrEvent.sign(
+        try NostrEvent.sign(
             privkey32: privkey32,
             pubkey: pubkey,
             kind: kindUserStatus,
             createdAt: createdAt,
-            tags: tags,
+            tags: buildStatusTags(dTag: dTag),
             content: content
         )
     }

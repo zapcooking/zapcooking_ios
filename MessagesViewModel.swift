@@ -51,7 +51,10 @@ final class MessagesViewModel {
         //    "give me everything you have for kind:1059 #p:me", which is the only correct
         //    way to fetch DM history. Mirrors Android's `subscribeDmsAndNotifications`.
         let filter = NostrFilter(kinds: [Nip17.Kind.giftWrap], pTags: [keypair.pubkey])
-        let sub = RelayPool.subscribe(relays: relays, filter: filter, id: "dms")
+        // Post-yield dedupe: budget/cooldown-skipped wraps must redeliver on
+        // later REQs; DmRepository's seen/refused sets own the retry decision.
+        let sub = RelayPool.subscribe(relays: relays, filter: filter, id: "dms",
+                                      dedupeBeforeYield: false)
         subscription = sub
 
         listenerTask = Task { [weak self] in
