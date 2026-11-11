@@ -101,7 +101,20 @@ final class FreshFeedViewModel {
     private(set) var finishLine: FreshFinishLine = .none
     /// The recipe row after the caught-up card (newest first, one per
     /// coordinate, the reader's own rules applied, old edits kept).
-    private(set) var recipePicks: [NostrEvent] = []
+    /// Recipes from the relay, newest first, one per coordinate, filtered;
+    /// `recipePicks` is what of it the row shows.
+    private(set) var recipePool: [NostrEvent] = []
+
+    /// The recipe row: the pool minus any recipe already shown in the feed
+    /// above it (by id or by coordinate, so another edit of the same recipe
+    /// counts as shown), at most `recipeRowLimit`.
+    var recipePicks: [NostrEvent] {
+        let shownIds = Set(posts.map(\.id))
+        let shownCoordinates = Set(posts.filter { $0.kind == 30023 }.map(RecipeRepository.coordinate))
+        return Array(recipePool.lazy
+            .filter { !shownIds.contains($0.id) && !shownCoordinates.contains(RecipeRepository.coordinate($0)) }
+            .prefix(Self.recipeRowLimit))
+    }
     /// This session's previous-visit mark (`FreshLastVisit`).
     private(set) var visitMark: Int?
     private(set) var tailStatus: FreshTailStatus = .idle
@@ -137,6 +150,8 @@ final class FreshFeedViewModel {
     // MARK: Tunables
 
     nonisolated static let recipeRowLimit = 12
+    /// How many recipes are kept for the row, before excluding the feed's.
+    nonisolated static let recipePoolLimit = 60
     /// Paging starts this many rows before the end.
     nonisolated static let loadMorePrefetch = 6
     /// Waits before each in-foreground revive of a lost tail. The last value
@@ -518,10 +533,12 @@ final class FreshFeedViewModel {
             if let kept = byCoordinate[coordinate], kept.createdAt >= event.createdAt { continue }
             byCoordinate[coordinate] = event
         }
-        recipePicks = Array(FreshRelayClient.newestFirst(Array(byCoordinate.values)).prefix(Self.recipeRowLimit))
+        // Kept beyond the row's limit so recipes excluded for being in the
+        // feed leave room for others.
+        recipePool = Array(FreshRelayClient.newestFirst(Array(byCoordinate.values)).prefix(Self.recipePoolLimit))
         recipesLoaded = answer.outcome == .answered
         recipeTask = nil
-        observeProfiles(in: recipePicks)
+        observeProfiles(in: recipePool)
     }
 
     // MARK: - Tail
@@ -792,7 +809,7 @@ final class FreshFeedViewModel {
         newPostsCount = pendingNew.count
         pillDismissedAt = min(pillDismissedAt, newPostsCount)
         ownPosts = ownPosts.filter { !isDeleted($0.value) }
-        recipePicks.removeAll(where: isDeleted)
+        recipePool.removeAll(where: isDeleted)
         emit()
     }
 
@@ -807,7 +824,7 @@ final class FreshFeedViewModel {
         newPostsCount = pendingNew.count
         pillDismissedAt = min(pillDismissedAt, newPostsCount)
         ownPosts = ownPosts.filter { !isHiddenLocally($0.value) }
-        recipePicks.removeAll(where: isHiddenLocally)
+        recipePool.removeAll(where: isHiddenLocally)
         emit()
     }
 

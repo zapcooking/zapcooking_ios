@@ -187,12 +187,39 @@ struct ContentView: View {
                     currentScreen = .onboarding
                 }
             }
+            // The Fresh default for new users: accounts already here keep
+            // their feed. After the registration above (older accounts join
+            // the list there), before any sign-in can add a new account.
+            runFeedDefaultMigration()
+            #if DEBUG
+            // `-FreshScreenshotAccount` (FreshScreenshotsUITests): a new
+            // watch-only account, created after the write so it is a new
+            // sign-in.
+            if let created = FreshScreenshotHarness.prepare(existing: keypair) {
+                keypair = created
+                currentScreen = .loading
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            runFeedDefaultMigration()
         }
         .onChange(of: keypair?.pubkey) { _, newPubkey in
             if let pk = newPubkey {
                 AppSettings.shared.loadQuickZapSettings(for: pk)
             }
         }
+    }
+}
+
+extension ContentView {
+    /// `FeedDefaultMigration`: a no-op once done, and while protected data
+    /// is unavailable (retried when it becomes available).
+    func runFeedDefaultMigration() {
+        FeedDefaultMigration.runIfNeeded(
+            accounts: NostrKey.accounts(),
+            protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable
+        )
     }
 }
 

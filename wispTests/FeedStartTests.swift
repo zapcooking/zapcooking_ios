@@ -54,6 +54,9 @@ struct FeedStartTests {
 
     @Test func onlyFoodLanding_startTwice_runsSharedSetupOnce() async {
         let pk = freshPubkey()
+        // An OnlyFood landing (Fresh is the default for new sign-ins now).
+        UserDefaults.standard.set("ONLY_FOOD", forKey: FeedKindStore.typeKey(pk))
+        defer { UserDefaults.standard.removeObject(forKey: FeedKindStore.typeKey(pk)) }
         let (vm, calls) = makeVM(pubkey: pk)
         #expect(vm.currentKind == .onlyFood)
 

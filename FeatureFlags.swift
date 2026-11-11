@@ -38,9 +38,10 @@ enum FeatureFlags {
     /// "Fresh feed relay"), as an entry in the feed picker. Operational, not
     /// a compliance switch: Fresh is free tier only and never logs in. While
     /// `false` the picker has no Fresh entry and a stored `FRESH` landing
-    /// falls back to the default. The default-feed rule for new users is a
-    /// later PR.
-    static let freshFeedEnabled: Bool = false
+    /// falls back to OnlyFood. On: Fresh leads the picker and is the landing
+    /// feed for accounts that sign in after this build
+    /// (`FeedDefaultMigration`); accounts already on the device keep theirs.
+    static let freshFeedEnabled: Bool = true
 
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
