@@ -66,3 +66,15 @@ the list can't scroll it higher).
   an injected value, not by a real pre-unlock launch.
 - The first live-relay screenshots stay in this branch's history (a4d59f0);
   a squash merge leaves them out of main.
+
+## Device pass (Seth, 2026-11-11, iPhone): passed
+Recorded after merge (08d2845). On iPhone:
+- An existing account kept its feed after the update (the one-time
+  `FeedDefaultMigration` write held).
+- A new account landed on Fresh.
+- Paging, the finish line, the new-posts pill, Report, Block, own post,
+  own reply, delete, offline refresh and feed switching passed.
+
+The "No device pass" line under Not gated is superseded by this section.
+The device pass was iPhone only; iPad was covered by the screenshots
+(Gate 3), not by hand.
