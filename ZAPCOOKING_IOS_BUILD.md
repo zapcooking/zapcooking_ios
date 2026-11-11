@@ -718,6 +718,51 @@ Kinds 7 / 9735 / 1 replies by `#e`: none — engagement does not come from
 this relay either. Kind 1985 (topic labels) → `CLOSED "auth-required: topic
 labels is for Zap Cooking members; …"`. Kinds 3 / 10002: none.
 
+**Spotlight supply (probed 2026-11-11 12:35 UTC).** One socket, no key:
+the client sent only `REQ` and `CLOSE` (90 frames). One `AUTH` challenge
+arrived and was left unanswered. The probe made one feed request,
+`{kinds:[1,30023,1068], since: now−14d, limit: 200}`, which returned 188
+posts after web's `isOldEdit` rule, newest first. It then made one preview
+per leaf topic (`search: "topic:<slug>"`) for all 44 leaves of the relay's
+`topics.json` (feed-relay 3d1e5db). Every preview ended in `EOSE`; none
+answered `invalid:`.
+
+- Preview sizes: 37 topics returned 5 posts, one returned 4 and one 3,
+  three returned 1, and two returned 0 (`sauerkraut`, `foraging`). That is
+  195 posts, 152 distinct; 34 posts belong to more than one topic. Kinds:
+  147 kind 1 and 48 kind 30023.
+- The first 30 / 60 / 90 feed posts reached back 13 / 39 / 65 hours.
+- "Fills" means three posts left by distinct authors after the feed posts
+  are excluded (web `spotlightPosts`).
+
+| Feed posts on screen | Preview posts already in them | Topics that fill a 3-post spotlight | Spotlights with no post repeated across cards |
+|---|---|---|---|
+| first 30 | 35 / 195 | 32 / 44 | 26 |
+| first 60 | 76 / 195 | 19 / 44 | 17 |
+| first 90 | 100 / 195 | 14 / 44 | 13 |
+
+The last column counts cards built one after another. Each card also
+excludes the posts earlier cards showed, and two cards in a row never come
+from the same parent group.
+
+- At the first-30 cut, 23 topics had no preview post in the feed and two
+  (`vegetables`, `desserts`) had all five there. At the first-90 cut, ten
+  topics had all five in the feed.
+- Some topics can't fill even with nothing on screen, because their posts
+  come from too few authors (one post per author): `wine` (5 posts, 0 in
+  the feed), `cookies`, `vegan` and `homesteading`.
+- The rhythm asks for about one spotlight per 16 posts (alternating with
+  the recipe box): about 1 in 30 posts, 3 in 60, 5 in 90. Supply covers
+  that on a first visit at every depth.
+- Repeat visits were simulated on the same snapshot, with no new posts and
+  the shown-state carried over. A reader who scrolls 90 posts gets 5/5,
+  5/5, 3/5, then 0/5 spotlights. Readers who stop at 30 or 60 get their
+  1 or 3 spotlights on all five simulated visits. In practice the relay
+  adds about 44 posts a day (616 in 14 days), which refills previews.
+- This is one snapshot, not a distribution. A thin topic costs one preview
+  request and is marked used, and a spotlight build tries at most four
+  topics.
+
 **Not measured** (needs a member login, which iOS never performs): the
 `restricted:` close, full topic feeds, history, labels.
 
@@ -736,6 +781,14 @@ labels is for Zap Cooking members; …"`. Kinds 3 / 10002: none.
 - Web's `isOldEdit` rule is ported unchanged.
 - v1 has no topic chip row and no topic screen: topic previews feed
   spotlight cards only.
+- Special cards (Seth, 2026-11-11). Behind `freshSpecialsEnabled`, which
+  is off.
+  - Already-shown state is per account and in the account wipe list.
+  - A card whose anchor post is hidden moves up one post.
+  - Spotlight posts get Report and Block.
+  - A topic that answers `invalid:` counts as used.
+  - Box cards and the finish-line recipe row exclude each other's recipes.
+  - No chip row, and no topic preview screen in this version.
 - Nothing about viewing leaves the device.
 
 The probe's raw frames were not committed. To re-measure, open a plain
