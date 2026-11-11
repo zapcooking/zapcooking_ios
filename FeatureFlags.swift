@@ -48,7 +48,8 @@ enum FeatureFlags {
     /// free tier only: no memory cards, no membership copy, no login. While
     /// `false` nothing places a card, fetches the topic list or asks for a
     /// topic preview, and the Fresh list is exactly as before.
-    static let freshSpecialsEnabled: Bool = false
+    /// Nonisolated: the topic list (an actor) reads it.
+    nonisolated static let freshSpecialsEnabled: Bool = false
 
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
