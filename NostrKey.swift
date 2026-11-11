@@ -141,7 +141,8 @@ enum NostrKey {
             "follow_pubkeys_ts_\(pubkey)",
             "relay_scoreboard_v1_\(pubkey)",
             "relay_list_repair_done_\(pubkey)",
-            "latest_feed_ts_\(pubkey)",
+            "latest_feed_ts_\(pubkey)",  // no longer written (#188); older installs still hold it
+            FollowsSyncCursor.key(pubkey),
             // Fresh: the device-local "new since your last visit" mark
             FreshLastVisit.key(pubkey: pubkey),
             // Feed choice and the Fresh-default marker: a removed and

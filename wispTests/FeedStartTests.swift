@@ -37,7 +37,10 @@ struct FeedStartTests {
             queryIndexers: { _ in
                 calls.indexerQueries += 1
                 return []
-            }
+            },
+            openFollowsSubscription: { _, id, _ in RelaySubscription(id: id) },
+            ensureProfiles: { _ in [:] },
+            observeMissingProfiles: { _ in }
         )
         let kp = Keypair(privkey: String(repeating: "1", count: 64), pubkey: pubkey)
         return (FeedViewModel(keypair: kp, services: services), calls)

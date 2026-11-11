@@ -248,7 +248,12 @@ enum RelayPool {
     /// Persistent outbox-routed subscription: one multi-filter REQ per relay (so a
     /// relay with >200 routed authors gets one connection and one REQ). The home
     /// feed uses this.
-    static func subscribe(queries: [RelayQuery], id: String) -> RelaySubscription {
+    ///
+    /// `observer` hears this subscription's deliveries and backlog ends
+    /// (`RelayBacklogObserver`). The Follows feed uses it to know when a
+    /// load has settled (#188).
+    static func subscribe(queries: [RelayQuery], id: String,
+                          observer: RelayBacklogObserver? = nil) -> RelaySubscription {
         let sub = RelaySubscription(id: id)
         var relayReqs: [(url: URL, req: String)] = []
         for query in queries {
@@ -256,9 +261,18 @@ enum RelayPool {
             let joined = query.filters.map { $0.toJSON() }.joined(separator: ",")
             relayReqs.append((url, "[\"REQ\",\"\(id)\",\(joined)]"))
         }
-        let sink = RelaySink(onEvent: { [weak sub] event, relay in
-            sub?.deliver(event: event, relayUrl: relay)
-        })
+        let sink = RelaySink(
+            onEvent: { [weak sub] event, relay in
+                observer?.delivered(event, from: relay)
+                sub?.deliver(event: event, relayUrl: relay)
+            },
+            onEose: { [weak sub] relay in
+                observer?.answered(relayUrl: relay, streamCount: sub?.yieldedCount ?? 0)
+            },
+            onClosed: { [weak sub] relay, reason in
+                observer?.rejected(relayUrl: relay, reason: reason, streamCount: sub?.yieldedCount ?? 0)
+            }
+        )
         Task { await RelayConnectionPool.shared.register(subId: id, relays: relayReqs, sink: sink) }
         return sub
     }
@@ -380,6 +394,25 @@ struct RelayQuery: Sendable {
     }
 }
 
+/// Hears one persistent subscription from the relays' receive loops: off the
+/// main actor, synchronously, and in wire order per relay, so every event a
+/// relay sent before its `EOSE` is reported before that relay's `answered`.
+nonisolated protocol RelayBacklogObserver: Sendable {
+    /// Every event a relay sent for the subscription, duplicates included.
+    func delivered(_ event: NostrEvent, from relayUrl: String)
+    /// The relay ended the backlog with `EOSE`. May repeat (a reconnect
+    /// re-issues the REQ). A relay that never connects never answers.
+    /// `streamCount` is how many elements the subscription's `events` stream
+    /// had yielded at that moment (`RelaySubscription.yieldedCount`): every
+    /// event this relay sent before its `EOSE` is among them.
+    func answered(relayUrl: String, streamCount: Int)
+    /// The relay refused or ended the request with a `CLOSED` other than
+    /// `auth-required:` (that one is retried after AUTH and never reaches
+    /// here). `reason` is the relay's message, machine-readable prefix
+    /// included. The pool does not re-issue a closed REQ.
+    func rejected(relayUrl: String, reason: String, streamCount: Int)
+}
+
 // MARK: - RelaySubscription
 
 /// A long-lived multi-relay subscription. Events from any relay are deduplicated
@@ -394,6 +427,7 @@ final class RelaySubscription: @unchecked Sendable {
     private var seen = Set<String>()
     private var reqText = ""
     private var cancelled = false
+    private var yielded = 0
     /// When false, ids are recorded only AFTER yielding, so a consumer that
     /// skips an event (DmGiftWrapIngestor budget/cooldown) sees it again on
     /// the next REQ; its own seen/refused sets own the retry decision.
@@ -419,16 +453,26 @@ final class RelaySubscription: @unchecked Sendable {
     func deliver(event: NostrEvent, relayUrl: String) {
         lock.lock()
         let isNew = dedupeBeforeYield ? seen.insert(event.id).inserted : true
-        let live = !cancelled
-        lock.unlock()
-        if !live { return }
-        if isNew || !dedupeBeforeYield {
-            continuation.yield((event, relayUrl))
-            if !dedupeBeforeYield {
-                // Record after yield (see dedupeBeforeYield).
-                lock.lock(); seen.insert(event.id); lock.unlock()
-            }
+        guard !cancelled, isNew || !dedupeBeforeYield else {
+            lock.unlock()
+            return
         }
+        // Count and yield under the lock, so `yieldedCount` is always exactly
+        // the number of elements ahead of the next one on `events`, whichever
+        // relay's receive loop gets here first. `yield` only enqueues.
+        yielded += 1
+        continuation.yield((event, relayUrl))
+        if !dedupeBeforeYield {
+            // Record after yield (see dedupeBeforeYield).
+            seen.insert(event.id)
+        }
+        lock.unlock()
+    }
+
+    /// How many elements `events` has yielded so far.
+    var yieldedCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return yielded
     }
 
     /// Re-broadcast the REQ on every live socket — defeats silent server-side
