@@ -397,7 +397,10 @@ struct FreshSpotlightLoaderTests {
     @Test("dispose cancels the pending retry and stops later builds")
     func disposeStops() async {
         let rig = Self.rig()
-        await rig.loader.prepare()  // all empty → thin… retry in 15 s
+        for slug in ["sourdough", "bread", "coffee", "tea"] {
+            rig.previews.answers[slug] = FreshAnswer(events: [], outcome: .timedOut)
+        }
+        await rig.loader.prepare()  // timed out → retry in 15 s
         #expect(rig.timers.delays == [15])
         rig.loader.dispose()
         #expect(rig.timers.delays.isEmpty)
@@ -410,12 +413,69 @@ struct FreshSpotlightLoaderTests {
     func onChangeFires() async {
         let changes = Box(0)
         let rig = Self.rig(onChange: { changes.value += 1 })
+        for slug in ["sourdough", "bread", "coffee", "tea"] {
+            rig.previews.answers[slug] = FreshAnswer(events: [], outcome: .timedOut)
+        }
         await rig.loader.prepare()
         #expect(changes.value == 1)
         for slug in ["sourdough", "bread", "coffee", "tea"] { rig.previews.posts(slug) }
         rig.timers.fireAll()
         await Self.eventually { changes.value == 2 }
         #expect(changes.value == 2)
+    }
+
+    // MARK: - Review fixes (#216)
+
+    @Test("a kick during a refusal hold doesn't hold a far slot: the turn can go to a recipe")
+    func kickDuringHoldIsNotAvailable() async {
+        let rig = Self.rig()
+        for slug in ["sourdough", "bread", "coffee", "tea"] {
+            rig.previews.answers[slug] = FreshAnswer(events: [], outcome: .floor)
+        }
+        await rig.loader.prepare()
+        #expect(rig.loader.previewHoldLeft() == 60)
+        rig.loader.kick()
+        #expect(!rig.loader.isAvailable(strict: true))
+        await Self.eventually(0.2) { false }
+        #expect(rig.previews.asked.count == 1, "nothing asked during the hold")
+        #expect(rig.timers.delays == [60.05], "the hold's own timer stays the only one")
+    }
+
+    @Test("when the only topics left share the last spotlight's parent group, spotlights are out (no 15 s loop)")
+    func onlyLastParentLeftGoesOut() async {
+        let oneGroup = [Self.twoGroups[0]]  // baking: sourdough, bread
+        let rig = Self.rig(groups: oneGroup)
+        for slug in ["sourdough", "bread"] { rig.previews.posts(slug) }
+        await rig.loader.prepare()
+        #expect(rig.loader.ready != nil)
+        _ = rig.loader.take()
+        await Self.eventually { rig.loader.isOut }
+        #expect(rig.loader.isOut)
+        #expect(rig.previews.asked.count == 1, "the same-group topic is never asked")
+        #expect(rig.timers.delays.isEmpty)
+        #expect(!rig.loader.isAvailable(strict: true))
+    }
+
+    @Test("after a failed preview, asking again (prepare or kick) waits out the 15 s retry")
+    func repeatedPrepareHonorsTheRetry() async {
+        let rig = Self.rig()
+        for slug in ["sourdough", "bread", "coffee", "tea"] {
+            rig.previews.answers[slug] = FreshAnswer(events: [], outcome: .timedOut)
+        }
+        await rig.loader.prepare()
+        #expect(rig.previews.asked.count == 1)
+        for _ in 0..<5 {
+            await rig.loader.prepare()
+            rig.loader.kick()
+        }
+        await Self.eventually(0.2) { false }
+        #expect(rig.previews.asked.count == 1)
+        #expect(!rig.loader.isAvailable(strict: true))
+        #expect(rig.timers.delays == [15])
+        // 15 s later a direct call may build again.
+        rig.clock.now += 15
+        await rig.loader.prepare()
+        #expect(rig.previews.asked.count == 2)
     }
 
     @Test("the loader's source names no signer, keypair, AUTH frame or HTTP auth")

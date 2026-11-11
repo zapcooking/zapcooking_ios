@@ -1,14 +1,27 @@
 # GATE — fresh/specials-loader (PR #216: Fresh specials S2)
 
-Branched from main at 45842df. Code commits fd98482 (loader and topic list)
-and **21abb18 (code frozen)**. This file replaces gate 73f5bb4 and is the
-HEAD commit. A review fix breaks the freeze: push a fresh gate file last.
+Branched from main at 45842df. Code commits fd98482 (loader and topic
+list), 21abb18 (kick race) and **aa0e52f (code frozen)**: the Copilot
+review fixes. This file replaces gate edd182d and is the HEAD commit. A
+review fix breaks the freeze: push a fresh gate file last.
 
-21abb18 fixes a race found in S3's screenshot run. `kick()` starts a build
-in a Task, and a slot decided in the same main-actor turn saw no spotlight
-ready and none building, so the turn went to a recipe.
+aa0e52f fixes three loader bugs:
+1. **A kick during a hold.** It no longer counts as a pending build, so a
+   far slot can't wait out a 60–600 s hold.
+2. **Only the last spotlight's parent group left.** Spotlights are now out
+   for the session, where the loader used to retry an empty pick every
+   15 s.
+3. **Repeated `prepare()` / `kick()`.** They now honour the 15 s failure
+   retry.
+
+Three new tests, red on the previous loader (edd182d) and green here:
+`kickDuringHoldIsNotAvailable`, `onlyLastParentLeftGoesOut` and
+`repeatedPrepareHonorsTheRetry`.
+
+21abb18 fixed a race found in S3's screenshot run. A slot decided in the
+same main-actor turn as `kick()` saw nothing building.
 `isAvailable(strict: true)` now also counts a kicked build that hasn't
-started. New test: `kickedBuildCountsAsBuilding`.
+started yet; aa0e52f limits that to a build that can start now.
 
 Loader and topic-list fetch only. Nothing in the app calls them yet, and
 `freshSpecialsEnabled` is `false`. No test opens a socket or makes a network
@@ -17,7 +30,7 @@ request, publishes an event or sends AUTH.
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), DerivedData `wisp-specials` (incremental
 from S1's tree; every touched file is new or recompiled): **TEST BUILD
-SUCCEEDED** at 21abb18. Zero warnings in `wisp/FreshTopicList.swift`,
+SUCCEEDED** at aa0e52f. Zero warnings in `wisp/FreshTopicList.swift`,
 `wisp/FreshSpotlightLoader.swift`, `wisp/FreshTopicCatalog.swift`,
 `FeatureFlags.swift`, `wispTests/FreshTopicListTests.swift` and
 `wispTests/FreshSpotlightLoaderTests.swift`.
@@ -29,18 +42,19 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,id=90B23E20-BA47-4AD0-98EF-175513626A4B' \
   -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-specials \
   -parallel-testing-enabled NO -only-testing:wispTests \
-  -collect-test-diagnostics never -resultBundlePath s2b-gate.xcresult
-sh ci_scripts/gate.sh --parse s2b-gate.xcresult
+  -collect-test-diagnostics never -resultBundlePath s2c-gate.xcresult
+sh ci_scripts/gate.sh --parse s2c-gate.xcresult
 ```
 ```
-gate: 1930 passed / 3 failed / 23 skipped / 1956 total  (bundle result: Failed)
+gate: 1933 passed / 3 failed / 23 skipped / 1959 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1956 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1959 tests ran
 ```
-First full run at 21abb18. (At fd98482: PASS 1929/3/23/1955.) New suites:
-- `FreshSpotlightLoaderTests` (20)
+First full run at aa0e52f. (Earlier: 1929/1955 at fd98482 and 1930/1956 at
+21abb18.) New suites:
+- `FreshSpotlightLoaderTests` (23)
 - `FreshSpotlightLoaderRelayTests` (1): the AUTH-frame check on the real client.
 - `FreshTopicListTests` (10)
 
