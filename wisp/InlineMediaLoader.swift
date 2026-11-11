@@ -48,6 +48,17 @@ enum InlineMediaLoader {
     private static var inFlightAnimated: [String: Task<AnimatedImagePayload?, Never>] = [:]
     private static var inFlightBytes: [String: Task<Void, Never>] = [:]
 
+    /// BUD-10 `blossom:` URIs name no server — resolve one to a concrete
+    /// https URL before fetching (cached in `BlossomUriResolver`). Everything
+    /// downstream keeps keying on the original blossom URL, so the decoded
+    /// caches and dedup are unaffected by which server won.
+    private static func effectiveUrl(_ url: URL) async -> URL {
+        guard url.scheme?.lowercased() == BlossomUri.scheme else { return url }
+        guard let resolved = await BlossomUriResolver.shared.resolve(url.absoluteString),
+              let resolvedUrl = URL(string: resolved) else { return url }
+        return resolvedUrl
+    }
+
     /// Decoded-cache key for a static image at `maxPixelSize`. MUST stay in
     /// sync with what `RetryingAsyncImage` renders from: the inline-capped
     /// (`#px1024`) and full-screen-uncapped (bare URL) variants of the same
@@ -60,6 +71,7 @@ enum InlineMediaLoader {
     /// cached image immediately when `DecodedImageCache` already has it.
     /// `nil` on network / decode failure (callers own retry policy).
     static func staticImage(url: URL, maxPixelSize: CGFloat?, source: Source) async -> UIImage? {
+        let url = await effectiveUrl(url)
         let key = staticKey(url: url, maxPixelSize: maxPixelSize)
         if let cached = DecodedImageCache.staticImage(for: key) { return cached }
         if let task = inFlightStatic[key] { return await task.value }
@@ -94,6 +106,7 @@ enum InlineMediaLoader {
     /// deduped. Key is the bare URL string — matches `AnimatedImageView`.
     /// Inline animated media is always decoded at the 1024px frame cap.
     static func animatedPayload(url: URL, source: Source) async -> AnimatedImagePayload? {
+        let url = await effectiveUrl(url)
         let key = url.absoluteString
         if let cached = DecodedImageCache.animatedPayload(for: key) { return cached }
         if let task = inFlightAnimated[key] { return await task.value }
@@ -127,6 +140,7 @@ enum InlineMediaLoader {
     /// decoded frame arrays are too memory-heavy to build ahead of need —
     /// the mount-time decode then skips the network entirely.
     static func warmBytes(url: URL) async {
+        let url = await effectiveUrl(url)
         let key = url.absoluteString
         // Skip when the decoded payload already exists or a real decode is in
         // flight — warming bytes would be pure waste.

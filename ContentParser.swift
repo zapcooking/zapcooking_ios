@@ -87,6 +87,7 @@ enum ContentParser {
         let pattern = #"nostr:(?:note1|nevent1|npub1|nprofile1|naddr1)(?-i:[a-z0-9]+)"#
             + #"|(?<!\w)(npub1(?-i:[a-z0-9]{58}))(?!\w|\.[a-zA-Z])"#
             + #"|(?:https?|wss?):\/\/\S+"#
+            + #"|blossom:\S+"#
             // Lookbehind excludes `@` and `.` in addition to word chars so the
             // domain half of a lightning / email address (`user@getalby.com`)
             // or a deeper subdomain segment isn't matched as a standalone URL
