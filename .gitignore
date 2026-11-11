@@ -49,3 +49,4 @@ wispTests/.zc_snapshot_dir
 wispTests/.cheffy_live_enable
 wispTests/.memories_live_enable
 wispTests/.note_review_live_enable
+wispTests/.fresh_relay_live_enable

@@ -52,6 +52,8 @@ struct wispApp: App {
                 EmojiLibraryHarness()
             } else if ProcessInfo.processInfo.arguments.contains("-EmojiReactionHarness") {
                 EmojiReactionHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-WalletAddressHarness") {
+                WalletAddressHarness()
             } else {
                 rootContent
             }

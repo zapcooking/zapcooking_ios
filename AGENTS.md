@@ -82,6 +82,16 @@ Account state is keyed by hex pubkey throughout. `NostrKey` stores the active ke
 
 ## Architecture
 
+### Never hardcode the damus relay
+
+`wss://relay.damus.io` must **not** be added to any hardcoded relay set
+(`RelayDefaults`, `defaultNostrConnectRelays`, fallback lists, DM
+relays, backup relays). It aggressively rate-limits and its operator
+threatened IP blocks during the signing-flood incident (#185, fixed by
+the one-AUTH-per-connection change). A user may still keep it in their
+own relay settings — we just never dial it by default. Reference:
+`gates/183-nip46-remote-signing.md`.
+
 ### Outbox-model relay routing (NIP-65)
 
 This is the central architectural idea for the home feed. Rather than fanning every query out to every relay:

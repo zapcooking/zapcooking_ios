@@ -39,6 +39,12 @@ final class ProfileEditViewModel {
     var uploadStatus: String?
     var lastError: String?
 
+    /// Whether `start()` fetched a kind-0 to merge onto. Callers that change
+    /// a single field programmatically (e.g. the Lightning-address → `lud16`
+    /// sync) must refuse to publish without it — merging onto an empty
+    /// baseline would ship a kind-0 holding only their field.
+    private(set) var hasNetworkBaseline: Bool = false
+
     @ObservationIgnored private var existingTags: [[String]] = []
     @ObservationIgnored private var existingJson: [String: Any] = [:]
     @ObservationIgnored private var blossomServers: [String] = [BlossomServerList.defaultServer]
@@ -68,6 +74,7 @@ final class ProfileEditViewModel {
 
         let results = await kind0
         if let best = results.filter({ $0.kind == 0 }).max(by: { $0.createdAt < $1.createdAt }) {
+            hasNetworkBaseline = true
             existingTags = best.tags
             if let data = best.content.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {

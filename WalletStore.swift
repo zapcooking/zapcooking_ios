@@ -293,6 +293,20 @@ final class WalletStore {
         lightningAddress = nil
     }
 
+    /// Publish the current Lightning address as `lud16` on the user's kind-0,
+    /// merging onto the latest network profile so no other field is lost.
+    /// Called after a settings-sheet registration — Android's wallet does the
+    /// same after registering, and desktop offers the identical sync. Refuses
+    /// to publish when the kind-0 baseline couldn't be fetched.
+    func syncLightningAddressToProfile() async {
+        guard mode == .spark, let address = lightningAddress else { return }
+        let editor = ProfileEditViewModel(keypair: keypair)
+        await editor.start()
+        guard editor.hasNetworkBaseline, editor.lud16 != address else { return }
+        editor.lud16 = address
+        _ = await editor.save()
+    }
+
     @discardableResult
     func switchToMode(_ newMode: WalletMode) async throws -> Bool {
         disconnect()

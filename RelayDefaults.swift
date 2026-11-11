@@ -17,6 +17,10 @@ enum RelayDefaults {
     /// so it carries authors whose write relays we don't otherwise reach.
     /// `nos.lol` is a high-volume general relay that picks up profiles missing
     /// from the indexer-branded set.
+    // NEVER add `wss://relay.damus.io` here (or in any other hardcoded
+    // relay list): it aggressively rate-limits and its operator threatened
+    // IP blocks during the signing-flood incident (#185). See
+    // gates/183-nip46-remote-signing.md.
     nonisolated static let indexers: [String] = [
         "wss://purplepag.es",
         "wss://indexer.nostrarchives.com",
