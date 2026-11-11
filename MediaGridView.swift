@@ -12,6 +12,24 @@ import SwiftUI
 ///    edge so it's visually obvious there's more.
 ///  - Tap any tile → `FullScreenMediaPager` opens at that index, swipe to
 ///    navigate every item in the post.
+/// Reliable layout width for full-width media/text blocks. `UIScreen.main`
+/// is deprecated and on iOS 26 scene-based apps it can report the device's
+/// bounds with width/height swapped, which made portrait media tiles render
+/// at ~2x the screen width (timeline posts overflowing both edges — the
+/// nevent1qqspf7xh… report). The app lays out portrait-first, so the scene
+/// screen's smaller dimension is the width every feed block expects.
+nonisolated func mediaLayoutScreenWidth() -> CGFloat {
+    #if canImport(UIKit)
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    if let screen = scenes.first?.screen {
+        return min(screen.bounds.width, screen.bounds.height)
+    }
+    return min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+    #else
+    return 390
+    #endif
+}
+
 struct MediaGridView: View {
     let items: [MediaItem]
     /// When true, the gallery is rendered inside another card (typically
@@ -163,13 +181,13 @@ struct MediaGridView: View {
     private var tileHeightForNested: CGFloat {
         // Same formula as feedBody, but anchored to the caller-supplied
         // nested container width (see `nestedHorizontalInset`'s doc).
-        let approxWidth = max(1, UIScreen.main.bounds.width - nestedHorizontalInset)
+        let approxWidth = max(1, mediaLayoutScreenWidth() - nestedHorizontalInset)
         return approxWidth * tileWidthFraction / tileAspect
     }
 
     @ViewBuilder
     private var feedBody: some View {
-        let screenWidth = UIScreen.main.bounds.width
+        let screenWidth = mediaLayoutScreenWidth()
         // Gallery rect: from card's left padding (`cardLeadingPadding` from screen left)
         // all the way to the screen's right edge.
         let galleryWidth = screenWidth - cardLeadingPadding
