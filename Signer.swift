@@ -131,12 +131,21 @@ enum Signer {
     /// first use (cold launch, account switch) so callers never race the
     /// restore. Keyed by pubkey: a client left over from a different account
     /// is never used to sign as this one.
-    nonisolated private static func remoteClient(for keypair: Keypair) async throws -> Nip46Client {
+    nonisolated private static func remoteClient(for keypair: Keypair) async throws -> any RemoteSigning {
+        #if DEBUG
+        if let fake = await remoteSigningOverrides[keypair.pubkey] { return fake }
+        #endif
         guard let client = await Nip46Manager.shared.client(for: keypair.pubkey) else {
             throw SignerError.noActiveRemoteSigner
         }
         return client
     }
+
+    #if DEBUG
+    /// Test seam: a remote account whose pubkey is a key here signs through
+    /// this fake instead of `Nip46Manager`'s live client. Tests only.
+    static var remoteSigningOverrides: [String: any RemoteSigning] = [:]
+    #endif
 }
 
 extension Keypair {
