@@ -19,33 +19,54 @@ nonisolated enum TmpJanitor {
     /// Files older than this are considered abandoned.
     private static let staleAfter: TimeInterval = 24 * 3600
 
-    /// Delete abandoned download staging files from tmp. Runs on the
-    /// caller's executor; called once from `MainView` before startup work.
-    nonisolated static func sweepStaleDownloadFiles(now: Date = Date()) {
+    /// What one sweep did, and on which thread it ran. `ranOnMainThread`
+    /// is how the tests prove the launch path stays off the main thread.
+    nonisolated struct Outcome: Sendable, Equatable {
+        let removed: Int
+        let ranOnMainThread: Bool
+    }
+
+    /// The launch entry point. Hops to a detached utility-priority task so
+    /// the directory walk and the deletes never run on the main thread,
+    /// even though `MainView`'s `.task` (main actor) awaits it. The first
+    /// sweep after a long-lived install faces a 40k+ file backlog, which
+    /// takes seconds.
+    nonisolated static func sweepAtLaunch(now: Date = Date()) async -> Outcome {
+        await Task.detached(priority: .utility) {
+            sweepStaleDownloadFiles(now: now)
+        }.value
+    }
+
+    /// Delete abandoned download staging files from tmp. Synchronous and
+    /// runs on the caller's thread: from the main actor it would block the
+    /// UI for the whole walk, so launch code calls `sweepAtLaunch()`.
+    @discardableResult
+    nonisolated static func sweepStaleDownloadFiles(now: Date = Date()) -> Outcome {
+        let onMain = Thread.isMainThread
         let tmp = FileManager.default.temporaryDirectory
         let cutoff = now.addingTimeInterval(-staleAfter)
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: tmp, includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ) else { return }
+        ) else { return Outcome(removed: 0, ranOnMainThread: onMain) }
 
         var removed = 0
         // Unbounded on purpose: the first sweep after a long-lived install
-        // faces a 40k+ file backlog, and it runs off the main actor (from
-        // MainView's .task), so a multi-second cleanup once per launch is
-        // acceptable. Later launches find almost nothing.
+        // faces a 40k+ file backlog. Off the main thread (sweepAtLaunch), a
+        // multi-second cleanup once per launch is acceptable. Later launches
+        // find almost nothing.
         for url in contents where
             url.lastPathComponent.hasPrefix(downloadFilePrefix) {
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? now
             guard modified < cutoff else { continue }
-            try? FileManager.default.removeItem(at: url)
-            removed += 1
+            if (try? FileManager.default.removeItem(at: url)) != nil { removed += 1 }
         }
         if removed > 0 {
             #if DEBUG
             print("[TmpJanitor] removed \(removed) stale download file(s) from tmp")
             #endif
         }
+        return Outcome(removed: removed, ranOnMainThread: onMain)
     }
 }
