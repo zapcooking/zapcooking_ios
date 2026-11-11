@@ -83,6 +83,9 @@ nonisolated enum GroupSubEvent: Sendable {
 nonisolated enum GroupRelayAuthState: Equatable, Sendable {
     case idle
     case pending(authEventId: String)
+    /// A NIP-46 remote signing round-trip is running: no settle timer runs
+    /// during this phase, since approval can legitimately take minutes.
+    case signing
     case authenticated
     case failed(reason: String)
     case unavailable
@@ -92,7 +95,7 @@ nonisolated enum GroupRelayAuthState: Equatable, Sendable {
     var isSettled: Bool {
         switch self {
         case .authenticated, .failed, .unavailable: return true
-        case .idle, .pending: return false
+        case .idle, .pending, .signing: return false
         }
     }
 }
@@ -521,10 +524,16 @@ actor GroupRelayPool {
                 replayOrFinish(state: state, sub: sub,
                                terminal: .closed(reason: reason),
                                count: \.authReplays, max: Self.maxAuthReplays)
+            case .signing:
+                // Signing is a NIP-46 round-trip that can outlast any
+                // reasonable settle timeout. Park the sub; the settle timer
+                // starts only once AUTH is actually on the wire.
+                sub.awaitingAuth = true
             case .idle, .pending:
                 // khatru sends the AUTH challenge before this CLOSED, so the
-                // machine is normally already .pending. Park the sub; the
-                // settle (OK true/false, unavailable, or timeout) decides.
+                // machine is normally already .pending (AUTH on the wire).
+                // Park the sub; the settle (OK true/false, unavailable, or
+                // timeout) decides.
                 sub.awaitingAuth = true
                 startAuthSettleTimeout(state: state)
             }
@@ -569,29 +578,49 @@ actor GroupRelayPool {
         switch state.auth {
         case .idle:
             break
-        case .pending, .authenticated, .failed, .unavailable:
+        case .pending, .signing, .authenticated, .failed, .unavailable:
             // Already answered this connection's challenge (khatru re-sends it
-            // on every rejection), or the outcome is settled. `.failed` stays
-            // terminal for the connection — reconnect retries with fresh state.
+            // on every rejection), signing is still in flight, or the outcome
+            // is settled. `.failed` stays terminal for the connection —
+            // reconnect retries with fresh state.
             return
         }
-        guard let keypair = state.keypair, !keypair.privkey.isEmpty else {
+        guard let keypair = state.keypair, Signer.canSign(keypair) else {
             settleAuth(state: state, outcome: .unavailable)
             return
         }
-        do {
-            let event = try Nip42.buildAuthEvent(challenge: challenge,
-                                                 relayUrl: state.url,
-                                                 keypair: keypair)
-            send(state: state, payload: "[\"AUTH\",\(event.toJSON())]")
-            // Sent is not accepted: hold .pending until the relay's OK for
-            // this event id arrives (issue #6 defect 3).
-            state.auth = .pending(authEventId: event.id)
-        } catch {
-            // Sign failed (empty or malformed key) — auth is unavailable on
-            // this connection; parked subs surface .authUnavailable.
-            settleAuth(state: state, outcome: .unavailable)
+        // Signing may be a NIP-46 round-trip (minutes with a remote signer
+        // awaiting human approval), so it runs off the actor in its own
+        // phase: repeat challenges are ignored, no settle timer runs, and
+        // no OK can match it.
+        state.auth = .signing
+        let socket = state.socket
+        let url = state.url
+        Task { [weak self, weak state] in
+            let event = try? await Nip42.buildAuthEvent(challenge: challenge,
+                                                        relayUrl: url,
+                                                        keypair: keypair)
+            guard let self, let state else { return }
+            await self.authSigned(state: state, socket: socket, event: event)
         }
+    }
+
+    private func authSigned(state: RelayState, socket: GroupRelaySocket?, event: NostrEvent?) {
+        // The connection dropped or the machine moved on while signing — this
+        // signature answers a challenge nobody is waiting on any more.
+        guard state.socket === socket, state.auth == .signing else { return }
+        guard let event else {
+            // Sign failed (malformed key, remote signer offline/rejected) —
+            // auth is unavailable on this connection; parked subs surface
+            // .authUnavailable.
+            settleAuth(state: state, outcome: .unavailable)
+            return
+        }
+        // Sent is not accepted: hold .pending until the relay's OK for
+        // this event id arrives (issue #6 defect 3).
+        state.auth = .pending(authEventId: event.id)
+        send(state: state, payload: "[\"AUTH\",\(event.toJSON())]")
+        startAuthSettleTimeout(state: state)
     }
 
     /// Move the auth machine to a settled outcome, wake waiters, and act on
@@ -617,7 +646,7 @@ actor GroupRelayPool {
                 finish(state: state, sub: sub, with: .authFailed(reason: reason))
             case .unavailable:
                 finish(state: state, sub: sub, with: .authUnavailable)
-            case .idle, .pending:
+            case .idle, .pending, .signing:
                 break // unreachable: outcome.isSettled asserted above
             }
         }

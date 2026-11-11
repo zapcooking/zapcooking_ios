@@ -83,21 +83,28 @@ import Testing
 
     // MARK: - The choke point
 
-    @Test func buildAuthEvent_refusesTheFeedRelay() throws {
+    @Test func buildAuthEvent_refusesTheFeedRelay() async throws {
         let keypair = try makeKeypair()
         for url in Self.feedSpellings {
-            #expect(throws: Nip42.AuthError.loginDisabled(relayUrl: url), "\(url)") {
-                try Nip42.buildAuthEvent(challenge: "c", relayUrl: url, keypair: keypair)
+            do {
+                _ = try await Nip42.buildAuthEvent(challenge: "c", relayUrl: url, keypair: keypair)
+                Issue.record("\(url): feed relay must refuse AUTH, not sign it")
+            } catch let e as Nip42.AuthError {
+                #expect(e == .loginDisabled(relayUrl: url), "\(url)")
+            } catch {
+                Issue.record("\(url): unexpected error \(error)")
             }
         }
     }
 
-    @Test func buildAuthEvent_stillSignsForEveryOtherRelay() throws {
+    @Test func buildAuthEvent_stillSignsForEveryOtherRelay() async throws {
         let keypair = try makeKeypair()
         for url in Self.otherRelays {
-            let event = try Nip42.buildAuthEvent(challenge: "c-1", relayUrl: url, keypair: keypair)
-            #expect(event.kind == 22242, "\(url)")
-            #expect(event.pubkey == keypair.pubkey)
+            let event = try await Nip42.buildAuthEvent(challenge: "c-1", relayUrl: url, keypair: keypair)
+            let kind = event.kind
+            let signedBy = event.pubkey
+            #expect(kind == 22242, "\(url)")
+            #expect(signedBy == keypair.pubkey)
             #expect(event.tags.contains(["relay", url]))
             #expect(event.tags.contains(["challenge", "c-1"]))
         }
@@ -135,23 +142,25 @@ import Testing
 
     /// Lazarus's signer (the user's key, built the way the recovery screen
     /// builds it) declines the feed relay whatever the approval setting says.
-    @Test func lazarusSigner_declinesTheFeedRelay() throws {
+    @Test func lazarusSigner_declinesTheFeedRelay() async throws {
         let signer = LazarusRelayClient.authSigner(for: try makeKeypair())
         for url in Self.feedSpellings {
-            #expect(signer(url, "c") == nil, "\(url)")
+            #expect(try await signer(url, "c") == nil, "\(url)")
         }
     }
 
     /// The shared pool's signer has the shape `MainView` installs
     /// (`try? Nip42.buildAuthEvent`): nil for the feed relay, so
     /// `respondToAuthChallenge` returns without sending.
-    @Test func sharedPoolSignerShape_declinesTheFeedRelay() throws {
+    @Test func sharedPoolSignerShape_declinesTheFeedRelay() async throws {
         let keypair = try makeKeypair()
-        let signer: @Sendable (String, String) -> NostrEvent? = { url, challenge in
-            try? Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: keypair)
+        let signer: @Sendable (String, String) async -> NostrEvent? = { url, challenge in
+            try? await Nip42.buildAuthEvent(challenge: challenge, relayUrl: url, keypair: keypair)
         }
-        #expect(signer(FeedRelay.url, "c") == nil)
-        #expect(signer("wss://nos.lol", "c") != nil)
+        let feedResult = await signer(FeedRelay.url, "c")
+        let otherResult = await signer("wss://nos.lol", "c")
+        #expect(feedResult == nil)
+        #expect(otherResult != nil)
     }
 
     // MARK: - Tripwire: one place builds a kind-22242 event
@@ -161,7 +170,10 @@ import Testing
     /// through `Nip42.buildAuthEvent` instead of adding it here. If a path
     /// truly cannot (it signs with a key that is not the user's), it must
     /// call `Nip42.loginAllowed` itself before it is listed.
-    private static let allowedAuthEventBuilders: Set<String> = ["Nip42.swift"]
+    /// Nip46.swift only *names* the kind in its requested-permission string
+    /// (`sign_event:22242`) — it never builds the event; building stays in
+    /// Nip42.swift.
+    private static let allowedAuthEventBuilders: Set<String> = ["Nip42.swift", "Nip46.swift"]
 
     /// Lines of `text` that name kind 22242 in code: the literal, or
     /// `Nip42.kindAuth`. Comments are ignored.

@@ -34,6 +34,15 @@ enum FeatureFlags {
     /// surfaces render a message, never a "tap to subscribe" link.
     static let membershipLinkoutEnabled: Bool = false
 
+    /// Fresh, the curated feed from `wss://feed.zap.cooking` (build spec §2
+    /// "Fresh feed relay"), as an entry in the feed picker. Operational, not
+    /// a compliance switch: Fresh is free tier only and never logs in. While
+    /// `false` the picker has no Fresh entry and a stored `FRESH` landing
+    /// falls back to OnlyFood. On: Fresh leads the picker and is the landing
+    /// feed for accounts that sign in after this build
+    /// (`FeedDefaultMigration`); accounts already on the device keep theirs.
+    static let freshFeedEnabled: Bool = true
+
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
     /// flow. Nothing on the URL path is gated or sold, so this is a plain

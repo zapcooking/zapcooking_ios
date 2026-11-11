@@ -90,10 +90,11 @@ struct LazarusPublisherTests {
         writeRelays: [String] = LazarusPublisherTests.writeRelays,
         answered: [String] = [],
         privateTags: [[String]]? = nil,
-        override: Bool = false
+        override: Bool = false,
+        keypair: Keypair? = nil
     ) -> LazarusPublisher.Request {
         LazarusPublisher.Request(
-            chosen: chosen, reviewedCurrent: reviewed, keypair: f.keypair,
+            chosen: chosen, reviewedCurrent: reviewed, keypair: keypair ?? f.keypair,
             writeRelays: writeRelays, answeredRelays: answered, standIns: ["wss://default.example"],
             privateTags: privateTags, allowUnconfirmed: override
         )
@@ -421,6 +422,34 @@ struct LazarusPublisherTests {
             Issue.record("expected signFailed")
             return
         }
+        #expect(f.trace.published.isEmpty)
+    }
+
+    /// A remote account's oversized restore is refused before any signing
+    /// round-trip: the signer app would reject the request anyway (NIP-46
+    /// requests cap around 64 KB encrypted), and the screen needs to say
+    /// exactly that instead of a bare signing failure.
+    @Test func remoteRestoreOverTheSignerSizeCapFailsWithoutSigning() async throws {
+        let keypair = try LazarusFixture.keypair()
+        // ~770 follows puts the serialized event past the 48 KB safe line.
+        let healthy = try followList(keypair, 770, Self.now - 86_400)
+        let clobbered = try followList(keypair, 3, Self.now - 3600)
+        let f = try fixture(keypair: keypair)
+        // `Keypair.isRemote` consults the session store; register the
+        // account as remote-signer for the duration of the test.
+        Nip46SessionStore.save(Nip46Session(
+            userPubkey: keypair.pubkey, appPrivkeyHex: String(repeating: "ab", count: 32),
+            appPubkey: String(repeating: "cd", count: 32), signerPubkey: keypair.pubkey,
+            relays: ["wss://relay.example"], bunkerURI: "bunker://test", createdAt: Self.now
+        ))
+        defer { Nip46SessionStore.delete(pubkey: keypair.pubkey) }
+        let remote = Keypair(privkey: "", pubkey: keypair.pubkey)
+        let outcome = await f.publisher.restore(request(f, chosen: healthy, reviewed: clobbered, keypair: remote))
+        guard case .tooLargeForRemoteSigner = try #require(failure(outcome)) else {
+            Issue.record("expected tooLargeForRemoteSigner")
+            return
+        }
+        #expect(f.trace.signCalls == 0)
         #expect(f.trace.published.isEmpty)
     }
 }

@@ -130,6 +130,21 @@ struct ContentView: View {
                 }
             }
         }
+        // Keep the NIP-46 signer session in step with the active account:
+        // open it for a remote-signer account (switch, add, launch), close
+        // the previous one's sockets otherwise. `Signer` keys clients by
+        // pubkey, so this is about warm-up and not leaking sockets — never
+        // about which key signs.
+        .onChange(of: keypair?.pubkey) { _, _ in
+            let current = keypair
+            Task {
+                if let current, current.isRemote {
+                    await Nip46Manager.shared.restoreSession(pubkey: current.pubkey)
+                } else {
+                    await Nip46Manager.shared.clearActive()
+                }
+            }
+        }
         // Warm the splash food-photo cache on every launch (regardless of
         // screen) so the intro has cached photos the moment it shows. 24h TTL.
         .task { await FoodPhotoCache.shared.warmIfNeeded() }
@@ -160,18 +175,51 @@ struct ContentView: View {
                 // Ensure accounts set up before multi-account was added are
                 // registered in wisp_accounts so they survive an "Add Account" flow.
                 NostrKey.registerInAccountList(saved.pubkey)
+                // Remote-signer accounts: open the signer session now so the
+                // first sign doesn't pay for the socket setup. (`Signer` also
+                // restores lazily, so this is a warm-up, not a requirement.)
+                if saved.isRemote {
+                    Task { await Nip46Manager.shared.restoreSession(pubkey: saved.pubkey) }
+                }
                 if NostrKey.isOnboardingComplete(pubkey: saved.pubkey) {
                     currentScreen = .loading
                 } else {
                     currentScreen = .onboarding
                 }
             }
+            // The Fresh default for new users: accounts already here keep
+            // their feed. After the registration above (older accounts join
+            // the list there), before any sign-in can add a new account.
+            runFeedDefaultMigration()
+            #if DEBUG
+            // `-FreshScreenshotAccount` (FreshScreenshotsUITests): a new
+            // watch-only account, created after the write so it is a new
+            // sign-in.
+            if let created = FreshScreenshotHarness.prepare(existing: keypair) {
+                keypair = created
+                currentScreen = .loading
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            runFeedDefaultMigration()
         }
         .onChange(of: keypair?.pubkey) { _, newPubkey in
             if let pk = newPubkey {
                 AppSettings.shared.loadQuickZapSettings(for: pk)
             }
         }
+    }
+}
+
+extension ContentView {
+    /// `FeedDefaultMigration`: a no-op once done, and while protected data
+    /// is unavailable (retried when it becomes available).
+    func runFeedDefaultMigration() {
+        FeedDefaultMigration.runIfNeeded(
+            accounts: NostrKey.accounts(),
+            protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable
+        )
     }
 }
 

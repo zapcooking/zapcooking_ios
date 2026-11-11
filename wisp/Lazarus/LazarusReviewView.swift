@@ -156,6 +156,9 @@ struct LazarusReviewView: View {
 
     @ViewBuilder
     private func warnings(_ review: LazarusReview) -> some View {
+        if let sizeWarning = model.restoreSizeWarning {
+            LazarusNotice(text: sizeWarning)
+        }
         if profile.requiredWarnings.contains(.remute), let delta = review.delta {
             if delta.addedCount > 0 {
                 LazarusNotice(text: "This restore re-mutes \(delta.addedCount.formatted()) \(delta.addedCount == 1 ? "item" : "items") (accounts, words, hashtags or threads) you may have unmuted on purpose since. That's a moderation action taken on your behalf.")

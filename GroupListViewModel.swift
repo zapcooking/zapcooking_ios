@@ -184,7 +184,6 @@ final class GroupListViewModel {
                      isRestricted: Bool = false, isHidden: Bool = false) async -> Result<GroupRoom, AdminError> {
         let trimmedRelay = normalizeRelay(relayUrl)
         let groupId = Nip29.generateGroupId()
-        let priv = Hex.decode(keypair.privkey) ?? Data()
 
         // Optimistic local insert + subscribe.
         let optimisticRoom = repository.addGroup(relayUrl: trimmedRelay, groupId: groupId, name: name)
@@ -192,7 +191,8 @@ final class GroupListViewModel {
 
         // Send kind 9007 (create-group).
         do {
-            let create = try Nip29.buildCreateGroup(privkey32: priv, pubkey: keypair.pubkey, groupId: groupId)
+            let create = try await Signer.sign(keypair: keypair, kind: Nip29.kindCreateGroup,
+                                               tags: [["h", groupId]], content: "")
             let result = await pool.publishWithAuthRetry(create, to: trimmedRelay)
             switch result {
             case .ok, .duplicate:
@@ -227,10 +227,12 @@ final class GroupListViewModel {
         if isPrivate || isClosed || isRestricted || isHidden || !name.isEmpty {
             try? await Task.sleep(for: .milliseconds(1500))
             do {
-                let edit = try Nip29.buildEditMetadata(
-                    privkey32: priv, pubkey: keypair.pubkey, groupId: groupId,
+                let tags = Nip29.buildEditMetadataTags(
+                    groupId: groupId,
                     name: name, isPrivate: isPrivate, isClosed: isClosed,
                     isRestricted: isRestricted, isHidden: isHidden)
+                let edit = try await Signer.sign(keypair: keypair, kind: Nip29.kindEditMetadata,
+                                                 tags: tags, content: "")
                 _ = await pool.publishWithAuthRetry(edit, to: trimmedRelay)
             } catch {}
         }
@@ -258,10 +260,10 @@ final class GroupListViewModel {
         defer { isJoining = false }
         await pool.ensureRelay(normalized, keypair: keypair)
 
-        let priv = Hex.decode(keypair.privkey) ?? Data()
         let event: NostrEvent
-        do { event = try Nip29.buildJoinRequest(privkey32: priv, pubkey: keypair.pubkey,
-                                                groupId: groupId, inviteCode: code) }
+        do { event = try await Signer.sign(keypair: keypair, kind: Nip29.kindJoinRequest,
+                                           tags: Nip29.buildJoinRequestTags(groupId: groupId, inviteCode: code),
+                                           content: "") }
         catch { lastJoinError = .network; return .failure(.network) }
 
         let result = await pool.publishWithAuthRetry(event, to: normalized)
@@ -313,8 +315,8 @@ final class GroupListViewModel {
     // MARK: - Leave / delete
 
     func leaveGroup(relayUrl: String, groupId: String) async {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        if let event = try? Nip29.buildLeaveRequest(privkey32: priv, pubkey: keypair.pubkey, groupId: groupId) {
+        if let event = try? await Signer.sign(keypair: keypair, kind: Nip29.kindLeaveRequest,
+                                              tags: [["h", groupId]], content: "") {
             _ = await pool.publishWithAuthRetry(event, to: relayUrl)
         }
         repository.removeGroup(relayUrl: relayUrl, groupId: groupId)
@@ -323,8 +325,8 @@ final class GroupListViewModel {
     }
 
     func deleteGroup(relayUrl: String, groupId: String) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildDeleteGroup(privkey32: priv, pubkey: keypair.pubkey, groupId: groupId) else {
+        guard let event = try? await Signer.sign(keypair: keypair, kind: Nip29.kindDeleteGroup,
+                                                 tags: [["h", groupId]], content: "") else {
             return .failure(.network)
         }
         let res = await pool.publishWithAuthRetry(event, to: relayUrl)
@@ -346,21 +348,21 @@ final class GroupListViewModel {
                                name: String? = nil, about: String? = nil, picture: String? = nil,
                                isPrivate: Bool? = nil, isClosed: Bool? = nil,
                                isRestricted: Bool? = nil, isHidden: Bool? = nil) async -> Result<Void, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? Nip29.buildEditMetadata(privkey32: priv, pubkey: keypair.pubkey, groupId: groupId,
-                                                       name: name, about: about, picture: picture,
-                                                       isPrivate: isPrivate, isClosed: isClosed,
-                                                       isRestricted: isRestricted, isHidden: isHidden) else {
+        let tags = Nip29.buildEditMetadataTags(groupId: groupId,
+                                               name: name, about: about, picture: picture,
+                                               isPrivate: isPrivate, isClosed: isClosed,
+                                               isRestricted: isRestricted, isHidden: isHidden)
+        guard let event = try? await Signer.sign(keypair: keypair, kind: Nip29.kindEditMetadata,
+                                                 tags: tags, content: "") else {
             return .failure(.network)
         }
         return await runAdmin(event: event, relayUrl: relayUrl)
     }
 
     func createInvite(relayUrl: String, groupId: String) async -> Result<String, AdminError> {
-        let priv = Hex.decode(keypair.privkey) ?? Data()
         let code = Nip29.generateInviteCode()
-        guard let event = try? Nip29.buildCreateInvite(privkey32: priv, pubkey: keypair.pubkey,
-                                                       groupId: groupId, code: code) else {
+        guard let event = try? await Signer.sign(keypair: keypair, kind: Nip29.kindCreateInvite,
+                                                 tags: [["h", groupId], ["code", code]], content: "") else {
             return .failure(.network)
         }
         let res = await runAdmin(event: event, relayUrl: relayUrl)
@@ -372,12 +374,11 @@ final class GroupListViewModel {
 
     // The admin events sign through `Signer.sign`, the same route
     // `GroupRoomViewModel.sendMessage` and the reactions take, instead of the
-    // `Nip29.build*` helpers. `Signer` is local-key only today (it throws
-    // `localKeyMissing` for a watch-only account; there is no NIP-46 path in
-    // the app yet), so the room UI offers moderation only to accounts that
-    // can sign (`GroupRoomViewModel.canModerate`); when a remote-signing path
-    // lands in `Signer`, these pick it up without change. Tag shapes match the
-    // builders: `["h", group]` then `["p", target, roles…]`.
+    // `Nip29.build*` helpers, so they work for local and NIP-46 remote-signer
+    // accounts alike (`Signer` throws `localKeyMissing` for a watch-only
+    // account, so the room UI offers moderation only to accounts that can sign
+    // — `GroupRoomViewModel.canModerate`). Tag shapes match the builders:
+    // `["h", group]` then `["p", target, roles…]`.
 
     func putUser(relayUrl: String, groupId: String, targetPubkey: String,
                  roles: [String] = []) async -> Result<Void, AdminError> {
@@ -472,11 +473,9 @@ final class GroupListViewModel {
             Nip51Groups.SimpleGroupEntry(groupId: $0.groupId, relayUrl: $0.relayUrl, name: $0.metadata?.name)
         }
         let tags = Nip51Groups.buildTags(from: entries)
-        let priv = Hex.decode(keypair.privkey) ?? Data()
-        guard let event = try? NostrEvent.sign(privkey32: priv, pubkey: keypair.pubkey,
-                                               kind: Nip51Groups.kindSimpleGroups,
-                                               createdAt: NostrClock.now(),
-                                               tags: tags, content: "") else { return }
+        guard let event = try? await Signer.sign(keypair: keypair,
+                                                 kind: Nip51Groups.kindSimpleGroups,
+                                                 tags: tags, content: "") else { return }
 
         // Publish to: known group relays + default group relay + indexers (best-effort).
         var targets = Set<String>(Self.listLookupRelays)

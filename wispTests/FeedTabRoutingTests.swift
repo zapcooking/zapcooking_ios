@@ -134,13 +134,18 @@ struct FeedTabRoutingTests {
 
     // MARK: - Default landing renders the OnlyFood list
 
-    @Test func coldStart_defaultLanding_rendersOnlyFoodBody_notPlaceholder() {
+    @Test func coldStart_defaultLanding_rendersFreshBody_notPlaceholder() {
         let pk = freshPubkey()
         let key = FeedKindStore.typeKey(pk)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        UserDefaults.standard.set(true, forKey: FeedDefaultMigration.doneKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: key)
+            UserDefaults.standard.removeObject(forKey: FeedDefaultMigration.markerKey(pk))
+        }
         let vm = FeedViewModel(keypair: Keypair(privkey: String(repeating: "1", count: 64), pubkey: pk))
-        #expect(vm.currentKind == .onlyFood)
-        #expect(FeedTabRouting.body(for: vm.currentKind) == .onlyFood)
+        #expect(vm.currentKind == .fresh)
+        #expect(FeedTabRouting.body(for: vm.currentKind) == .fresh)
+        #expect(FeedTabRouting.body(for: .onlyFood) == .onlyFood)
 
         #expect(FeedTabRouting.body(for: .follows) == .general)
         #expect(FeedTabRouting.body(for: .extendedNetwork) == .general)
