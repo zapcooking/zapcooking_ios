@@ -16,8 +16,9 @@ import UIKit
 // - Every event's id and signature are checked here; a bad one is dropped
 //   and counted, never returned (the rest of the app does not verify).
 // - `auth-required:` is the free tier's edge (`.floor`), never an error and
-//   never a prompt. `invalid:` is a permanent answer: the same request is
-//   never sent again by this client.
+//   never a prompt. `invalid:` on a topic preview means the slug is unknown:
+//   that slug is never asked again by this client. A feed page, recipes page
+//   or tail refused `invalid:` is reported but stays retryable.
 // - The live tail survives a dropped socket: it is marked lost, revived from
 //   the app's foreground notification (the hook `NostrClock` uses), and
 //   resumes with an overlap, de-duplicated by id. The relay admitted one post
@@ -35,8 +36,9 @@ nonisolated enum FreshOutcome: Equatable, Sendable {
     /// `until` is already older than the 14-day floor (not sent). Never an
     /// error, never a login prompt.
     case floor
-    /// `CLOSED invalid:` (e.g. an unknown topic slug). Permanent: this client
-    /// never sends the same request again.
+    /// `CLOSED invalid:`. For a topic preview (an unknown slug) it is
+    /// permanent: this client never asks that slug again. Any other request
+    /// refused this way may be sent again.
     case invalid(reason: String)
     /// Any other `CLOSED`, a dropped connection, or `close()`.
     case failed(reason: String)
@@ -157,6 +159,10 @@ actor FreshRelayClient {
     /// tail at once: iOS often reports the background socket's death only
     /// when the app resumes, after the foreground notification has fired.
     nonisolated static let foregroundReviveGrace: TimeInterval = 10
+    /// Clock skew allowed on a post's `created_at` (the app's 30 s, as in
+    /// `OnlyFoodFilter.futureSkewSeconds`). A tail's resume point never moves
+    /// past now plus this, so a future-dated post can't push it ahead.
+    nonisolated static let futureSkewSeconds = 30
 
     // MARK: State
 
@@ -176,8 +182,9 @@ actor FreshRelayClient {
     private var tail: TailState?
     /// Ids returned by feed pages and the live tail (web's `seen`).
     private var seen: Set<String> = []
-    /// Requests the relay answered `invalid:`; never sent again.
-    private var invalidRequests: Set<String> = []
+    /// Topic slugs the relay answered `invalid:` (as `topic:<slug>` keys);
+    /// never asked again. Only previews are remembered.
+    private var invalidTopics: Set<String> = []
     private var foregroundObserver: (any NSObjectProtocol)?
     private var lastForegroundAt: Date?
 
@@ -199,7 +206,8 @@ actor FreshRelayClient {
         var subId: String?
         /// The `since` the tail was started with (clamped to the floor).
         let startSince: Int
-        /// Newest `created_at` the tail delivered (verified, seen or not).
+        /// Newest `created_at` the tail delivered (verified, seen or not),
+        /// clamped to now + `futureSkewSeconds`.
         var newest: Int
         var lost = false
     }
@@ -271,7 +279,7 @@ actor FreshRelayClient {
 
     /// A topic's newest posts in the free window (at most five), for a
     /// spotlight card. Not de-duplicated against the feed. An unknown slug is
-    /// `.invalid` and is never asked again.
+    /// `.invalid` and is never asked again by this client.
     func topicPreview(slug: String) async -> FreshAnswer {
         let filter = FreshFilter(
             kinds: Self.kinds, since: floor, limit: Self.previewLimit, search: "topic:\(slug)"
@@ -323,11 +331,6 @@ actor FreshRelayClient {
     func liveTail(since: Int) -> AsyncStream<FreshTailUpdate> {
         stopTail()
         let (stream, continuation) = AsyncStream<FreshTailUpdate>.makeStream()
-        if invalidRequests.contains("tail") {
-            continuation.yield(.ended(.invalid(reason: "invalid: (refused earlier)")))
-            continuation.finish()
-            return stream
-        }
         let start = Swift.max(since, floor)
         let state = TailState(continuation: continuation, startSince: start, newest: start)
         tail = state
@@ -413,10 +416,10 @@ actor FreshRelayClient {
 
     /// One request to `EOSE` or `CLOSED`, as an outcome. The timeout is for
     /// silence: it restarts with every event, so a slow but steady page is
-    /// not cut off. A request the relay answered `invalid:` before is not
-    /// sent again.
+    /// not cut off. A topic slug the relay answered `invalid:` before is not
+    /// asked again; every other request is always sent.
     private func request(_ filter: FreshFilter, key: String) async -> FreshAnswer {
-        if invalidRequests.contains(key) {
+        if invalidTopics.contains(key) {
             return FreshAnswer(events: [], outcome: .invalid(reason: "invalid: (refused earlier)"), asked: filter.limit)
         }
         let subId = Self.subscriptionId()
@@ -445,7 +448,7 @@ actor FreshRelayClient {
             // dropped socket there is nothing to close.
             socket?.send(Self.closeFrame(subId))
         case .invalid:
-            invalidRequests.insert(pending.key)
+            if pending.key.hasPrefix("topic:") { invalidTopics.insert(pending.key) }
         case .floor, .failed:
             break
         }
@@ -584,7 +587,9 @@ actor FreshRelayClient {
     private func receiveTailEvent(_ object: [String: Any]) {
         guard let state = tail,
               let event = NostrEvent(json: object), FreshEventVerifier.isValid(event) else { return }
-        if event.createdAt > state.newest { tail?.newest = event.createdAt }
+        // Clamped: a future-dated post must not move the resume point ahead.
+        let createdAt = Swift.min(event.createdAt, now() + Self.futureSkewSeconds)
+        if createdAt > state.newest { tail?.newest = createdAt }
         guard seen.insert(event.id).inserted else { return }
         state.continuation.yield(.event(event))
     }
@@ -592,7 +597,7 @@ actor FreshRelayClient {
     private func tailClosed(_ outcome: FreshOutcome) {
         switch outcome {
         case .floor, .invalid:
-            if case .invalid = outcome { invalidRequests.insert("tail") }
+            // A verdict ends this tail; a later `liveTail` may ask again.
             guard let state = tail else { return }
             state.continuation.yield(.ended(outcome))
             tail?.subId = nil

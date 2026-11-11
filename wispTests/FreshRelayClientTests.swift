@@ -601,10 +601,10 @@ struct FreshRelayClientTests {
         let author = try Author()
 
         let box = TailBox()
-        let recorder = box.record(await client.liveTail(since: Self.now))
+        let recorder = box.record(await client.liveTail(since: Self.now - 1200))
         let req = try await awaitReq(transport)
         transport.latest?.feed("[\"EOSE\",\"\(req.subId)\"]")
-        let newest = try author.event(Self.now + 600)
+        let newest = try author.event(Self.now - 600)
         feed(transport.latest, req.subId, [newest], eose: false)
         #expect(await eventually { box.eventIds == [newest.id] })
 
@@ -616,14 +616,14 @@ struct FreshRelayClientTests {
         let reopened = await eventually { transport.opened.count == 2 && !self.reqs(transport.latest).isEmpty }
         try #require(reopened)
         let resumed = reqs(transport.latest)[0]
-        let expectedSince = Self.now + 600 - FreshRelayClient.tailResumeOverlapSeconds
+        let expectedSince = Self.now - 600 - FreshRelayClient.tailResumeOverlapSeconds
         #expect(resumed.since == expectedSince)
         #expect(box.revivedSince == [expectedSince])
         #expect(await client.tailIsLost == false)
 
         // The relay re-sends what was already shown, plus a post admitted late:
         // created 827 s before the newest one seen (probe 2026-11-10).
-        let late = try author.event(Self.now + 600 - 827)
+        let late = try author.event(Self.now - 600 - 827)
         feed(transport.latest, resumed.subId, [newest, late])
         #expect(await eventually { box.eventIds == [newest.id, late.id] })
 
@@ -702,6 +702,120 @@ struct FreshRelayClientTests {
         #expect(await client.reviveTail() == false)
         #expect(reqs(transport.latest).count == 1)
         #expect(!(transport.latest?.sent.contains { $0.hasPrefix("[\"AUTH\"") } ?? true))
+    }
+
+    // MARK: - Review rulings (2026-11-10)
+
+    private func invalid(_ socket: FakeGroupSocket?, _ subId: String) {
+        socket?.feed("[\"CLOSED\",\"\(subId)\",\"invalid: bad filter\"]")
+    }
+
+    @Test("invalid: on a feed page is reported, and the next feed page is sent again")
+    func feedPageInvalidIsRetryable() async throws {
+        let transport = FakeGroupTransport()
+        let client = makeClient(transport)
+        let author = try Author()
+        async let first = client.feedPage()
+        let req = try await awaitReq(transport)
+        invalid(transport.latest, req.subId)
+        #expect(await first.outcome == .invalid(reason: "invalid: bad filter"))
+
+        async let second = client.feedPage()
+        let req2 = try await awaitReq(transport, count: 2)
+        #expect(req2.subId != req.subId)
+        #expect(req2.since == Self.floor)
+        let page = try posts(author, newest: Self.now - 10, count: 3)
+        feed(transport.latest, req2.subId, page)
+        let answer = await second
+        #expect(answer.outcome == .answered)
+        #expect(answer.events.map(\.id) == page.map(\.id))
+    }
+
+    @Test("invalid: on a recipes page is reported, and recipes are asked again")
+    func recipesInvalidIsRetryable() async throws {
+        let transport = FakeGroupTransport()
+        let client = makeClient(transport)
+        async let first = client.recipes()
+        let req = try await awaitReq(transport)
+        invalid(transport.latest, req.subId)
+        guard case .invalid = await first.outcome else {
+            Issue.record("expected .invalid")
+            return
+        }
+        async let second = client.recipes()
+        let req2 = try await awaitReq(transport, count: 2)
+        #expect(req2.tTags == FreshRelayClient.recipeTags)
+        feed(transport.latest, req2.subId, [])
+        #expect(await second.outcome == .answered)
+    }
+
+    @Test("invalid: on the tail ends it, and a new tail is sent again")
+    func tailInvalidIsRetryable() async throws {
+        let transport = FakeGroupTransport()
+        let client = makeClient(transport)
+        let box = TailBox()
+        let recorder = box.record(await client.liveTail(since: Self.now))
+        let req = try await awaitReq(transport)
+        invalid(transport.latest, req.subId)
+        await recorder.value
+        #expect(box.ended == [.invalid(reason: "invalid: bad filter")])
+
+        let box2 = TailBox()
+        let recorder2 = box2.record(await client.liveTail(since: Self.now))
+        let req2 = try await awaitReq(transport, count: 2)
+        #expect(req2.since == Self.now)
+        #expect(box2.ended.isEmpty)
+        await client.stopTail()
+        await recorder2.value
+    }
+
+    @Test("tail: a future-dated post can't move the resume point past now + 30 s")
+    func tailNewestIsClampedToSkew() async throws {
+        let transport = FakeGroupTransport()
+        let center = NotificationCenter()
+        let client = makeClient(transport, center: center)
+        let author = try Author()
+        let box = TailBox()
+        let recorder = box.record(await client.liveTail(since: Self.now - 1200))
+        let req = try await awaitReq(transport)
+        let future = try author.event(Self.now + 86_400)
+        let normal = try author.event(Self.now - 100)
+        feed(transport.latest, req.subId, [future, normal], eose: false)
+        #expect(await eventually { box.eventIds.count == 2 })
+
+        transport.latest?.dropConnection()
+        #expect(await eventually { box.lostCount == 1 })
+        center.post(name: Self.foreground, object: nil)
+        let reopened = await eventually { transport.opened.count == 2 && !self.reqs(transport.latest).isEmpty }
+        try #require(reopened)
+        let expected = Self.now + FreshRelayClient.futureSkewSeconds - FreshRelayClient.tailResumeOverlapSeconds
+        #expect(reqs(transport.latest)[0].since == expected)
+        #expect(box.revivedSince == [expected])
+        await client.stopTail()
+        await recorder.value
+    }
+
+    @Test("numbers too large for Int in an event from the relay drop the event; nothing traps")
+    func outOfRangeNumbersAreDropped() async throws {
+        let transport = FakeGroupTransport()
+        let client = makeClient(transport)
+        let author = try Author()
+        async let page = client.feedPage()
+        let req = try await awaitReq(transport)
+        let good = try author.event(Self.now - 5)
+        let base = good.toJSON()
+        let hugeTime = base.replacingOccurrences(of: "\"created_at\":\(good.createdAt)", with: "\"created_at\":1e100")
+        let hugeKind = base.replacingOccurrences(of: "\"kind\":1", with: "\"kind\":1e100")
+        let fraction = base.replacingOccurrences(of: "\"created_at\":\(good.createdAt)", with: "\"created_at\":\(good.createdAt).5")
+        #expect(hugeTime != base && hugeKind != base && fraction != base)
+        for json in [hugeTime, hugeKind, fraction] {
+            transport.latest?.feed("[\"EVENT\",\"\(req.subId)\",\(json)]")
+        }
+        feed(transport.latest, req.subId, [good])
+        let answer = await page
+        #expect(answer.outcome == .answered)
+        #expect(answer.events.map(\.id) == [good.id])
+        #expect(answer.rejected == 3)
     }
 }
 
