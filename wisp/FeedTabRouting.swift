@@ -6,8 +6,9 @@ import SwiftUI
 /// kind-dependent decisions pulled out of the view so the gates can assert
 /// on them without a SwiftUI host.
 enum FeedTabRouting {
-    /// Which body the feed tab renders for a kind.
-    enum Body: Equatable {
+    /// Which body the feed tab renders for a kind. `allCases` order is the
+    /// stacking order in `KeptMountedFeedBodies`.
+    enum Body: Hashable, CaseIterable {
         /// `OnlyFoodFeedViewModel`'s list (hashtag-backed, §7.4 latched).
         case onlyFood
         /// `FeedViewModel`'s list (follows / relay / relay set / extended).

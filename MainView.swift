@@ -1565,33 +1565,37 @@ struct MainView: View {
     /// the general feed; OnlyFood has its own loading / empty / relay-miss
     /// states. Both share the top bar, the picker and `feedPath`.
     ///
-    /// Both bodies stay mounted once shown (`KeptMountedFeedBodies`, §7):
+    /// Every body stays mounted once shown (`KeptMountedFeedBodies`, keyed
+    /// by `FeedTabRouting.Body`, §7):
     /// a `@ViewBuilder` switch here tore down OnlyFood's `ScrollView` on
     /// every kind change, and its notes — kept by the view model — came back
     /// scrolled to the top.
     @ViewBuilder
     private var feedContent: some View {
         let active = FeedTabRouting.body(for: viewModel.currentKind)
-        KeptMountedFeedBodies(active: active) {
-            onlyFoodBody
-        } general: {
-            VStack(spacing: 0) {
-                relayFeedStatusBanner
-                feedBody
+        KeptMountedFeedBodies(active: active) { key in
+            switch key {
+            case .onlyFood:
+                onlyFoodBody
+            case .general:
+                VStack(spacing: 0) {
+                    relayFeedStatusBanner
+                    feedBody
+                }
+            case .liveVideo:
+                LiveVideoFeedView(
+                    isActive: active == .liveVideo,
+                    onSelect: { stream in
+                        feedPath.append(LiveStreamRoute(
+                            aTagValue: stream.aTagValue,
+                            hostPubkey: stream.activity.hostPubkey,
+                            dTag: stream.activity.dTag,
+                            relayHints: stream.activity.relayHints
+                        ))
+                    },
+                    onRefresh: { viewModel.refreshLiveDiscovery() }
+                )
             }
-        } live: {
-            LiveVideoFeedView(
-                isActive: active == .liveVideo,
-                onSelect: { stream in
-                    feedPath.append(LiveStreamRoute(
-                        aTagValue: stream.aTagValue,
-                        hostPubkey: stream.activity.hostPubkey,
-                        dTag: stream.activity.dTag,
-                        relayHints: stream.activity.relayHints
-                    ))
-                },
-                onRefresh: { viewModel.refreshLiveDiscovery() }
-            )
         }
     }
 
