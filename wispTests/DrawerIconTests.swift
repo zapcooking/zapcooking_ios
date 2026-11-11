@@ -141,6 +141,15 @@ struct NavGlyphAssetTests {
         }
     }
 
+    /// The active-state cut (sheet up) is its own bundled artwork and
+    /// renders differently from the outline glyph.
+    @Test func gadgetsFillArt_isBundled_andDistinct() throws {
+        let outline = try #require(UIImage(named: "ZapNavGadgets"))
+        let fill = try #require(UIImage(named: "ZapNavGadgetsFill"))
+        #expect(fill.renderingMode != .alwaysOriginal)
+        #expect(Self.render(outline) != Self.render(fill))
+    }
+
     private static func render(_ image: UIImage) -> Data? {
         let side: CGFloat = 64
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in

@@ -971,6 +971,7 @@ struct MainView: View {
                     onSousChef: SousChefGate.entryVisible() ? { showSousChef = true } : nil,
                     onCheffy: CheffyGate.entryVisible() ? { showCheffy = true } : nil,
                     onGadgets: { showCookingUtilitiesSheet = true },
+                    gadgetsActive: showCookingUtilitiesSheet,
                     viewModel: recipeFeedVM
                 )
                 if !drawerOpen && !isWatchOnly {
@@ -1330,16 +1331,17 @@ struct MainView: View {
         .accessibilityIdentifier("feed-cheffy-entry")
     }
 
-    /// Gadgets (timers) straight from the bar, drawn with Android's
-    /// measuring cup (`ic_kitchen_gadgets`) and sitting in the same actions
+    /// Gadgets (timers) straight from the bar, drawn with the egg-timer
+    /// artwork (Android's Gadgets glyph) and sitting in the same actions
     /// group Android puts it in. It opens the same sheet the drawer's
     /// Gadgets row does — that was three taps deep, which is three too many
-    /// with something on the hob.
+    /// with something on the hob. The filled cut shows while the sheet is
+    /// up, mirroring the web header's active weight.
     private var gadgetsButton: some View {
         Button {
             showCookingUtilitiesSheet = true
         } label: {
-            Image("ZapNavGadgets")
+            Image(showCookingUtilitiesSheet ? "ZapNavGadgetsFill" : "ZapNavGadgets")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: FeedTopBarLayout.gadgetsGlyphSize)

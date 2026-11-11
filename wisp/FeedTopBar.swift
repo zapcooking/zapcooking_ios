@@ -51,7 +51,7 @@ enum FeedTopBarLayout {
     /// smaller than its neighbours so the full-bleed artwork matches their
     /// visual height; same trick here.
     static let gadgetsTargetSize: CGFloat = 44
-    static let gadgetsGlyphSize: CGFloat = 22
+    static let gadgetsGlyphSize: CGFloat = 24
 }
 
 /// Leading and trailing content in an `HStack`, the centre content overlaid
