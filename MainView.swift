@@ -218,6 +218,11 @@ struct MainView: View {
             }
         }
         .task {
+            // Launch janitor first: CFNetworkDownload leftovers stack up in
+            // tmp (85 GB / 61k files on a long-lived install). See TmpJanitor.
+            // sweepAtLaunch runs the walk on a detached utility task, so the
+            // main thread is free while it works.
+            _ = await TmpJanitor.sweepAtLaunch()
             await cookingTimers.prepareNotifications()
         }
         #if DEBUG
