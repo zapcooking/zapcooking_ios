@@ -1,8 +1,8 @@
 # GATE — fresh/specials-on (PR #219: Fresh specials S5, flag on)
 
-Stacked on #217 (`fresh/specials-cards` at cd84956, its gate HEAD). One
-code commit, **3ef75ef (code frozen)**. This file is the only commit after
-it, and it is the HEAD commit. Merge only after Seth's device pass of #217
+Stacked on #217. #217's gate HEAD ee4797e, which carries its Copilot review
+fixes (4bac078), is merged in as 8b37edb. One S5 code commit, **3ef75ef
+(code frozen)**. This file replaces gate 6d59969 and is the HEAD commit. Merge only after Seth's device pass of #217
 with the flag flipped locally.
 
 The only app change: `FeatureFlags.freshSpecialsEnabled = true`.
@@ -19,7 +19,7 @@ Fresh outside those suites. Nothing publishes an event or sends AUTH.
 
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), DerivedData `wisp-specials-cards`
-(incremental): **TEST BUILD SUCCEEDED** at 3ef75ef. Zero warnings in
+(incremental): **TEST BUILD SUCCEEDED** at 8b37edb. Zero warnings in
 `FeatureFlags.swift`, `wispTests/FreshSpecialsTests.swift`,
 `wispTests/FreshTopicListTests.swift` and
 `wispTests/FreshFeedViewModelTests.swift`. No "will never be executed"
@@ -32,17 +32,17 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,id=90B23E20-BA47-4AD0-98EF-175513626A4B' \
   -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-specials-cards \
   -parallel-testing-enabled NO -only-testing:wispTests \
-  -collect-test-diagnostics never -resultBundlePath s5-gate.xcresult
-sh ci_scripts/gate.sh --parse s5-gate.xcresult
+  -collect-test-diagnostics never -resultBundlePath s5b-gate.xcresult
+sh ci_scripts/gate.sh --parse s5b-gate.xcresult
 ```
 ```
-gate: 1955 passed / 3 failed / 23 skipped / 1981 total  (bundle result: Failed)
+gate: 1960 passed / 3 failed / 23 skipped / 1986 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1981 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1986 tests ran
 ```
-First full run at 3ef75ef. The total equals #217's (one flag test replaced
+First full run at 8b37edb. (At 3ef75ef: PASS 1955/3/23/1981.) The total equals #217's (one flag test replaced
 one, one topic-list test replaced one). No local patch. No
 `project.pbxproj` diff.
 
