@@ -1,11 +1,30 @@
 # GATE — fresh/specials-cards (PR #217: Fresh specials S3)
 
-Based on main. #216 and #218 are merged; main e791f73 came in as
-**1572fec**. The only conflict was `FreshScreenshotFixturesTests.swift`,
-where both sides had added tests at the end of the suite; all three were
-kept. This branch's code commits are 8f53e4d (cards) and cd8185a
-(device-pass fixes). This file replaces gate 501e133 and is the HEAD
-commit. A review fix breaks the freeze: push a fresh gate file last.
+Based on main (#216 and #218 merged; main e791f73 merged as 1572fec). Code
+commits: 8f53e4d (cards), cd8185a (device-pass fixes) and **4bac078 (code
+frozen)**, the Copilot review fixes. This file replaces gate cd84956 and is
+the HEAD commit. A review fix breaks the freeze: push a fresh gate file
+last. #219 (S5) is stacked on this branch and merges it.
+
+## 4bac078: review fixes (Copilot, reviewed at 3fbe498)
+1. **Spotlight taps** go through `ArticleTapRouting.appendCardTap`, so
+   long-form opens the recipe or article reader.
+2. **Duplicates:** a card post that later reaches the list (a page, or the
+   pill tapped) leaves its card, and an emptied card goes. Behind the pill
+   it stays in the card.
+3. **Deactivation mid-build:** the loader rechecks `enabled` after the
+   topic fetch and before each preview, so no preview reopens the closed
+   socket.
+4. **Persistence:** a placed spotlight's posts are queued for the event
+   store.
+5. Spotlight-only authors' profiles were already fixed in cd8185a.
+
+New tests, each red on cd84956 and green here:
+- `pagedPostLeavesTheCard`
+- `tailPostLeavesTheCardOnReveal`
+- `spotlightPostsArePersisted`
+- `spotlightTapUsesCardRouting` (a `MainView` source check)
+- `FreshSpotlightLoaderTests/disabledDuringTopicsAsksNoPreview`
 
 **What the merge brings:** #218's recipe-row rule (`RecipeParser.isRecipe`
 in `loadRecipes`). It merged cleanly next to this branch's box pool. Both
@@ -30,7 +49,7 @@ from the in-app fixture relay with a watch-only account.
 
 ## Gate 1: build green, no new warnings in touched files
 Mac Studio, Xcode 27.2 (27B52), DerivedData `wisp-specials-cards` (cold at
-fd98482, then incremental): **TEST BUILD SUCCEEDED** at 1572fec. Zero
+fd98482, then incremental): **TEST BUILD SUCCEEDED** at 4bac078. Zero
 warnings in `RichInlineTextView.swift`, `wispTests/FreshSpecialsTests.swift`,
 `wispTests/FreshFeedViewModelTests.swift`, `wisp/FreshFeedViewModel.swift`, `wisp/FreshSpecialCards.swift`,
 `wisp/FreshRecipeBox.swift`, `wisp/FreshScreenshotFixtures.swift`,
@@ -46,18 +65,18 @@ xcodebuild test-without-building -project wisp.xcodeproj -scheme wisp \
   -destination 'platform=iOS Simulator,id=90B23E20-BA47-4AD0-98EF-175513626A4B' \
   -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wisp-specials-cards \
   -parallel-testing-enabled NO -only-testing:wispTests \
-  -collect-test-diagnostics never -resultBundlePath s3e-gate.xcresult
-sh ci_scripts/gate.sh --parse s3e-gate.xcresult
+  -collect-test-diagnostics never -resultBundlePath s3g-gate.xcresult
+sh ci_scripts/gate.sh --parse s3g-gate.xcresult
 ```
 ```
-gate: 1955 passed / 3 failed / 23 skipped / 1981 total  (bundle result: Failed)
+gate: 1960 passed / 3 failed / 23 skipped / 1986 total  (bundle result: Failed)
 gate:   known   FeedRenderableTests/mentionTaggedNoteFollowsReplyGate
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheRawToken_groupChatBubble
 gate:   known   ColorHierarchyTests/textTiers_keepTheirContrastFloors_onTheSixtyPercentWashes
-gate: PASS — failure set is exactly the known set (3/3); 1981 tests ran
+gate: PASS — failure set is exactly the known set (3/3); 1986 tests ran
 ```
-First full run at 1572fec. (Earlier: 1945/1971 at 8f53e4d, 1950/1976 at
-cd8185a and 1953/1979 at 9cd92ca.) New tests:
+First full run at 4bac078. (Earlier: 1945/1971 at 8f53e4d, 1950/1976 at
+cd8185a, 1953/1979 at 9cd92ca and 1955/1981 at 1572fec.) New tests:
 - `FreshSpecialsListTests` (18). Four came with cd8185a:
   - tile text with mentions;
   - profiles requested when a spotlight is readied;
