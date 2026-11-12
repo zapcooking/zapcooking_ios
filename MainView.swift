@@ -1941,7 +1941,9 @@ struct MainView: View {
                 profiles: freshFeedVM.profiles,
                 me: freshFeedVM.pubkey,
                 onPostTap: { event in
-                    feedPath.append(ThreadRoute(eventId: event.id, authorPubkey: event.pubkey))
+                    // A preview can hold long-form: recipe or article reader,
+                    // as the feed's own cards route it.
+                    ArticleTapRouting.appendCardTap(to: &feedPath, event: event)
                 },
                 onProfileTap: { pubkey in
                     feedPath.append(ProfileRoute(pubkey: pubkey))
