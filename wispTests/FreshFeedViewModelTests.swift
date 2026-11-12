@@ -105,7 +105,10 @@ import Testing
             persist: { rules.persisted.append(contentsOf: $0) },
             visitStorage: store, lastVisit: FreshLastVisit(),
             notificationCenter: center, retryDelays: retry,
-            profileSource: NoProfiles()
+            profileSource: NoProfiles(),
+            // The plain list (cards: `FreshSpecialsListTests`); with the
+            // shipped flag on this would also start the topic-list GET.
+            specialsEnabled: false
         )
         return Rig(transport: transport, vm: vm, center: center, rules: rules, store: store)
     }
@@ -801,7 +804,10 @@ import Testing
             persist: { rules.persisted.append(contentsOf: $0) },
             visitStorage: store, lastVisit: FreshLastVisit(),
             notificationCenter: center, retryDelays: [.milliseconds(30)],
-            profileSource: NoProfiles()
+            profileSource: NoProfiles(),
+            // The plain list (cards: `FreshSpecialsListTests`); with the
+            // shipped flag on this would also start the topic-list GET.
+            specialsEnabled: false
         )
         return Rig(transport: transport, vm: vm, center: center, rules: rules, store: store)
     }

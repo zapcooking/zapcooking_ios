@@ -51,9 +51,9 @@ import Testing
 
     // MARK: - Flag
 
-    @Test("ships off: freshSpecialsEnabled is false")
-    func flagIsOff() {
-        #expect(FeatureFlags.freshSpecialsEnabled == false)
+    @Test("ships on: freshSpecialsEnabled is true (S5, after Seth's device pass)")
+    func flagIsOn() {
+        #expect(FeatureFlags.freshSpecialsEnabled == true)
     }
 
     // MARK: - Slots

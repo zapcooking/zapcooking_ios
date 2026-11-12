@@ -49,7 +49,7 @@ enum FeatureFlags {
     /// `false` nothing places a card, fetches the topic list or asks for a
     /// topic preview, and the Fresh list is exactly as before.
     /// Nonisolated: the topic list (an actor) reads it.
-    nonisolated static let freshSpecialsEnabled: Bool = false
+    nonisolated static let freshSpecialsEnabled: Bool = true
 
     /// Sous Chef URL import (Concern 2.5) — free anonymous
     /// `/api/extract-recipe/public` extraction into a preview + publish
