@@ -152,7 +152,9 @@ final class FreshSpotlightLoader {
     func build() async -> FreshSpecial? {
         guard deps.enabled(), !disposed, !isOut, previewHoldLeft() == 0 else { return nil }
         let groups = await deps.topics()
-        guard !disposed, !groups.isEmpty else { return nil }
+        // Fresh may have gone away during the topic fetch: no preview then
+        // (it would reopen the socket the view model just closed).
+        guard !disposed, deps.enabled(), !groups.isEmpty else { return nil }
         if markOutIfExhausted(groups) { return nil }
         var tried: Set<String> = []
         for _ in 0..<FreshSpecialsConfig.maxTopicTries {
@@ -164,6 +166,7 @@ final class FreshSpotlightLoader {
                 return nil
             }
             tried.insert(topic.slug)
+            guard !disposed, deps.enabled() else { return nil }
             let answer = await deps.preview(topic.slug)
             guard !disposed, deps.enabled() else { return nil }
             if Self.isRefusal(answer.outcome) {

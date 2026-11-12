@@ -32,6 +32,7 @@ import Testing
         var previews: [String: [NostrEvent]] = [:]
         var asked: [String] = []
         var topicsAsked = 0
+        var persisted: [NostrEvent] = []
     }
 
     struct Rig {
@@ -70,7 +71,7 @@ import Testing
             isPrivate: { _ in false },
             isDeleted: { deleted.ids.contains($0.id) },
             ownLocalPosts: { [] },
-            persist: { _ in },
+            persist: { scripted.persisted += $0 },
             visitStorage: visitStore, lastVisit: FreshLastVisit(),
             notificationCenter: center, retryDelays: [.milliseconds(30)],
             profileSource: profiles ?? Base.NoProfiles(),
@@ -536,5 +537,67 @@ import Testing
         scroll(rig.vm, to: firstAt + 6)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(!cards(rig.vm).contains { if case .recipe(let e) = $0.special { return e.id == article.id }; return false })
+    }
+
+    // MARK: - Review fixes (#217)
+
+    /// A spotlight placed after the first card; returns its posts.
+    func placeSpotlight(_ rig: Rig, spot: [NostrEvent]) async throws -> [NostrEvent] {
+        for topic in Self.groups.flatMap(\.topics) { rig.scripted.previews[topic.slug] = spot }
+        try await start(rig, page: try Self.page(FreshRelayClient.pageSize), recipes: try Self.oldRecipes(6))
+        await rig.vm.prepareSpotlightAndWait()
+        let firstAt = rig.vm.posts.firstIndex { $0.id == cards(rig.vm).first?.after } ?? 0
+        scroll(rig.vm, to: firstAt + 2)
+        _ = await t.eventually { self.cards(rig.vm).count == 2 }
+        try #require(cards(rig.vm).count == 2)
+        return Self.spotlightPosts(cards(rig.vm)[1].special)
+    }
+
+    @Test("a spotlight post that later arrives on a feed page leaves its card (shown once)")
+    func pagedPostLeavesTheCard() async throws {
+        let rig = makeRig()
+        let spot = try Self.page(3, newest: Self.now - 20_000, step: 60)
+        let shown = try await placeSpotlight(rig, spot: spot)
+        async let more: Void = rig.vm.loadMoreAndWait()
+        let pageReq = try #require(await t.eventually {
+            self.reqs(rig).contains { $0.limit == FreshRelayClient.pageSize && $0.until != nil }
+        } ? reqs(rig).first { $0.limit == FreshRelayClient.pageSize && $0.until != nil } : nil)
+        t.answer(rig.transport, pageReq, [spot[0]] + (try Self.page(4, newest: Self.now - 30_000)))
+        await more
+        #expect(rig.vm.posts.contains { $0.id == spot[0].id })
+        #expect(Set(Self.spotlightPosts(cards(rig.vm)[1].special).map(\.id)) == Set(shown.map(\.id)).subtracting([spot[0].id]))
+    }
+
+    @Test("a spotlight post from the live tail stays in its card behind the pill, and leaves it when the pill is tapped")
+    func tailPostLeavesTheCardOnReveal() async throws {
+        let rig = makeRig()
+        let spot = try Self.page(3, newest: Self.now - 3_000, step: 60)
+        _ = try await placeSpotlight(rig, spot: spot)
+        let tail = try #require(reqs(rig).first(where: Base.isTail))
+        t.answer(rig.transport, tail, [spot[1]], eose: false)
+        #expect(await t.eventually { rig.vm.newPostsCount == 1 })
+        #expect(Self.spotlightPosts(cards(rig.vm)[1].special).contains { $0.id == spot[1].id })
+        rig.vm.showNewPosts()
+        #expect(rig.vm.posts.contains { $0.id == spot[1].id })
+        #expect(!Self.spotlightPosts(cards(rig.vm)[1].special).contains { $0.id == spot[1].id })
+    }
+
+    @Test("a placed spotlight's posts are queued for the event store (its tiles' threads open offline)")
+    func spotlightPostsArePersisted() async throws {
+        let rig = makeRig()
+        let spot = try Self.page(3, newest: Self.now - 3_000, step: 60)
+        let shown = try await placeSpotlight(rig, spot: spot)
+        #expect(Set(shown.map(\.id)).isSubset(of: Set(rig.scripted.persisted.map(\.id))))
+    }
+
+    @Test("a spotlight post routes taps like the feed's cards (recipe / article reader for long-form)")
+    func spotlightTapUsesCardRouting() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let main = try String(contentsOf: root.appendingPathComponent("MainView.swift"), encoding: .utf8)
+        let start = try #require(main.range(of: "private func freshSpecialCard("))
+        let end = try #require(main.range(of: "private var freshList: some View", range: start.upperBound..<main.endIndex))
+        let body = main[start.lowerBound..<end.lowerBound]
+        #expect(body.contains("ArticleTapRouting.appendCardTap(to: &feedPath, event: event)"))
+        #expect(!body.contains("ThreadRoute("))
     }
 }

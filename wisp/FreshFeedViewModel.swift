@@ -1007,6 +1007,12 @@ final class FreshFeedViewModel {
         posts = merged
         observeProfiles(in: merged)
         if !placedSlots.isEmpty {
+            // A card post that has since reached the list (a later page, or
+            // the pill) is shown there only: it leaves its card, and a card
+            // left with none goes. Posts still waiting behind the pill stay in
+            // the card until the reader taps it (they aren't on screen twice).
+            let inFeed = Set(merged.map(\.id))
+            filterCards(dropping: { inFeed.contains($0.id) })
             // Posts that left the list (reported, blocked, deleted): their
             // cards move up to the post above (S1 `reanchor`).
             let removed = Set(previous).subtracting(merged.map(\.id))
@@ -1177,7 +1183,11 @@ final class FreshFeedViewModel {
             boxTaken.insert(FreshRecipeBox.address(recipe))
             return .recipe(recipe)
         case .spotlight:
-            return spotlights?.take()
+            guard let card = spotlights?.take() else { return nil }
+            // Kept like the feed's own posts, so a tile's thread opens from
+            // the event store without another relay lookup.
+            if case .spotlight(_, let posts) = card { persist(posts) }
+            return card
         }
     }
 
