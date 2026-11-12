@@ -1,15 +1,50 @@
 import Foundation
 import Observation
 
-/// One row of the Fresh list as the divider sees it. v1 has no special
-/// cards in the list itself (the recipe row sits after the finish line).
+/// One row of the Fresh list as the divider sees it: a post, or a special
+/// card (recipe box or spotlight, behind `FeatureFlags.freshSpecialsEnabled`)
+/// placed after its anchor post.
 nonisolated struct FreshRow: FreshDividable, Identifiable, Equatable {
-    let event: NostrEvent
-    var id: String { event.id }
-    var isSpecialCard: Bool { false }
-    var dividerCreatedAt: Int { event.createdAt }
+    enum Content {
+        case post(NostrEvent)
+        case card(key: String, special: FreshSpecial)
+    }
 
-    static func == (a: FreshRow, b: FreshRow) -> Bool { a.event.id == b.event.id }
+    let content: Content
+
+    init(event: NostrEvent) { content = .post(event) }
+    init(cardKey: String, special: FreshSpecial) { content = .card(key: cardKey, special: special) }
+
+    /// The post, or nil for a card.
+    var event: NostrEvent? {
+        if case .post(let e) = content { return e }
+        return nil
+    }
+
+    var special: FreshSpecial? {
+        if case .card(_, let special) = content { return special }
+        return nil
+    }
+
+    /// The post's id, or the card's slot key (`sp:<n>`).
+    var id: String {
+        switch content {
+        case .post(let e): return e.id
+        case .card(let key, _): return key
+        }
+    }
+
+    var isSpecialCard: Bool { event == nil }
+    /// Cards are skipped by the divider; the value is never read for one.
+    var dividerCreatedAt: Int { event?.createdAt ?? 0 }
+
+    static func == (a: FreshRow, b: FreshRow) -> Bool {
+        switch (a.content, b.content) {
+        case let (.post(x), .post(y)): return x.id == y.id
+        case let (.card(k1, s1), .card(k2, s2)): return k1 == k2 && s1 == s2
+        default: return false
+        }
+    }
 }
 
 extension FreshDividedRow where R == FreshRow {
@@ -109,9 +144,14 @@ final class FreshFeedViewModel {
     /// above it (by id or by coordinate, so another edit of the same recipe
     /// counts as shown), at most `recipeRowLimit`.
     var recipePicks: [NostrEvent] {
-        // No box cards yet (`freshSpecialsEnabled` is off): nothing taken.
-        FreshRecipeBox.rowPicks(pool: recipePool, feed: posts, boxTaken: [], limit: Self.recipeRowLimit)
+        // Minus what the recipe-box cards took (Seth, 2026-11-11).
+        FreshRecipeBox.rowPicks(pool: recipePool, feed: posts, boxTaken: boxTaken, limit: Self.recipeRowLimit)
     }
+    /// Decided special-card slots, in slot order (`freshSpecialsEnabled`):
+    /// a card after its anchor post, or a skipped slot.
+    private(set) var placedSlots: [FreshPlacedSlot] = []
+    /// Recipe coordinates the box cards took since the last refresh.
+    private(set) var boxTaken: Set<String> = []
     /// This session's previous-visit mark (`FreshLastVisit`).
     private(set) var visitMark: Int?
     private(set) var tailStatus: FreshTailStatus = .idle
@@ -128,9 +168,21 @@ final class FreshFeedViewModel {
     /// The pill shows while posts wait that the reader hasn't dismissed.
     var showsNewPostsPill: Bool { newPostsCount > pillDismissedAt }
 
-    /// `posts` with the "new since your last visit" divider placed.
+    /// `posts` with the special cards after their anchors and the "new since
+    /// your last visit" divider placed (cards don't count for it).
     var rows: [FreshDividedRow<FreshRow>] {
-        FreshDivider.withDivider(posts.map(FreshRow.init(event:)), mark: visitMark)
+        let items: [FreshRow]
+        if placedSlots.isEmpty {
+            items = posts.map(FreshRow.init(event:))
+        } else {
+            items = FreshSpecials.place(posts, id: { $0.id }, slots: placedSlots).map {
+                switch $0 {
+                case .item(let event): return FreshRow(event: event)
+                case .card(let key, let special): return FreshRow(cardKey: key, special: special)
+                }
+            }
+        }
+        return FreshDivider.withDivider(items, mark: visitMark)
     }
 
     var isEmpty: Bool { hasLoaded && posts.isEmpty && !loadFailed }
@@ -157,6 +209,16 @@ final class FreshFeedViewModel {
     /// A full page whose posts are all filtered out adds no row to scroll to;
     /// this many such pages in a row are fetched without waiting for a scroll.
     nonisolated static let maxEmptyPageHops = 5
+    /// Special-card slots are decided once their anchor is at most this many
+    /// posts below the deepest post the reader has reached. An index stand-in
+    /// for web's "within three screens" (a LazyVStack exposes no geometry).
+    nonisolated static let slotDecideAhead = 12
+    /// More than this many posts below the reader, a slot waits for the
+    /// rotation's own next type (web `strict`, "more than two screens
+    /// below"); closer, whichever type is ready takes it. A slot whose anchor
+    /// the reader has already reached is skipped: nothing is inserted above
+    /// what the reader is reading.
+    nonisolated static let slotNearPosts = 4
 
     // MARK: Dependencies
 
@@ -175,6 +237,15 @@ final class FreshFeedViewModel {
     @ObservationIgnored private let retryDelays: [Duration]
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let profileSource: FreshProfileSource
+    /// `FeatureFlags.freshSpecialsEnabled` (tests and the screenshot
+    /// fixtures pass true). Off: no slots, no topic list, no preview, no early
+    /// recipe download; the list is exactly as before.
+    @ObservationIgnored let specialsEnabled: Bool
+    @ObservationIgnored private let specialsStore: FreshSpecialsStore
+    @ObservationIgnored private let specialsRng: FreshRandom
+    @ObservationIgnored private let topicGroups: () async -> [FreshTopicGroup]
+    @ObservationIgnored private let topicPreview: ((String) async -> FreshAnswer)?
+    @ObservationIgnored private let specialsSchedule: ((TimeInterval, @escaping @MainActor () -> Void) -> () -> Void)?
 
     // MARK: Internal state
 
@@ -213,6 +284,20 @@ final class FreshFeedViewModel {
     @ObservationIgnored private var hideObserver: NSObjectProtocol?
     @ObservationIgnored private var publishObserver: NSObjectProtocol?
     @ObservationIgnored private var deletionObserver: NSObjectProtocol?
+    // Specials (session state lives as long as this view model; a refresh
+    // resets the slots and keeps the rotation and the used topics, as web).
+    @ObservationIgnored private var spotlights: FreshSpotlightLoader?
+    @ObservationIgnored private var slotPlan: FreshSlots
+    @ObservationIgnored private var rotation = FreshRotation()
+    @ObservationIgnored private var slotSerial = 0
+    /// The deepest post the reader's list has shown (by id, so posts inserted
+    /// above it don't move it).
+    @ObservationIgnored private var deepestSeenId: String?
+    /// Older recipes for the box cards (`FreshRecipeBox.buildPool`), from the
+    /// same download as the recipe row, uncapped.
+    @ObservationIgnored private var boxPool: [NostrEvent] = []
+    /// Cards whose appearance was recorded in the shown stores.
+    @ObservationIgnored private var recordedCards: Set<String> = []
 
     init(
         pubkey: String,
@@ -229,7 +314,13 @@ final class FreshFeedViewModel {
         notificationCenter: NotificationCenter = .default,
         retryDelays: [Duration] = FreshFeedViewModel.tailRetryDelays,
         sleep: (@Sendable (Duration) async throws -> Void)? = nil,
-        profileSource: FreshProfileSource? = nil
+        profileSource: FreshProfileSource? = nil,
+        specialsEnabled: Bool = FeatureFlags.freshSpecialsEnabled,
+        specialsStore: FreshSpecialsStore? = nil,
+        specialsRng: FreshRandom? = nil,
+        topicGroups: (() async -> [FreshTopicGroup])? = nil,
+        topicPreview: ((String) async -> FreshAnswer)? = nil,
+        specialsSchedule: ((TimeInterval, @escaping @MainActor () -> Void) -> () -> Void)? = nil
     ) {
         self.pubkey = pubkey
         self.client = client ?? FreshRelayClient()
@@ -253,6 +344,14 @@ final class FreshFeedViewModel {
         self.retryDelays = retryDelays.isEmpty ? FreshFeedViewModel.tailRetryDelays : retryDelays
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
         self.profileSource = profileSource ?? LiveFreshProfileSource()
+        self.specialsEnabled = specialsEnabled
+        self.specialsStore = specialsStore ?? FreshSpecialsStore(pubkey: pubkey)
+        let rng = specialsRng ?? { Double.random(in: 0..<1) }
+        self.specialsRng = rng
+        self.slotPlan = FreshSlots(rng: rng)
+        self.topicGroups = topicGroups ?? { await FreshTopicList.shared.groups() }
+        self.topicPreview = topicPreview
+        self.specialsSchedule = specialsSchedule
     }
 
     deinit {
@@ -289,9 +388,14 @@ final class FreshFeedViewModel {
             guard loadTask == nil else { return }
             let epoch = self.epoch
             loadTask = Task { [weak self] in await self?.loadFirstPage(epoch: epoch) }
+            // Special cards: the recipe box needs the recipe download, which is
+            // much bigger than page 1. Asked alongside it, so the first slot
+            // (after post 5–7) isn't reached before a recipe is ready.
+            if specialsEnabled && !recipesLoaded { startRecipes() }
         } else {
             startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
             if finishLine.caughtUp && !recipesLoaded { startRecipes() }
+            startSpecials()
         }
     }
 
@@ -373,6 +477,7 @@ final class FreshFeedViewModel {
         guard fresh, epoch == self.epoch, isActive else { return }
         retryAttempt = 0
         startTail(since: tailAnchor() - FreshRelayClient.tailResumeOverlapSeconds)
+        startSpecials()
     }
 
     // MARK: - Paging
@@ -431,6 +536,7 @@ final class FreshFeedViewModel {
         loadTask = nil
         if isActive {
             startTail(since: tailAnchor())
+            startSpecials()
         }
     }
 
@@ -475,6 +581,7 @@ final class FreshFeedViewModel {
                     pendingNew = []
                     newPostsCount = 0
                     pillDismissedAt = 0
+                    resetSlotsForRefresh()
                 }
             }
             let shownIds = Set(relayPosts.map(\.id))
@@ -552,10 +659,16 @@ final class FreshFeedViewModel {
         }
         // Kept beyond the row's limit so recipes excluded for being in the
         // feed leave room for others.
-        recipePool = Array(FreshRelayClient.newestFirst(Array(byCoordinate.values)).prefix(Self.recipePoolLimit))
+        let all = FreshRelayClient.newestFirst(Array(byCoordinate.values))
+        recipePool = Array(all.prefix(Self.recipePoolLimit))
         recipesLoaded = answer.outcome == .answered
         recipeTask = nil
         observeProfiles(in: recipePool)
+        if specialsEnabled {
+            boxPool = FreshRecipeBox.buildPool(all, now: now())
+            observeProfiles(in: boxPool)
+            decideSlots()
+        }
     }
 
     // MARK: - Tail
@@ -740,7 +853,10 @@ final class FreshFeedViewModel {
         guard let i = relayPosts.firstIndex(where: { $0.kind == 30023 && RecipeRepository.coordinate($0) == c }) else {
             return false
         }
-        if relayPosts[i].createdAt < event.createdAt { relayPosts[i] = event }
+        if relayPosts[i].createdAt < event.createdAt {
+            renameAnchor(relayPosts[i].id, to: event.id)
+            relayPosts[i] = event
+        }
         return true
     }
 
@@ -827,6 +943,8 @@ final class FreshFeedViewModel {
         pillDismissedAt = min(pillDismissedAt, newPostsCount)
         ownPosts = ownPosts.filter { !isDeleted($0.value) }
         recipePool.removeAll(where: isDeleted)
+        boxPool.removeAll(where: isDeleted)
+        filterCards(dropping: isDeleted)
         emit()
     }
 
@@ -842,6 +960,8 @@ final class FreshFeedViewModel {
         pillDismissedAt = min(pillDismissedAt, newPostsCount)
         ownPosts = ownPosts.filter { !isHiddenLocally($0.value) }
         recipePool.removeAll(where: isHiddenLocally)
+        boxPool.removeAll(where: isHiddenLocally)
+        filterCards(dropping: isHiddenLocally)
         emit()
     }
 
@@ -870,7 +990,10 @@ final class FreshFeedViewModel {
             let c = RecipeRepository.coordinate(own)
             guard seenOwnCoordinates.insert(c).inserted else { return false }  // an older own edit
             if let row = rowByCoordinate[c] {
-                if merged[row].createdAt < own.createdAt { merged[row] = own }
+                if merged[row].createdAt < own.createdAt {
+                    renameAnchor(merged[row].id, to: own.id)
+                    merged[row] = own
+                }
                 return false
             }
             return true
@@ -880,14 +1003,243 @@ final class FreshFeedViewModel {
             merged.insert(own, at: index)
             shownIds.insert(own.id)
         }
+        let previous = posts.map(\.id)
         posts = merged
         observeProfiles(in: merged)
+        if !placedSlots.isEmpty {
+            // A card post that has since reached the list (a later page, or
+            // the pill) is shown there only: it leaves its card, and a card
+            // left with none goes. Posts still waiting behind the pill stay in
+            // the card until the reader taps it (they aren't on screen twice).
+            let inFeed = Set(merged.map(\.id))
+            filterCards(dropping: { inFeed.contains($0.id) })
+            // Posts that left the list (reported, blocked, deleted): their
+            // cards move up to the post above (S1 `reanchor`).
+            let removed = Set(previous).subtracting(merged.map(\.id))
+            if !removed.isEmpty {
+                placedSlots = FreshSpecials.reanchor(placedSlots, order: previous, removed: removed)
+            }
+        }
+        decideSlots()
 
         // The newest row shown is the next visit's mark (own posts and edits
         // included), clamped like the tail anchor.
         if isActive, appActive, let newest = merged.map(\.createdAt).max() {
             let ceiling = now() + FreshRelayClient.futureSkewSeconds
             lastVisit.recordNewest(min(newest, ceiling), pubkey: pubkey, storage: visitStorage)
+        }
+    }
+
+    // MARK: - Special cards (FeatureFlags.freshSpecialsEnabled)
+
+    /// A post row appeared (the list's `onAppear`): paging, and how far down
+    /// the reader is, which decides the special-card slots.
+    func postAppeared(rowIndex: Int) {
+        let rows = self.rows
+        if let position = Self.postPosition(ofRow: rowIndex, in: rows),
+           position >= posts.count - Self.loadMorePrefetch {
+            loadMore()
+        }
+        guard specialsEnabled, rows.indices.contains(rowIndex),
+              case .row(let row) = rows[rowIndex], let event = row.event else { return }
+        let index = postIndex()
+        let deepest = deepestSeenId.flatMap { index[$0] } ?? -1
+        if let at = index[event.id], at > deepest {
+            deepestSeenId = event.id
+            decideSlots()
+        }
+    }
+
+    /// A card appeared: it counts as shown for this account (web marks a
+    /// spotlight when half of it is on screen and a box recipe as it nears
+    /// the screen; here, when the row appears). Once per card.
+    func cardAppeared(key: String) {
+        guard specialsEnabled, recordedCards.insert(key).inserted,
+              let special = placedSlots.first(where: { $0.key == key })?.special else { return }
+        let now = now()
+        switch special {
+        case .recipe(let recipe):
+            specialsStore.markRecipeBoxSeen(FreshRecipeBox.address(recipe), now: now)
+        case .spotlight(let topic, let posts):
+            specialsStore.markShown(posts.map(\.id), now: now)
+            specialsStore.markTopicShown(topic.slug, now: now)
+        }
+    }
+
+    /// Create the spotlight loader once, and keep one spotlight ready while
+    /// the feed is shown.
+    private func startSpecials() {
+        guard specialsEnabled, isActive else { return }
+        if spotlights == nil {
+            let client = self.client
+            let preview = topicPreview ?? { slug in await client.topicPreview(slug: slug) }
+            spotlights = FreshSpotlightLoader(.init(
+                preview: preview,
+                topics: topicGroups,
+                accept: { [weak self] in self?.accept($0) ?? false },
+                shown: { [weak self] in self?.shownSpotlightIds() ?? [] },
+                exclude: { [weak self] in self?.onScreenIds() ?? [] },
+                topicHistory: { [weak self] in self?.specialsStore.loadTopicHistory() ?? [:] },
+                rng: specialsRng,
+                schedule: specialsSchedule ?? FreshSpotlightLoader.taskTimer,
+                onChange: { [weak self] in self?.spotlightChanged() },
+                // Never while the feed isn't shown: its socket is closed.
+                enabled: { [weak self] in (self?.specialsEnabled ?? false) && (self?.isActive ?? false) }
+            ))
+        }
+        if !recipesLoaded { startRecipes() }
+        spotlights?.kick()
+        decideSlots()
+    }
+
+    /// Async form for tests: build a spotlight now and decide slots.
+    func prepareSpotlightAndWait() async {
+        await spotlights?.prepare()
+    }
+
+    /// Topics the spotlights used this session (tests).
+    var spotlightUsedTopics: Set<String> { spotlights?.usedTopics ?? [] }
+
+    /// The loader finished a build: ask for the ready spotlight's profiles
+    /// now (before it is placed), then decide slots.
+    private func spotlightChanged() {
+        if case .spotlight(_, let posts)? = spotlights?.ready {
+            observeSpotlightProfiles(posts)
+        }
+        decideSlots()
+    }
+
+    private func shownSpotlightIds() -> Set<String> {
+        Set(specialsStore.loadShown(now: now()).keys)
+    }
+
+    /// Posts on screen or waiting behind the pill, and every post in a card.
+    private func onScreenIds() -> Set<String> {
+        var ids = Set(posts.map(\.id))
+        ids.formUnion(pendingNew.map(\.id))
+        for slot in placedSlots {
+            switch slot.special {
+            case .recipe(let e)?: ids.insert(e.id)
+            case .spotlight(_, let ps)?: ids.formUnion(ps.map(\.id))
+            case nil: break
+            }
+        }
+        return ids
+    }
+
+    private func postIndex() -> [String: Int] {
+        var index: [String: Int] = [:]
+        for (i, e) in posts.enumerated() where index[e.id] == nil { index[e.id] = i }
+        return index
+    }
+
+    /// Decide every slot that has come within reach (`slotDecideAhead`
+    /// posts below the deepest post shown), in order. A slot the reader has
+    /// already reached is skipped; one far below waits for the rotation's
+    /// own type; nothing ready near the screen waits too (until it's reached).
+    /// After the first card, slots keep their spacing from the card above,
+    /// so posts inserted at the top (the pill) don't squeeze two cards
+    /// together.
+    private func decideSlots() {
+        guard specialsEnabled, isActive, hasLoaded, !posts.isEmpty else { return }
+        let anchors = slotPlan.upTo(posts.count)
+        let index = postIndex()
+        let reader = deepestSeenId.flatMap { index[$0] } ?? -1
+        while placedSlots.count < anchors.count {
+            let k = placedSlots.count
+            let anchorIndex: Int
+            if k > 0, let last = placedSlots.last, let lastIndex = index[last.anchorId] {
+                anchorIndex = lastIndex + (anchors[k] - anchors[k - 1])
+            } else {
+                anchorIndex = anchors[k] - 1
+            }
+            guard anchorIndex < posts.count else { break }
+            let distance = anchorIndex - reader
+            var special: FreshSpecial?
+            if distance > 0 {
+                guard distance <= Self.slotDecideAhead else { break }
+                let strict = distance > Self.slotNearPosts
+                guard let type = rotation.choose(
+                    ready: { [self] in $0 == .recipe ? nextBoxRecipe() != nil : spotlights?.ready != nil },
+                    strict: strict,
+                    available: { [self] in
+                        $0 == .recipe
+                            ? nextBoxRecipe() != nil || (strict && recipeTask != nil)
+                            : spotlights?.isAvailable(strict: strict) ?? false
+                    }
+                ), let taken = take(type) else { break }
+                special = taken
+                rotation.record(type)
+            }
+            placedSlots.append(FreshPlacedSlot(key: "sp:\(slotSerial)", anchorId: posts[anchorIndex].id, special: special))
+            slotSerial += 1
+        }
+    }
+
+    private func take(_ type: FreshSpecialType) -> FreshSpecial? {
+        switch type {
+        case .recipe:
+            guard let recipe = nextBoxRecipe() else { return nil }
+            boxTaken.insert(FreshRecipeBox.address(recipe))
+            return .recipe(recipe)
+        case .spotlight:
+            guard let card = spotlights?.take() else { return nil }
+            // Kept like the feed's own posts, so a tile's thread opens from
+            // the event store without another relay lookup.
+            if case .spotlight(_, let posts) = card { persist(posts) }
+            return card
+        }
+    }
+
+    /// A random older recipe this account hasn't been shown, not taken this
+    /// session, and not in the feed (by id or coordinate). The box picks
+    /// first and the finish-line row leaves out what it took
+    /// (`recipePicks`), so the two never show the same recipe and a recipe
+    /// never leaves a row the reader may already see.
+    private func nextBoxRecipe() -> NostrEvent? {
+        guard !boxPool.isEmpty else { return nil }
+        let seen = Set(specialsStore.loadRecipeBoxSeen(now: now()).keys)
+        var excluding = Set(posts.map(\.id))
+        excluding.formUnion(posts.filter { $0.kind == 30023 }.map(FreshRecipeBox.address))
+        return FreshRecipeBox.pickRandom(boxPool, seen: seen, taken: boxTaken, excluding: excluding, random: specialsRng)
+    }
+
+    /// A refresh: new slots for the new page, and recipes the box took go back
+    /// (web `loadFirst`). The rotation and the used topics carry on.
+    private func resetSlotsForRefresh() {
+        placedSlots = []
+        boxTaken = []
+        slotPlan = FreshSlots(rng: specialsRng)
+        deepestSeenId = nil
+    }
+
+    /// An edit replaced a post in its row: a card anchored on it stays.
+    private func renameAnchor(_ old: String, to new: String) {
+        guard old != new, placedSlots.contains(where: { $0.anchorId == old }) else { return }
+        placedSlots = placedSlots.map {
+            guard $0.anchorId == old else { return $0 }
+            var slot = $0
+            slot.anchorId = new
+            return slot
+        }
+    }
+
+    /// Reported, blocked or deleted: a recipe card goes; a spotlight loses
+    /// that post at once and goes when none is left. The slot stays decided.
+    private func filterCards(dropping drop: (NostrEvent) -> Bool) {
+        guard !placedSlots.isEmpty else { return }
+        placedSlots = placedSlots.map { slot in
+            switch slot.special {
+            case .recipe(let e)? where drop(e):
+                return FreshPlacedSlot(key: slot.key, anchorId: slot.anchorId, special: nil)
+            case .spotlight(let topic, let ps)?:
+                let kept = ps.filter { !drop($0) }
+                if kept.count == ps.count { return slot }
+                return FreshPlacedSlot(key: slot.key, anchorId: slot.anchorId,
+                                       special: kept.isEmpty ? nil : .spotlight(topic, posts: kept))
+            default:
+                return slot
+            }
         }
     }
 
@@ -898,6 +1250,17 @@ final class FreshFeedViewModel {
             if let cached = profileSource.cached(pk) { profiles[pk] = cached }
         }
         profileSource.observe(events)
+    }
+
+    /// Spotlight posts: their authors and everyone their text mentions
+    /// (`referencedAuthorPubkeys`, the same set `MissingProfileWatcher`
+    /// fetches), so a tile shows names and avatars rather than short npubs.
+    /// Profiles that arrive later reach `profiles` through `updates()`.
+    private func observeSpotlightProfiles(_ posts: [NostrEvent]) {
+        for pk in Set(posts.flatMap(\.referencedAuthorPubkeys)) where profiles[pk] == nil {
+            if let cached = profileSource.cached(pk) { profiles[pk] = cached }
+        }
+        profileSource.observe(posts)
     }
 
     private func ensureProfileUpdates() {

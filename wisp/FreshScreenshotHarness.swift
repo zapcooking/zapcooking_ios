@@ -19,6 +19,9 @@ import Foundation
 ///   no real user appears and nothing is stored.
 /// - `-FreshVisitMarkSecondsAgo N`: set that account's last-visit mark to
 ///   now − N, so the "new since your last visit" divider has a place to go.
+/// - `-FreshScreenshotSpecials` (with fixtures): the special cards, for that
+///   view model only (`FreshScreenshotFixtures.viewModel`); the flag stays
+///   off.
 nonisolated enum FreshScreenshotHarness {
     static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
@@ -30,6 +33,8 @@ nonisolated enum FreshScreenshotHarness {
     }
 
     static var usesFixtures: Bool { isOn && arguments.contains("-FreshScreenshotFixtures") }
+
+    static var usesSpecials: Bool { usesFixtures && arguments.contains("-FreshScreenshotSpecials") }
 
     /// Returns the new watch-only account when one was created (the caller
     /// routes to it), nil otherwise. Applies the visit-mark argument to the

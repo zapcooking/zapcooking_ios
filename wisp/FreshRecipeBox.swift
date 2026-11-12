@@ -4,15 +4,20 @@ import Foundation
 /// ported from web `src/lib/freshFeed/recipeBox.ts` (ZapCooking e4a71d6b).
 /// Picked at random from the recipes this account hasn't been shown yet.
 ///
-/// Pool: kind 30023 tagged zapcooking / nostrcooking (and kind 35000, which
-/// iOS doesn't request), first published (`published_at`, else
-/// `created_at`) more than 14 days ago; one per coordinate, the newest
-/// version.
+/// Pool: recipes by the app's rule (`RecipeParser.isRecipe`: kind 30023, a
+/// zapcooking / nostrcooking tag AND recipe-template content), first
+/// published (`published_at`, else `created_at`) more than 14 days ago; one
+/// per coordinate, the newest version.
+///
+/// ≠ web: web's `isRecipe` checks the tag only, so an article tagged
+/// zapcooking can become a box card (Seth's device pass found one;
+/// frontend#946). Kind 35000 is not requested on iOS.
 ///
 /// The box cards and the finish-line recipe row never show the same recipe
-/// (Seth, 2026-11-11): a box pick skips what the row has shown, and the row
-/// skips what the box has taken. Web gets this by drawing its explore row
-/// from the same taken set.
+/// (Seth, 2026-11-11): the box picks first and the row skips what the box
+/// has taken (`rowPicks(boxTaken:)`), so a recipe never leaves a row the
+/// reader may already see. Web gets this by drawing its explore row from
+/// the same taken set.
 nonisolated enum FreshRecipeBox {
     /// `kind:pubkey:d`, the coordinate every version of a recipe shares.
     static func address(_ e: NostrEvent) -> String {
@@ -21,7 +26,7 @@ nonisolated enum FreshRecipeBox {
 
     /// An older recipe: first published before the free window.
     static func isCandidate(_ e: NostrEvent, now: Int) -> Bool {
-        guard FreshPosts.isRecipe(kind: e.kind, tags: e.tags) else { return false }
+        guard RecipeParser.isRecipe(e) else { return false }
         let first = FreshPosts.publishedAt(tags: e.tags) ?? e.createdAt
         return first < now - FreshPosts.freeWindowSeconds
     }
@@ -38,8 +43,8 @@ nonisolated enum FreshRecipeBox {
     }
 
     /// A random recipe this account hasn't been shown (`seen`), not already
-    /// taken this session, and not otherwise excluded (in the feed, or shown
-    /// in the finish-line row); nil when the pool is used up.
+    /// taken this session, and not otherwise excluded (in the feed, by id or
+    /// coordinate); nil when the pool is used up.
     static func pickRandom(
         _ pool: [NostrEvent],
         seen: Set<String>,

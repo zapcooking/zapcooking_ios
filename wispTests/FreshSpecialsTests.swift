@@ -304,21 +304,28 @@ import Testing
     static let day = 86_400
 
     static func recipe(_ id: String, d: String, author: String = "a", createdAt: Int,
-                       publishedAt: Int? = nil, tagged: Bool = true) -> NostrEvent {
+                       publishedAt: Int? = nil, tagged: Bool = true, template: Bool = true) -> NostrEvent {
         var tags: [[String]] = [["d", d]]
         if tagged { tags.append(["t", "zapcooking"]) }
         if let publishedAt { tags.append(["published_at", String(publishedAt)]) }
-        return NostrEvent(id: id, pubkey: author, kind: 30023, createdAt: createdAt, tags: tags, content: id, sig: "")
+        let content = template
+            ? "## Chef's notes\n\n\(id)\n\n## Ingredients\n\n- flour\n- water\n\n## Directions\n\n1. Mix.\n2. Bake."
+            : "\(id): an article, not a recipe."
+        return NostrEvent(id: id, pubkey: author, kind: 30023, createdAt: createdAt, tags: tags, content: content, sig: "")
     }
 
-    @Test("candidates: tagged recipes first published more than 14 days ago")
+    @Test("candidates: recipes (tag and recipe template) first published more than 14 days ago; a tagged article is not one")
     func candidates() {
         let old = Self.recipe("old", d: "a", createdAt: Self.now - 30 * Self.day)
         let new = Self.recipe("new", d: "b", createdAt: Self.now - 2 * Self.day)
         let oldEdit = Self.recipe("edit", d: "c", createdAt: Self.now - Self.day, publishedAt: Self.now - 100 * Self.day)
         let untagged = Self.recipe("plain", d: "d", createdAt: Self.now - 30 * Self.day, tagged: false)
         let note = NostrEvent(id: "n", pubkey: "a", kind: 1, createdAt: Self.now - 30 * Self.day, tags: [], content: "", sig: "")
+        // Seth's device pass: an announcement tagged zapcooking (badge ARTICLE).
+        let taggedArticle = Self.recipe("branta", d: "branta", createdAt: Self.now - 30 * Self.day, template: false)
         #expect(FreshRecipeBox.isCandidate(old, now: Self.now))
+        #expect(!FreshRecipeBox.isCandidate(taggedArticle, now: Self.now))
+        #expect(FreshRecipeBox.buildPool([taggedArticle, old], now: Self.now).map(\.id) == ["old"])
         #expect(!FreshRecipeBox.isCandidate(new, now: Self.now))
         #expect(FreshRecipeBox.isCandidate(oldEdit, now: Self.now))
         #expect(!FreshRecipeBox.isCandidate(untagged, now: Self.now))

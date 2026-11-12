@@ -18,6 +18,18 @@ extension NSAttributedString.Key {
 /// (text, hashtags, mentions, links, custom emoji images) with
 /// per-range link tap handling.
 struct RichInlineTextView: UIViewRepresentable {
+    /// The name a `nostr:npub…` / `nprofile…` mention shows (after "@").
+    /// Unresolved mentions fall back to a short npub instead of a bare
+    /// ellipsis: a stable identifier the reader can match against other
+    /// surfaces, and which never exposes hex. Some users unknowingly save a
+    /// display name with trailing whitespace; left intact it renders as
+    /// "@name " and collides with the space that follows the mention in the
+    /// surrounding text, producing a visible double space.
+    static func mentionName(pubkey: String, profile: ProfileData?) -> String {
+        (profile?.displayString ?? Nip19.shortNpub(hex: pubkey))
+            .replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+    }
+
     let segments: [ContentSegment]
     let profiles: [String: ProfileData]
     /// When true, taps on `@mention` / `#hashtag` / inline-URL ranges fire the
@@ -256,15 +268,7 @@ struct RichInlineTextView: UIViewRepresentable {
 
             case .nostrProfile(let pubkey, _):
                 let resolvedProfile = profiles[pubkey] ?? ProfileRepository.shared.get(pubkey)
-                // Unresolved mentions fall back to a short npub instead of a
-                // bare ellipsis: a stable identifier the reader can match
-                // against other surfaces, and which never exposes hex.
-                // Some users unknowingly save a display name with trailing
-                // whitespace; left intact it renders as "@name " and collides
-                // with the space that follows the mention in the surrounding
-                // text, producing a visible double space.
-                let name = (resolvedProfile?.displayString ?? Nip19.shortNpub(hex: pubkey))
-                    .replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+                let name = Self.mentionName(pubkey: pubkey, profile: resolvedProfile)
                 var attrs = baseAttrs
                 attrs[.foregroundColor] = mentionPillStyle ? ComposerTextStyling.pillTextColor : primaryColor
                 if mentionPillStyle {

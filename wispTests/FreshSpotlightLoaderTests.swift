@@ -426,6 +426,25 @@ struct FreshSpotlightLoaderTests {
 
     // MARK: - Review fixes (#216)
 
+    @Test("Fresh going away during the topic fetch: no preview is asked (the socket stays closed)")
+    func disabledDuringTopicsAsksNoPreview() async {
+        let gate = Box<CheckedContinuation<Void, Never>?>(nil)
+        let enabled = Box(true)
+        let rig = Self.rig(topics: {
+            await withCheckedContinuation { gate.value = $0 }
+            return Self.twoGroups
+        }, enabled: enabled)
+        for slug in ["sourdough", "bread", "coffee", "tea"] { rig.previews.posts(slug) }
+        let build = Task { await rig.loader.prepare() }
+        await Self.eventually { gate.value != nil }
+        enabled.value = false  // deactivated
+        gate.value?.resume()
+        await build.value
+        #expect(rig.previews.asked.isEmpty)
+        #expect(rig.loader.ready == nil)
+        #expect(rig.timers.pending.isEmpty)
+    }
+
     @Test("a kick during a refusal hold doesn't hold a far slot: the turn can go to a recipe")
     func kickDuringHoldIsNotAvailable() async {
         let rig = Self.rig()
