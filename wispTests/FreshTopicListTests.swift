@@ -201,11 +201,13 @@ struct FreshTopicListTests {
         #expect(fetcher.count == 0)
     }
 
-    @Test("the shared list follows the flag, which ships off")
-    func sharedFollowsTheFlag() async {
-        #expect(FeatureFlags.freshSpecialsEnabled == false)
-        #expect(await FreshTopicList.shared.groups().isEmpty)
-        #expect(await FreshTopicList.shared.requestCount == 0)
+    @Test("by default the list follows the flag, which ships on (a scripted fetch: no network)")
+    func defaultFollowsTheFlag() async {
+        #expect(FeatureFlags.freshSpecialsEnabled == true)
+        let fetcher = Fetcher([.ok(Self.nip11)])
+        let list = FreshTopicList(fetch: { try await fetcher.fetch($0) })
+        #expect(await list.groups().count == 2)
+        #expect(fetcher.count == 1)
     }
 }
 
