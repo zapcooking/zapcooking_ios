@@ -1,7 +1,5 @@
 import Foundation
-#if DEBUG
 import os
-#endif
 
 /// A relay-side NIP-42 challenge that the user hasn't pre-approved. Surfaced via
 /// `RelayPool.pendingAuth` so the UI can prompt for approval. Once approved, the
