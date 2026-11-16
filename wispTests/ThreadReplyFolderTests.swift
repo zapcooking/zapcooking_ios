@@ -148,6 +148,83 @@ struct ThreadReplyFolderTests {
         #expect(foldDepth == 4)
         #expect(hiddenCount == 2)
     }
+
+    // MARK: - Adjacency with orphan grafting (#220 follow-up)
+
+    private func reply(
+        _ id: String, parent: String? = nil, root: String? = nil,
+        kind: Int = 1, pubkey: String? = nil
+    ) -> NostrEvent {
+        var tags: [[String]] = []
+        if let root { tags.append(["e", root, "", "root"]) }
+        if let parent { tags.append(["e", parent, "", "reply"]) }
+        return NostrEvent(id: id, pubkey: pubkey ?? "pk-\(id)", kind: kind,
+                          createdAt: 0, tags: tags, content: "", sig: "")
+    }
+
+    private func adjacency(_ events: [NostrEvent]) -> [String: [NostrEvent]] {
+        ThreadReplyFolder.adjacency(
+            events,
+            knownIds: Set(events.map(\.id)),
+            parentOf: { event in
+                let es = event.tags.filter { $0.first == "e" && $0.count >= 2 }
+                return (es.first { $0.count >= 4 && $0[3] == "reply" } ?? es.first)?[1]
+            },
+            rootAnchorOf: { event in
+                event.tags.first { $0.first == "e" && $0.count >= 2 }?[1]
+            }
+        )
+    }
+
+    /// The #220 follow-up: a reply whose parent (a muted author's note no
+    /// relay returned) never arrived grafts to its root anchor, so the
+    /// user's own reply stays findable in the thread a notification
+    /// deep-linked to.
+    @Test func orphanedReply_graftsToKnownRootAnchor() {
+        let root = reply("root")
+        let orphan = reply("mine", parent: "missing", root: "root")
+        let byParent = adjacency([root, orphan])
+        #expect(byParent["root"]?.map { $0.id } == ["mine"])
+        #expect(byParent["missing"] == nil)
+    }
+
+    @Test func replyWithKnownParent_staysNested() {
+        let root = reply("root")
+        let a = reply("a", parent: "root", root: "root")
+        let b = reply("b", parent: "a", root: "root")
+        let byParent = adjacency([root, a, b])
+        #expect(byParent["root"]?.map { $0.id } == ["a"])
+        #expect(byParent["a"]?.map { $0.id } == ["b"])
+    }
+
+    /// No known parent AND no known anchor: nothing to graft to — dropped,
+    /// same as the pre-graft behavior.
+    @Test func orphanWithoutKnownAnchor_isDropped() {
+        let root = reply("root")
+        let orphan = reply("mine", parent: "missing", root: "also-missing")
+        let byParent = adjacency([root, orphan])
+        #expect(byParent["root"]?.isEmpty ?? true)
+        #expect(byParent["missing"] == nil)
+    }
+
+    /// A forged or malformed root tag naming the reply itself must not
+    /// self-graft into a cycle.
+    @Test func graftNeverTargetsTheEventItself() {
+        let root = reply("root")
+        let orphan = reply("mine", parent: "missing", root: "mine")
+        let byParent = adjacency([root, orphan])
+        #expect(byParent["mine"] == nil)
+        #expect(byParent["root"]?.isEmpty ?? true)
+    }
+
+    /// Kind-1111 orphans graft the same way — their uppercase `E` names the
+    /// conversation anchor (resolved by the caller's `rootAnchorOf`).
+    @Test func orphanedComment_graftsViaRootAnchor() {
+        let root = reply("root")
+        let comment = reply("c1", parent: "missing", root: "root", kind: 1111)
+        let byParent = adjacency([root, comment])
+        #expect(byParent["root"]?.map { $0.id } == ["c1"])
+    }
 }
 
 private extension Array {

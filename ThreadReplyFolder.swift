@@ -12,6 +12,45 @@ import Foundation
 enum ThreadReplyFolder {
     static let depthCap = 3
 
+    /// Parent → children adjacency over a set of held reply events.
+    ///
+    /// Orphan grafting (#220 follow-up): a reply whose immediate parent
+    /// never arrived — typically a muted author's note that no relay
+    /// returned, so it never entered the thread's event map — is attached
+    /// to its nearest KNOWN anchor instead of vanishing. The NIP-10 root
+    /// marker (lowercase `e` for kind 1, uppercase `E` for kind 1111)
+    /// names the conversation root the reply already belongs to, so the
+    /// subtree below the missing intermediate stays visible: without the
+    /// graft, a notification deep-link to a note in that subtree renders
+    /// a thread the target is silently absent from. Placement is shallower
+    /// than the true chain, but visibility beats depth precision.
+    ///
+    /// `events` are the pre-filtered replies (kind / stray rules are the
+    /// caller's); `knownIds` decides orphaning; `parentOf` resolves the
+    /// immediate parent, `rootAnchorOf` the conversation anchor.
+    static func adjacency<C: Collection>(
+        _ events: C,
+        knownIds: Set<String>,
+        parentOf: (NostrEvent) -> String?,
+        rootAnchorOf: (NostrEvent) -> String?
+    ) -> [String: [NostrEvent]] where C.Element == NostrEvent {
+        var byParent: [String: [NostrEvent]] = [:]
+        for event in events {
+            let parentId = parentOf(event) ?? ""
+            if knownIds.contains(parentId) {
+                byParent[parentId, default: []].append(event)
+                continue
+            }
+            // Parent never arrived: graft to the reply's own root anchor
+            // when that is held. Never graft to the event itself.
+            guard let anchor = rootAnchorOf(event),
+                  anchor != event.id, anchor != parentId,
+                  knownIds.contains(anchor) else { continue }
+            byParent[anchor, default: []].append(event)
+        }
+        return byParent
+    }
+
     enum DisplayItem: Identifiable {
         case single(NestedReplyRow, midAir: Bool)
         case wotGroup(count: Int, depth: Int, id: String)

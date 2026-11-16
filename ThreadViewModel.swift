@@ -1352,25 +1352,26 @@ final class ThreadViewModel {
         // repost `e`-tags this note too but isn't a reply (without the guard it'd
         // surface as a duplicate card). This narrows `childCounts` to genuine
         // replies (it previously counted kind-6 reposts); childCounts feeds
-        // `effectiveReplyCount` as `max(local, remote)` in ThreadView, so the
+        // effectiveReplyCount as `max(local, remote)` in ThreadView, so the
         // narrowing is benign and arguably more consistent with the relay count.
-        var childrenByParent: [String: [NostrEvent]] = [:]
-        for event in events.values
-        where (event.kind == 1 || event.kind == Nip22.kindComment) && event.id != renderRootId {
-            // A kind-1 note replying to a comment is a stray main-feed note,
-            // not a comment-thread reply (NIP-22 threads are a 1111-only
-            // namespace) — hidden from the tree and excluded from counts.
-            // Private gift-wrapped replies are exempt: private comment
-            // publishing isn't implemented, so a private reply rumor is
-            // still kind 1.
-            if event.kind == 1,
-               !PrivateInteractionStore.shared.contains(event.id),
-               Nip22.isStrayKind1OnComment(event, parentKindOf: { self.events[$0]?.kind }) {
-                continue
-            }
-            guard let parentId = parent(of: event) else { continue }
-            childrenByParent[parentId, default: []].append(event)
+        // Replies whose parent never arrived (a muted author's note no relay
+        // returned) graft to their root anchor — see
+        // `ThreadReplyFolder.adjacency`.
+        let isStrayKind1: (NostrEvent) -> Bool = { event in
+            event.kind == 1
+                && !PrivateInteractionStore.shared.contains(event.id)
+                && Nip22.isStrayKind1OnComment(event, parentKindOf: { self.events[$0]?.kind })
         }
+        var childrenByParent = ThreadReplyFolder.adjacency(
+            events.values.lazy.filter {
+                ($0.kind == 1 || $0.kind == Nip22.kindComment)
+                    && $0.id != renderRootId
+                    && !isStrayKind1($0)
+            },
+            knownIds: Set(events.keys),
+            parentOf: { self.parent(of: $0) },
+            rootAnchorOf: { Nip10.rootId(of: $0) }
+        )
         for key in childrenByParent.keys {
             childrenByParent[key]?.sort { $0.createdAt < $1.createdAt }
         }
