@@ -6,7 +6,7 @@ import Observation
 final class SearchViewModel {
     let keypair: Keypair
 
-    enum Mode: String { case notes, people }
+    enum Mode: String { case people, notes, recipes }
     enum RelayOption: String { case `default`, all, individual }
 
     // MARK: - Inputs
@@ -28,6 +28,14 @@ final class SearchViewModel {
     var noteProfiles: [String: ProfileData] = [:]
     var people: [ProfileData] = []
     var authorResults: [ProfileData] = []
+    var recipes: [RecipeResult] = []
+    var recipeProfiles: [String: ProfileData] = [:]
+
+    /// Food-hashtag / keyword completions for the current query, from the
+    /// static taxonomy (`FoodHashtags.all`) — the iOS counterpart of web's
+    /// `recipeTags` suggestion rows. Shown as tappable chips above the
+    /// results in every mode; a tap opens the hashtag feed.
+    var tagMatches: [String] = []
 
     var engagement: [String: EngagementCounts] = [:]
     var isSearching = false
@@ -47,9 +55,25 @@ final class SearchViewModel {
     @ObservationIgnored private var searchCounter: Int = 0
     @ObservationIgnored private var authorCounter: Int = 0
 
+    /// The NIP-50 search-relay pair fanned for every full-text query — the
+    /// same two the web app queries (`SEARCH_RELAYS` on zap.cooking's search
+    /// page). Querying `search.nostrarchives.com` alone is what blanked
+    /// search: when its index went quiet it still answered every REQ with an
+    /// immediate empty EOSE, which `RelayPool.query`'s first-EOSE fast path
+    /// treated as a definitive "no results". nos.today independently answers
+    /// kind-0 / kind-1 / kind-30023 `search` filters (verified live), so the
+    /// default is both, and search queries run with `waitForAllRelays: true`
+    /// so one relay's empty EOSE can't truncate the other's stream.
+    static let defaultSearchRelays = ["wss://search.nos.today", "wss://search.nostrarchives.com"]
+
+    /// Kept for the deliberate single-relay call sites outside search
+    /// (`OnlyFoodFeedViewModel.searchRelay` matches Android's hashtag path;
+    /// `FoodSeedRepository` seeds its own list).
     static let defaultSearchRelay = "wss://search.nostrarchives.com"
 
-    private let searchTimeout: TimeInterval = 5
+    /// Web's search page gives its relay subscriptions 6s including connect
+    /// time; match that — throttled relays answer late, not never (§7.4).
+    private let searchTimeout: TimeInterval = 6
     private let engagementTimeout: TimeInterval = 10
     private let authorTimeout: TimeInterval = 4
 
@@ -69,6 +93,10 @@ final class SearchViewModel {
                     if self.notes.contains(where: { $0.pubkey == pk }),
                        let p = self.profileRepo.get(pk) {
                         self.noteProfiles[pk] = p
+                    }
+                    if self.recipes.contains(where: { $0.author == pk }),
+                       let p = self.profileRepo.get(pk) {
+                        self.recipeProfiles[pk] = p
                     }
                 }
             }
@@ -157,12 +185,22 @@ final class SearchViewModel {
         if let implied = impliedMode(for: text), mode != implied {
             mode = implied
         }
+        // Keyword/hashtag completions track the text as typed (before the
+        // 500 ms debounce), like web's autocomplete rows. Identity intents
+        // (npub / hex / NIP-05 / note refs) never get tag rows.
+        if case .text = intent {
+            tagMatches = Self.matchingTags(for: text)
+        } else {
+            tagMatches = []
+        }
         guard isQueryActionable(intent) else {
             if case .text(let s) = intent, s.isEmpty {
                 notes = []
                 people = []
                 noteProfiles = [:]
                 engagement = [:]
+                recipes = []
+                recipeProfiles = [:]
                 hasSearched = false
             }
             return
@@ -254,6 +292,9 @@ final class SearchViewModel {
             notes = []
             engagement = [:]
             noteProfiles = [:]
+        } else if mode == .recipes {
+            recipes = []
+            recipeProfiles = [:]
         } else {
             people = []
         }
@@ -262,8 +303,6 @@ final class SearchViewModel {
         searchTask = Task { [weak self] in
             guard let self else { return }
 
-            // For people search, NIP-05 identifiers need an async HTTP lookup
-            // before we can build the relay filter.
             if mode == .people, case .nip05(let identifier) = intent {
                 let pubkey = await Nip05Verifier.lookup(identifier: identifier)
                 guard !Task.isCancelled else { return }
@@ -301,7 +340,7 @@ final class SearchViewModel {
                 switch intent {
                 case .pubkey(let pubkey):
                     filter = NostrFilter(kinds: [0], authors: [pubkey], limit: 1)
-                    let combined = ([Self.defaultSearchRelay] + Array(RelayDefaults.indexers))
+                    let combined = (Self.defaultSearchRelays + Array(RelayDefaults.indexers))
                         .reduce(into: [String]()) { acc, url in if !acc.contains(url) { acc.append(url) } }
                     queryRelays = combined
                 case .text(let trimmed):
@@ -329,18 +368,74 @@ final class SearchViewModel {
                     search: trimmed
                 )
                 queryRelays = relays
+            case .recipes:
+                // Web's recipe filter: kind-30023 long-form events carrying a
+                // zapcooking/nostrcooking `t` tag. (Web also queries kind
+                // 35000, its legacy premium-recipe kind; iOS's format seam and
+                // RecipeRoute are 30023-only, so those hits could not open.)
+                guard case .text(let trimmed) = intent else {
+                    await MainActor.run {
+                        guard myCounter == self.searchCounter else { return }
+                        self.isSearching = false
+                    }
+                    return
+                }
+                filter = NostrFilter(
+                    kinds: [RecipeParser.recipeKind],
+                    tTags: RecipeParser.recipeHashtags,
+                    limit: 25,
+                    search: trimmed
+                )
+                queryRelays = relays
             }
 
-            let events = await RelayPool.query(relays: queryRelays, filter: filter, timeout: timeout)
+            // `waitForAllRelays`: the point of the two-relay fan-out is that
+            // either search relay can be the only one answering today — the
+            // first-EOSE fast path would let one relay's instant empty EOSE
+            // truncate the other's stream and look like zero results.
+            let events = await RelayPool.query(
+                relays: queryRelays, filter: filter, timeout: timeout, waitForAllRelays: true
+            )
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard myCounter == self.searchCounter else { return }
-                switch mode {
-                case .people: self.handlePeopleResults(events)
-                case .notes:  self.handleNoteResults(events)
+
+            if mode == .people, case .text(let trimmed) = intent {
+                // Username index alongside the relay kind-0s (web queries
+                // Primal + nostrarchives the same way). Either source answering
+                // alone is a usable result set; a 3s ceiling keeps a hung index
+                // from stretching the search past the relay timeout.
+                let suggestions = await Self.withTimeout(seconds: 3) {
+                    (try? await NostrArchivesClient.suggest(query: trimmed, limit: 20)) ?? []
+                } ?? []
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard myCounter == self.searchCounter else { return }
+                    self.handlePeopleResults(events, suggestions: suggestions, query: trimmed)
+                    self.isSearching = false
                 }
-                self.isSearching = false
+            } else {
+                await MainActor.run {
+                    guard myCounter == self.searchCounter else { return }
+                    switch mode {
+                    case .people: self.handlePeopleResults(events)
+                    case .notes:  self.handleNoteResults(events)
+                    case .recipes: self.handleRecipeResults(events)
+                    }
+                    self.isSearching = false
+                }
             }
+        }
+    }
+
+    private static func withTimeout<T>(seconds: TimeInterval, _ op: @escaping () async -> T) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await op() }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(seconds))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
     }
 
@@ -348,7 +443,7 @@ final class SearchViewModel {
     /// Runs a new sub-task so the NIP-05 path can return early from its task.
     private func runPubkeyFetch(pubkey: String, counter: Int, timeout: TimeInterval) {
         let filter = NostrFilter(kinds: [0], authors: [pubkey], limit: 1)
-        let combined = ([Self.defaultSearchRelay] + Array(RelayDefaults.indexers))
+        let combined = (Self.defaultSearchRelays + Array(RelayDefaults.indexers))
             .reduce(into: [String]()) { acc, url in if !acc.contains(url) { acc.append(url) } }
         searchTask = Task { [weak self] in
             let events = await RelayPool.query(relays: combined, filter: filter, timeout: timeout)
@@ -426,7 +521,11 @@ final class SearchViewModel {
         isSearching = false
     }
 
-    private func handlePeopleResults(_ events: [NostrEvent]) {
+    private func handlePeopleResults(
+        _ events: [NostrEvent],
+        suggestions: [NostrArchivesClient.Suggestion] = [],
+        query: String? = nil
+    ) {
         var seen = Set<String>()
         var results: [ProfileData] = []
         // Blocked users still surface here (unlike note search) — it's the
@@ -442,6 +541,35 @@ final class SearchViewModel {
                 results.append(ProfileData(pubkey: event.pubkey))
             }
         }
+
+        if let query {
+            // Username-index rows paint straight from the API payload (name,
+            // picture, nip05 — web's suggestion rows do the same), with the
+            // profile cache preferred where a kind-0 already landed.
+            for suggestion in suggestions {
+                let key = canonicalPubkey(suggestion.pubkey)
+                guard key.count == 64, seen.insert(key).inserted else { continue }
+                if let cached = profileRepo.get(key) {
+                    results.append(cached)
+                    continue
+                }
+                var json: [String: Any] = [:]
+                if let name = suggestion.name { json["name"] = name }
+                if let display = suggestion.display_name { json["display_name"] = display }
+                if let nip05 = suggestion.nip05 { json["nip05"] = nip05 }
+                if let about = suggestion.about { json["about"] = about }
+                if let picture = suggestion.picture { json["picture"] = picture }
+                results.append(ProfileData(pubkey: key, json: json))
+            }
+            let follows = FollowsCache.shared.followsSet(for: keypair.pubkey)
+            people = Self.rankedPeople(results, query: query, follows: follows)
+            let missing = Set(people.map(\.pubkey)).filter { profileRepo.get($0) == nil }
+            if !missing.isEmpty {
+                MissingProfileWatcher.shared.observePubkeys(missing)
+            }
+            return
+        }
+
         let follows = FollowsCache.shared.followsSet(for: keypair.pubkey)
         results.sort { lhs, rhs in
             let lf = follows.contains(lhs.pubkey)
@@ -487,6 +615,31 @@ final class SearchViewModel {
         }
         if !missingPubkeys.isEmpty {
             MissingProfileWatcher.shared.observePubkeys(missingPubkeys)
+        }
+    }
+
+    private func handleRecipeResults(_ events: [NostrEvent]) {
+        var seen = Set<String>()
+        var results: [RecipeResult] = []
+        for event in events {
+            guard let result = Self.recipeResult(from: event) else { continue }
+            guard seen.insert(result.id).inserted else { continue }
+            results.append(result)
+        }
+        recipes = results
+
+        // Seed author names/avatars from cache; the rest resolve through the
+        // same missing-profile watcher the note results use.
+        var seed: [String: ProfileData] = [:]
+        for pubkey in Set(results.map(\.author)) {
+            if let p = profileRepo.get(pubkey) {
+                seed[pubkey] = p
+            }
+        }
+        recipeProfiles = seed
+        let missing = Set(results.map(\.author)).filter { recipeProfiles[$0] == nil }
+        if !missing.isEmpty {
+            MissingProfileWatcher.shared.observePubkeys(missing)
         }
     }
 
@@ -562,7 +715,8 @@ final class SearchViewModel {
             let events = await RelayPool.query(
                 relays: relays,
                 filter: NostrFilter(kinds: [0], limit: 10, search: trimmed),
-                timeout: timeout
+                timeout: timeout,
+                waitForAllRelays: true
             )
             guard let self else { return }
             await MainActor.run {
@@ -596,7 +750,97 @@ final class SearchViewModel {
         case eventRef(id: String, relays: [String])  // note1/nevent1 → ids: lookup
     }
 
+    /// One recipe row: the addressable coordinate plus the display title.
+    /// The detail page re-loads the event itself, so the event needn't be kept.
+    struct RecipeResult: Identifiable, Equatable {
+        let author: String
+        let dTag: String
+        let title: String
+
+        var id: String {
+            RecipeRepository.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
+        }
+    }
+
     // MARK: - Helpers
+
+    /// Keyword / hashtag completions from the static food taxonomy — iOS's
+    /// counterpart of web's `recipeTags` suggestion rows. Prefix matches come
+    /// first, then substring matches, capped at `limit`.
+    static func matchingTags(for query: String, limit: Int = 8) -> [String] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard q.count >= 2 else { return [] }
+        var prefix: [String] = []
+        var contains: [String] = []
+        for tag in FoodHashtags.all {
+            let t = tag.lowercased()
+            if t.hasPrefix(q) { prefix.append(tag) }
+            else if t.contains(q) { contains.append(tag) }
+        }
+        return Array((prefix + contains).prefix(limit))
+    }
+
+    /// Client-side recheck of a relay's answer to the recipe filter — search
+    /// relays sometimes ignore `#t`/kind constraints, and web's
+    /// `recipeSearchResult` guards the same way. Web additionally accepts
+    /// kind 35000 (its legacy premium-recipe kind); iOS's format seam and
+    /// `RecipeRoute` are kind-30023 only, so a 35000 hit would route to a
+    /// detail page that can never load it — those stay out of results.
+    static func recipeResult(from event: NostrEvent) -> RecipeResult? {
+        guard event.kind == RecipeParser.recipeKind else { return nil }
+        let tagged = event.tags.contains {
+            $0.count >= 2 && $0[0] == "t"
+                && RecipeParser.recipeHashtags.contains($0[1].lowercased())
+        }
+        guard tagged else { return nil }
+
+        let d = RecipeParser.dTag(event)
+        guard !d.isEmpty else { return nil }
+        let pubkey = event.pubkey.lowercased()
+        guard pubkey.count == 64, pubkey.allSatisfy({ $0.isHexDigit }) else { return nil }
+
+        guard !HiddenRecipes.isHidden(kind: RecipeParser.recipeKind, pubkey: pubkey, dTag: d)
+        else { return nil }
+        let coordinate = RecipeRepository.coordinate(
+            kind: RecipeParser.recipeKind, author: pubkey, dTag: d
+        )
+        guard !ReportedContent.shared.isHidden(coordinate: coordinate) else { return nil }
+
+        let title = event.tags
+            .first(where: { $0.count >= 2 && $0[0] == "title" })?
+            .dropFirst()
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return RecipeResult(author: pubkey, dTag: d, title: (title?.isEmpty == false) ? title! : d)
+    }
+
+    /// Port of web `rankProfiles`: exact name, name prefix, NIP-05 local-part
+    /// exact, NIP-05 prefix, then the rest. Within a tier, followed accounts
+    /// surface first (the old iOS ordering), then input order — relay kind-0
+    /// rows are passed in ahead of index-only rows.
+    static func rankedPeople(
+        _ profiles: [ProfileData], query: String, follows: Set<String>
+    ) -> [ProfileData] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        func tier(_ p: ProfileData) -> Int {
+            let names = [p.displayName, p.name].compactMap { $0?.lowercased() }
+            if names.contains(q) { return 0 }
+            if names.contains(where: { $0.hasPrefix(q) }) { return 1 }
+            let local = p.nip05?.split(separator: "@").first.map { String($0).lowercased() }
+            if local == q { return 2 }
+            if local?.hasPrefix(q) == true { return 3 }
+            return 4
+        }
+        return profiles.enumerated()
+            .sorted { a, b in
+                let (ta, tb) = (tier(a.element), tier(b.element))
+                if ta != tb { return ta < tb }
+                let (fa, fb) = (follows.contains(a.element.pubkey), follows.contains(b.element.pubkey))
+                if fa != fb { return fa && !fb }
+                return a.offset < b.offset
+            }
+            .map(\.element)
+    }
 
     /// Collapse the different string forms the same identity can arrive in
     /// from a search relay — mixed-case or whitespace-padded hex, or an
@@ -612,18 +856,18 @@ final class SearchViewModel {
         return lower
     }
 
-    private func relaysToQuery() -> [String] {
+    func relaysToQuery() -> [String] {
         switch relayOption {
         case .default:
-            return [Self.defaultSearchRelay]
+            return Self.defaultSearchRelays
         case .all:
-            let combined = ([Self.defaultSearchRelay] + savedSearchRelays).reduce(into: [String]()) { acc, url in
+            let combined = (Self.defaultSearchRelays + savedSearchRelays).reduce(into: [String]()) { acc, url in
                 if !acc.contains(url) { acc.append(url) }
             }
-            return combined.isEmpty ? [Self.defaultSearchRelay] : combined
+            return combined.isEmpty ? Self.defaultSearchRelays : combined
         case .individual:
             if let url = selectedRelayUrl, !url.isEmpty { return [url] }
-            return [Self.defaultSearchRelay]
+            return Self.defaultSearchRelays
         }
     }
 

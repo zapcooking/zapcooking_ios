@@ -25,6 +25,44 @@ enum NostrArchivesClient {
         let followers: SocialList
     }
 
+    /// One row of the global username index (`GET /v1/search/suggest`).
+    /// Field names match the API payload verbatim; extra fields the API
+    /// returns (rank scores, follower counts) are ignored.
+    struct Suggestion: Decodable {
+        let pubkey: String
+        let name: String?
+        let display_name: String?
+        let nip05: String?
+        let about: String?
+        let picture: String?
+    }
+
+    struct SuggestResponse: Decodable {
+        let query: String
+        let suggestions: [Suggestion]
+    }
+
+    /// `GET /v1/search/suggest?q=&limit=` — global username search over the
+    /// nostrarchives name index (web's `naSuggest` reads the same endpoint).
+    /// Search treats the index as optional: a failure here means fewer
+    /// people rows, never an error surface.
+    static func suggest(query: String, limit: Int = 10) async throws -> [Suggestion] {
+        guard var comps = URLComponents(string: "\(baseURL)/v1/search/suggest") else {
+            throw URLError(.badURL)
+        }
+        comps.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = comps.url else { throw URLError(.badURL) }
+
+        let (data, response) = try await HttpClientFactory.generalClient.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(SuggestResponse.self, from: data).suggestions
+    }
+
     /// `GET /v1/social/{pubkey}` — follow/follower counts plus paginated hex
     /// pubkey lists. `pubkey` is hex (the API also accepts npub). Limits clamp
     /// server-side to 1–500; offsets page through the lists.
