@@ -22,8 +22,8 @@ enum ShareSheetPresenter {
         guard let presenter = topmostPresenter() else { return }
 
         // Share as a `URL` when the string parses so iOS offers richer link
-        // targets (Messages preview, Safari, copy-as-link); fall back to text.
-        let items: [Any] = [URL(string: url) ?? url]
+        // targets (Messages preview, Safari); fall back to text.
+        let items: [Any] = [LinkItemSource(link: url)]
         let activityVC = UIActivityViewController(activityItems: items, applicationActivities: nil)
 
         // iPad requires a popover anchor or this crashes. We're decoupled from
@@ -57,5 +57,30 @@ enum ShareSheetPresenter {
             top = next
         }
         return top
+    }
+}
+
+/// The link as a `URL` for every target except Copy, which gets plain text.
+///
+/// The sheet's Copy action stores whatever item type it is handed. Handed a
+/// `URL` it writes a `public.url` pasteboard item with no string flavor, so
+/// text-only readers (a text field that rejects URL items, the Simulator's
+/// Mac pasteboard sync, `simctl pbpaste`) see an empty clipboard — "Copy did
+/// nothing". Handing Copy the string puts the link on the clipboard as text.
+final class LinkItemSource: NSObject, UIActivityItemSource {
+    let link: String
+
+    init(link: String) { self.link = link }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        URL(string: link) ?? link
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        itemForActivityType activityType: UIActivity.ActivityType?
+    ) -> Any? {
+        if activityType == .copyToPasteboard { return link }
+        return URL(string: link) ?? link
     }
 }

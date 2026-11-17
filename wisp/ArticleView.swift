@@ -270,7 +270,7 @@ struct ArticleView: View {
                     // Next runloop tick, as the post overflow menu does: the
                     // popover is still the top presenter until its dismissal
                     // settles, and a share sheet presented under it goes nowhere.
-                    if let link = articleShareURL(article) {
+                    if let link = RecipeShare.url(for: article) {
                         DispatchQueue.main.async {
                             ShareSheetPresenter.present(url: link)
                         }
@@ -279,14 +279,14 @@ struct ArticleView: View {
                 Divider()
                 articleMenuItem(title: "Copy Link", systemImage: "link") {
                     showOverflowMenu = false
-                    guard let link = articleShareURL(article) else { return }
+                    guard let link = RecipeShare.url(for: article) else { return }
                     UIPasteboard.general.string = link
                     QuickFollowToast.shared.show("Link copied")
                 }
                 Divider()
                 articleMenuItem(title: "Copy Article ID", systemImage: "lanyardcard") {
                     showOverflowMenu = false
-                    guard let naddr = articleNaddr(article) else { return }
+                    guard let naddr = RecipeShare.naddr(for: article) else { return }
                     UIPasteboard.general.string = naddr
                     QuickFollowToast.shared.show("Article ID copied")
                 }
@@ -336,26 +336,6 @@ struct ArticleView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// `naddr` for the article, with up to two relay hints so a recipient's
-    /// client can find it.
-    private func articleNaddr(_ article: NostrEvent) -> String? {
-        let dTag = article.tags.first(where: { $0.count >= 2 && $0[0] == "d" })?[1] ?? ""
-        let relays = Array(NoteSourceTracker.shared.relays(for: article.id).prefix(2))
-        return Nip19.naddrEncode(
-            kind: article.kind,
-            pubkeyHex: article.pubkey,
-            dTag: dTag,
-            relays: relays
-        )
-    }
-
-    private func articleShareURL(_ article: NostrEvent) -> String? {
-        guard let naddr = articleNaddr(article) else { return nil }
-        // The fork's canonical web route for an addressable article
-        // (`ZAPCOOKING_IOS_BUILD.md`, share URLs): never the upstream host.
-        return "https://zap.cooking/r/\(naddr)"
     }
 
     // MARK: - Markdown blocks

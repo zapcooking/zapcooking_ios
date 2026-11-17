@@ -20,6 +20,9 @@ import SwiftUI
 /// through the needs-key toast (deliberate divergence from Android's
 /// silent no-op).
 ///
+/// Share / Copy Link (#222) sit in every overflow variant (author,
+/// non-author, watch-only) via `RecipeShare`, the builder `ArticleView` uses.
+///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Recipe bytes from `RecipeRepository` via `RecipeDetailViewModel`.
 /// - Nourish scores are an independent pantry read (Concern 3.5); a miss
@@ -183,6 +186,41 @@ struct RecipeDetailView: View {
         }
     }
 
+    /// Share + Copy Link, in every overflow variant (author, non-author,
+    /// watch-only): neither needs a signing key. Hidden when the event cannot
+    /// be encoded, rather than offering a dead link.
+    @ViewBuilder
+    private func shareButtons(_ event: NostrEvent) -> some View {
+        if let link = RecipeShare.url(for: event) {
+            Button {
+                // Next runloop tick, as `ArticleView` does: the menu is still
+                // the top presenter until its dismissal settles, and a share
+                // sheet presented under it goes nowhere.
+                DispatchQueue.main.async {
+                    ShareSheetPresenter.present(url: link)
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityIdentifier("share-recipe")
+            Button {
+                UIPasteboard.general.string = link
+                QuickFollowToast.shared.show("Link copied")
+            } label: {
+                Label("Copy Link", systemImage: "link")
+            }
+            .accessibilityIdentifier("copy-recipe-link")
+        }
+    }
+
+    private var overflowLabel: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color.wispOnSurface)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+
     private var topBar: some View {
         HStack(spacing: 12) {
             BackChevronButton { dismiss() }
@@ -220,6 +258,7 @@ struct RecipeDetailView: View {
                 .accessibilityIdentifier("edit-recipe")
 
                 Menu {
+                    shareButtons(event)
                     saveToCollectionButton
                     Button(role: .destructive) {
                         showDeleteConfirm = true
@@ -240,6 +279,7 @@ struct RecipeDetailView: View {
             }
             if let event = viewModel.event, event.pubkey != keypair.pubkey {
                 Menu {
+                    shareButtons(event)
                     saveToCollectionButton
                     Button(role: .destructive) {
                         ReportPresenter.shared.present(.event(event))
@@ -267,6 +307,19 @@ struct RecipeDetailView: View {
                         .foregroundStyle(Color.wispOnSurface)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Recipe actions")
+                .accessibilityIdentifier("recipe-overflow")
+            }
+            // Watch-only on their own pubkey: no edit / delete, but sharing
+            // still works.
+            if let event = viewModel.event,
+               event.pubkey == keypair.pubkey,
+               activeUserIsWatchOnly {
+                Menu {
+                    shareButtons(event)
+                } label: {
+                    overflowLabel
                 }
                 .accessibilityLabel("Recipe actions")
                 .accessibilityIdentifier("recipe-overflow")
