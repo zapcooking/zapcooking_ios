@@ -96,6 +96,7 @@ struct SearchView: View {
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("search-advanced-toggle")
                     }
                 }
                 // Scope the animation to just the Cancel ↔ Settings swap.
@@ -368,18 +369,32 @@ struct SearchView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !viewModel.hasSearched && currentResultsEmpty && viewModel.tagMatches.isEmpty {
             emptyHint(icon: "magnifyingglass", text: "Start typing to search")
+        } else if viewModel.hasSearched && currentResultsEmpty && !viewModel.isSearching && viewModel.searchUnreachable {
+            unreachableHint
         } else if viewModel.hasSearched && currentResultsEmpty && !viewModel.isSearching && viewModel.tagMatches.isEmpty {
-            emptyHint(icon: "tray", text: "No results found")
+            VStack(spacing: 8) {
+                emptyHint(icon: "tray", text: "No results found")
+                if viewModel.searchPartialCoverage {
+                    partialCoverageFootnote
+                }
+            }
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     tagSuggestions
-                    if viewModel.mode == .notes {
-                        notesList
-                    } else if viewModel.mode == .recipes {
-                        recipesList
+                    if viewModel.searchUnreachable && !viewModel.isSearching {
+                        unreachableHint
                     } else {
-                        peopleList
+                        if viewModel.searchPartialCoverage && !viewModel.isSearching {
+                            partialCoverageFootnote
+                        }
+                        if viewModel.mode == .notes {
+                            notesList
+                        } else if viewModel.mode == .recipes {
+                            recipesList
+                        } else {
+                            peopleList
+                        }
                     }
                 }
             }
@@ -389,6 +404,52 @@ struct SearchView: View {
             // rationale.
             .ignoresSafeArea(.keyboard, edges: .bottom)
         }
+    }
+
+    /// The relay fan-out completed with nobody answering. An empty list
+    /// here doesn't mean the content doesn't exist — the search never
+    /// ran — so this is an explicit failure state with a retry, not the
+    /// plain "No results found" hint. Rendered full-height when there are
+    /// no tag chips, and as a plain row beneath the chips otherwise.
+    private var unreachableHint: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("Couldn't reach search relays")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("No search relay answered. Check your connection and try again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button {
+                viewModel.runSearch()
+            } label: {
+                Text("Try again")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(Color.wispSurfaceVariant, in: Capsule())
+                    .foregroundStyle(Color.wispOnSurface)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+    }
+
+    /// Some queried search relays never answered (EOSE) — whatever this
+    /// list holds, the same query on the missing relays may hold more.
+    private var partialCoverageFootnote: some View {
+        Text("Some search relays didn't answer — results may be incomplete.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
     }
 
     /// Keyword / hashtag chips above the results — mirrors web's tag

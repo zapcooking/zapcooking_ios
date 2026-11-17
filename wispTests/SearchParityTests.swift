@@ -174,4 +174,46 @@ struct SearchParityTests {
     @Test func matchingTags_caseInsensitive() {
         #expect(SearchViewModel.matchingTags(for: "SOUP").contains("soup"))
     }
+
+    // MARK: - Relay coverage (unreachable vs. genuinely empty)
+
+    @Test func coverageFlags_zeroAnsweredIsUnreachable() {
+        let flags = SearchViewModel.coverageFlags(responded: 0, queried: 2)
+        #expect(flags.unreachable)
+        #expect(!flags.partial)
+    }
+
+    @Test func coverageFlags_someAnsweredIsPartialNotUnreachable() {
+        let flags = SearchViewModel.coverageFlags(responded: 1, queried: 2)
+        #expect(!flags.unreachable)
+        #expect(flags.partial)
+    }
+
+    @Test func coverageFlags_allAnsweredIsComplete() {
+        let flags = SearchViewModel.coverageFlags(responded: 2, queried: 2)
+        #expect(!flags.unreachable)
+        #expect(!flags.partial)
+    }
+
+    @Test func coverageFlags_singleRelayPartialImpossible() {
+        let flags = SearchViewModel.coverageFlags(responded: 1, queried: 1)
+        #expect(!flags.unreachable)
+        #expect(!flags.partial)
+    }
+
+    @Test func coverageFlags_zeroQueriedIsNeutral() {
+        let flags = SearchViewModel.coverageFlags(responded: 0, queried: 0)
+        #expect(!flags.unreachable)
+        #expect(!flags.partial)
+    }
+
+    @Test func clearingQueryResetsCoverageFlags() {
+        let vm = SearchViewModel(keypair: Keypair(privkey: "", pubkey: alice))
+        vm.query = "soup"
+        vm.searchUnreachable = true
+        vm.searchPartialCoverage = true
+        vm.updateQuery("")
+        #expect(!vm.searchUnreachable)
+        #expect(!vm.searchPartialCoverage)
+    }
 }

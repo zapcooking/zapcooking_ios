@@ -61,4 +61,44 @@ final class SearchScreenshotsUITests: XCTestCase {
     func testNotesScreenshot() {
         capture("notes", "search-notes-results")
     }
+
+    /// The unreachable empty state: with every search relay unreachable
+    /// (here: one custom relay pointing at a closed local port, the real
+    /// relay-picker flow), an empty result list must read as a failure
+    /// with a retry — never as "No results found".
+    func testUnreachableRelaysShowFailureState() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-WatchOnlyLogin", "319ad3e790634dbe86f14db9c2995b26ee3c6228be55f89c4c7fea9acc01d50a",
+            // Empty query: the harness only lands us on the search tab.
+            "-SearchHarness", "",
+        ]
+        app.launch()
+        let field = app.textFields["Search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "search screen did not come up")
+
+        // Advanced panel → relay menu → add an unreachable relay. Adding
+        // selects it as the individual search relay.
+        app.buttons["search-advanced-toggle"].tap()
+        let relayMenu = app.buttons["Default"]
+        XCTAssertTrue(relayMenu.waitForExistence(timeout: 5), "relay selector not found")
+        relayMenu.tap()
+        let addRelayItem = app.buttons["Add custom relay\u{2026}"]
+        XCTAssertTrue(addRelayItem.waitForExistence(timeout: 5), "Add custom relay menu item not found")
+        addRelayItem.tap()
+
+        let relayField = app.textFields.firstMatch
+        XCTAssertTrue(relayField.waitForExistence(timeout: 5), "add-relay sheet did not come up")
+        relayField.tap()
+        relayField.typeText("wss://127.0.0.1:1")
+        app.buttons["Add"].tap()
+
+        // Query the unreachable relay and wait out the 6s search window.
+        field.tap()
+        field.typeText("soup\n")
+        let failure = app.staticTexts["Couldn't reach search relays"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 20),
+                      "unreachable state did not appear:\n\(app.debugDescription)")
+        attachScreen(app, "search-unreachable")
+    }
 }

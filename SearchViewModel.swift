@@ -42,6 +42,16 @@ final class SearchViewModel {
     var isAuthorSearching = false
     var hasSearched = false
 
+    /// True when the last search finished with zero of the queried search
+    /// relays answering (EOSE). The empty result list then means "nobody
+    /// answered" — relays down, network down, an outage or incident — and
+    /// must surface as an explicit failure, never as "No results found".
+    var searchUnreachable = false
+
+    /// True when only some of the queried search relays answered: the result
+    /// set may be incomplete. Never set together with `searchUnreachable`.
+    var searchPartialCoverage = false
+
     // MARK: - Internals
 
     @ObservationIgnored private let profileRepo = ProfileRepository.shared
@@ -201,6 +211,8 @@ final class SearchViewModel {
                 engagement = [:]
                 recipes = []
                 recipeProfiles = [:]
+                searchUnreachable = false
+                searchPartialCoverage = false
                 hasSearched = false
             }
             return
@@ -288,6 +300,8 @@ final class SearchViewModel {
         searchTask?.cancel()
         isSearching = true
         hasSearched = true
+        searchUnreachable = false
+        searchPartialCoverage = false
         if mode == .notes {
             notes = []
             engagement = [:]
@@ -393,10 +407,18 @@ final class SearchViewModel {
             // either search relay can be the only one answering today — the
             // first-EOSE fast path would let one relay's instant empty EOSE
             // truncate the other's stream and look like zero results.
-            let events = await RelayPool.query(
+            // queryDetailed (not query): "no relay answered at all" must be
+            // distinguishable from "answered, nothing matched" — when the
+            // search relays are down or under attack, an empty result list
+            // would tell the user the content doesn't exist.
+            let outcome = await RelayPool.queryDetailed(
                 relays: queryRelays, filter: filter, timeout: timeout, waitForAllRelays: true
             )
             guard !Task.isCancelled else { return }
+            let events = outcome.events
+            let coverage = Self.coverageFlags(
+                responded: outcome.relaysResponded, queried: queryRelays.count
+            )
 
             if mode == .people, case .text(let trimmed) = intent {
                 // Username index alongside the relay kind-0s (web queries
@@ -409,12 +431,16 @@ final class SearchViewModel {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard myCounter == self.searchCounter else { return }
+                    self.searchUnreachable = coverage.unreachable
+                    self.searchPartialCoverage = coverage.partial
                     self.handlePeopleResults(events, suggestions: suggestions, query: trimmed)
                     self.isSearching = false
                 }
             } else {
                 await MainActor.run {
                     guard myCounter == self.searchCounter else { return }
+                    self.searchUnreachable = coverage.unreachable
+                    self.searchPartialCoverage = coverage.partial
                     switch mode {
                     case .people: self.handlePeopleResults(events)
                     case .notes:  self.handleNoteResults(events)
@@ -424,6 +450,16 @@ final class SearchViewModel {
                 }
             }
         }
+    }
+
+    /// How to present an empty (or thin) result set: zero of the queried
+    /// relays answered means the search never really ran — relays down,
+    /// network down, or an incident like nostrarchives' — and must surface
+    /// as an explicit failure, never as "No results found". Some-but-not-all
+    /// answering means the set may be incomplete.
+    static func coverageFlags(responded: Int, queried: Int) -> (unreachable: Bool, partial: Bool) {
+        guard queried > 0 else { return (false, false) }
+        return (responded == 0, responded > 0 && responded < queried)
     }
 
     private static func withTimeout<T>(seconds: TimeInterval, _ op: @escaping () async -> T) async -> T? {
