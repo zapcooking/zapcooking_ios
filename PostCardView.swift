@@ -34,6 +34,10 @@ struct PostCardView: View {
     /// not identity, and depth-cap folding means a reply's visual position
     /// doesn't always trace cleanly back to its parent.
     var replyToLabelOverride: String? = nil
+    /// Set by ThreadView on a muted reply the reader chose to view: puts a
+    /// trailing "Hide" on the "Replying to" row that re-collapses it. The row
+    /// is rendered for this even when it would otherwise have no label.
+    var onHideMuted: (() -> Void)? = nil
     /// When true, the card renders a lock chip in the header and hides
     /// repost / quote actions (they would re-publish the rumor id as a public
     /// kind-6 or kind-1 with `q` tag, breaking the encryption invariant).
@@ -917,18 +921,28 @@ struct PostCardView: View {
     private func replyingToRow(for displayEvent: NostrEvent) -> some View {
         // Web-scoped NIP-22 comments have no `e` reply target, so admit them
         // explicitly — their context comes from the `I` tag instead.
-        if !ancestorCompact,
-           Nip10.replyTarget(of: displayEvent) != nil
-             || Nip22.externalRoot(of: displayEvent) != nil,
-           let label = replyToLabelOverride ?? replyingToLabel(for: displayEvent) {
+        let hasTarget = Nip10.replyTarget(of: displayEvent) != nil
+            || Nip22.externalRoot(of: displayEvent) != nil
+        let label = hasTarget ? (replyToLabelOverride ?? replyingToLabel(for: displayEvent)) : nil
+        if !ancestorCompact, label != nil || onHideMuted != nil {
             HStack(spacing: 4) {
-                Image(systemName: "arrowshape.turn.up.left.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let label {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let onHideMuted {
+                    Spacer(minLength: 8)
+                    Button("Hide", action: onHideMuted)
+                        .font(.caption)
+                        .foregroundStyle(Color.zapInteractive)
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("muted-reply-hide")
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -3042,6 +3056,7 @@ extension PostCardView: Equatable {
             && lhs.forcedReplyCount == rhs.forcedReplyCount
             && lhs.showReplyContext == rhs.showReplyContext
             && lhs.replyToLabelOverride == rhs.replyToLabelOverride
+            && (lhs.onHideMuted != nil) == (rhs.onHideMuted != nil)
             && lhs.isPrivate == rhs.isPrivate
     }
 }

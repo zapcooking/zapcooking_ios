@@ -492,34 +492,32 @@ struct ThreadView: View {
             // touch — the comment icon opened compose AND triggered a
             // push, which then dismissed the compose sheet and caused it
             // to reopen in a tight loop.
-            VStack(alignment: .leading, spacing: 0) {
-                if row.isBlocked { mutedReplyHideRow(row.id) }
-                PostCardView(
-                    event: row.event,
-                    profile: viewModel.profiles[row.event.pubkey],
-                    profiles: viewModel.profiles,
-                    engagement: engagement(for: row.event.id),
-                    replyToLabelOverride: replyingTo.map(replyToLabel),
-                    isPrivate: row.isPrivate,
-                    onProfileTap: { pk in push(ProfileRoute(pubkey: pk)) },
-                    // Tap on an embedded quoted note pushes that note as
-                    // its own focal. SwiftUI's nested-Button hit-testing
-                    // gives the inner QuotedNoteView's tap area priority,
-                    // so this fires before the surrounding row tap.
-                    onNoteTap: { quotedId in
-                        navigateToThread(eventId: quotedId, authorPubkey: row.event.pubkey)
-                    },
-                    onHashtagTap: { tag in push(HashtagFeedRoute(tag: tag)) }
-                )
-                .equatable()
-                .contentShape(Rectangle())
-                // Tap a reply row to scroll to it in place + flash it — the whole
-                // conversation is already on screen, so we never push a sub-thread.
-                // (Embedded quoted-note taps above still push: different conversation.)
-                .onTapGesture {
-                    viewModel.scrollTargetId = row.event.id
-                    viewModel.highlightId = row.event.id
-                }
+            PostCardView(
+                event: row.event,
+                profile: viewModel.profiles[row.event.pubkey],
+                profiles: viewModel.profiles,
+                engagement: engagement(for: row.event.id),
+                replyToLabelOverride: replyingTo.map(replyToLabel),
+                onHideMuted: row.isBlocked ? { revealedMutedIds.remove(row.id) } : nil,
+                isPrivate: row.isPrivate,
+                onProfileTap: { pk in push(ProfileRoute(pubkey: pk)) },
+                // Tap on an embedded quoted note pushes that note as
+                // its own focal. SwiftUI's nested-Button hit-testing
+                // gives the inner QuotedNoteView's tap area priority,
+                // so this fires before the surrounding row tap.
+                onNoteTap: { quotedId in
+                    navigateToThread(eventId: quotedId, authorPubkey: row.event.pubkey)
+                },
+                onHashtagTap: { tag in push(HashtagFeedRoute(tag: tag)) }
+            )
+            .equatable()
+            .contentShape(Rectangle())
+            // Tap a reply row to scroll to it in place + flash it — the whole
+            // conversation is already on screen, so we never push a sub-thread.
+            // (Embedded quoted-note taps above still push: different conversation.)
+            .onTapGesture {
+                viewModel.scrollTargetId = row.event.id
+                viewModel.highlightId = row.event.id
             }
         }
     }
@@ -614,19 +612,6 @@ struct ThreadView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("muted-reply-reveal")
-    }
-
-    /// Re-collapse control shown above a revealed muted reply.
-    private func mutedReplyHideRow(_ id: String) -> some View {
-        HStack {
-            Spacer()
-            Button("Hide") { revealedMutedIds.remove(id) }
-                .font(.caption)
-                .foregroundStyle(Color.zapInteractive)
-                .accessibilityIdentifier("muted-reply-hide")
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
     }
 
     private var blockedPlaceholder: some View {
