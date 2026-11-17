@@ -25,18 +25,32 @@ enum ThreadReplyFolder {
     /// a thread the target is silently absent from. Placement is shallower
     /// than the true chain, but visibility beats depth precision.
     ///
+    /// Pass-through of hidden nodes: `hiddenParents` maps the id of an event
+    /// the caller keeps OUT of the tree (a stray kind-1 on a comment) to ITS
+    /// parent id ("" when it has none). Replies below a hidden node re-parent
+    /// to the nearest visible ancestor instead of being severed with it — the
+    /// hidden note disappears, the conversation under it does not. Hidden ids
+    /// must not appear in `knownIds`.
+    ///
     /// `events` are the pre-filtered replies (kind / stray rules are the
     /// caller's); `knownIds` decides orphaning; `parentOf` resolves the
     /// immediate parent, `rootAnchorOf` the conversation anchor.
     static func adjacency<C: Collection>(
         _ events: C,
         knownIds: Set<String>,
+        hiddenParents: [String: String] = [:],
         parentOf: (NostrEvent) -> String?,
         rootAnchorOf: (NostrEvent) -> String?
     ) -> [String: [NostrEvent]] where C.Element == NostrEvent {
         var byParent: [String: [NostrEvent]] = [:]
         for event in events {
-            let parentId = parentOf(event) ?? ""
+            var parentId = parentOf(event) ?? ""
+            // Bounded so a forged parent cycle among hidden notes can't spin.
+            var hops = 0
+            while let up = hiddenParents[parentId], hops < 32 {
+                parentId = up
+                hops += 1
+            }
             if knownIds.contains(parentId) {
                 byParent[parentId, default: []].append(event)
                 continue

@@ -13,6 +13,10 @@ struct ThreadView: View {
     @State private var suppressNextDisappearChainRemoval: Bool = false
     /// Anchors whose depth-capped subtree the user expanded inline.
     @State private var expandedBranchIds: Set<String> = []
+    /// Muted replies the reader chose to view, per reply (web parity,
+    /// zapcooking/frontend#1004): revealing one never unmutes the account or
+    /// surfaces its other replies. Ephemeral — a fresh screen starts collapsed.
+    @State private var revealedMutedIds: Set<String> = []
     /// Reply row ids currently on-screen (via onAppear/onDisappear), used to
     /// pick the sticky reply bar's target — the topmost visible reply,
     /// falling back to the thread's default parent.
@@ -471,8 +475,8 @@ struct ThreadView: View {
 
     @ViewBuilder
     private func replyRow(_ row: ThreadRow, replyingTo: NostrEvent?) -> some View {
-        if row.isBlocked {
-            blockedPlaceholder
+        if row.isBlocked && !revealedMutedIds.contains(row.id) {
+            mutedReplyPlaceholder(revealing: row.id)
         } else if row.isWotHidden {
             // Replies normally drop outright before reaching a row; this only
             // renders if a WoT-hidden id slips into a slice (belt-and-
@@ -488,31 +492,34 @@ struct ThreadView: View {
             // touch — the comment icon opened compose AND triggered a
             // push, which then dismissed the compose sheet and caused it
             // to reopen in a tight loop.
-            PostCardView(
-                event: row.event,
-                profile: viewModel.profiles[row.event.pubkey],
-                profiles: viewModel.profiles,
-                engagement: engagement(for: row.event.id),
-                replyToLabelOverride: replyingTo.map(replyToLabel),
-                isPrivate: row.isPrivate,
-                onProfileTap: { pk in push(ProfileRoute(pubkey: pk)) },
-                // Tap on an embedded quoted note pushes that note as
-                // its own focal. SwiftUI's nested-Button hit-testing
-                // gives the inner QuotedNoteView's tap area priority,
-                // so this fires before the surrounding row tap.
-                onNoteTap: { quotedId in
-                    navigateToThread(eventId: quotedId, authorPubkey: row.event.pubkey)
-                },
-                onHashtagTap: { tag in push(HashtagFeedRoute(tag: tag)) }
-            )
-            .equatable()
-            .contentShape(Rectangle())
-            // Tap a reply row to scroll to it in place + flash it — the whole
-            // conversation is already on screen, so we never push a sub-thread.
-            // (Embedded quoted-note taps above still push: different conversation.)
-            .onTapGesture {
-                viewModel.scrollTargetId = row.event.id
-                viewModel.highlightId = row.event.id
+            VStack(alignment: .leading, spacing: 0) {
+                if row.isBlocked { mutedReplyHideRow(row.id) }
+                PostCardView(
+                    event: row.event,
+                    profile: viewModel.profiles[row.event.pubkey],
+                    profiles: viewModel.profiles,
+                    engagement: engagement(for: row.event.id),
+                    replyToLabelOverride: replyingTo.map(replyToLabel),
+                    isPrivate: row.isPrivate,
+                    onProfileTap: { pk in push(ProfileRoute(pubkey: pk)) },
+                    // Tap on an embedded quoted note pushes that note as
+                    // its own focal. SwiftUI's nested-Button hit-testing
+                    // gives the inner QuotedNoteView's tap area priority,
+                    // so this fires before the surrounding row tap.
+                    onNoteTap: { quotedId in
+                        navigateToThread(eventId: quotedId, authorPubkey: row.event.pubkey)
+                    },
+                    onHashtagTap: { tag in push(HashtagFeedRoute(tag: tag)) }
+                )
+                .equatable()
+                .contentShape(Rectangle())
+                // Tap a reply row to scroll to it in place + flash it — the whole
+                // conversation is already on screen, so we never push a sub-thread.
+                // (Embedded quoted-note taps above still push: different conversation.)
+                .onTapGesture {
+                    viewModel.scrollTargetId = row.event.id
+                    viewModel.highlightId = row.event.id
+                }
             }
         }
     }
@@ -584,12 +591,50 @@ struct ThreadView: View {
         return counts
     }
 
+    /// Collapsed muted reply: a one-liner that doesn't name the account, with
+    /// a per-reply "View" reveal (web parity, zapcooking/frontend#1004).
+    private func mutedReplyPlaceholder(revealing id: String) -> some View {
+        Button {
+            revealedMutedIds.insert(id)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "nosign")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+                (Text("Reply from an account you muted · ")
+                    .foregroundStyle(.tertiary)
+                    + Text("View").foregroundStyle(Color.zapInteractive))
+                    .font(.subheadline)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("muted-reply-reveal")
+    }
+
+    /// Re-collapse control shown above a revealed muted reply.
+    private func mutedReplyHideRow(_ id: String) -> some View {
+        HStack {
+            Spacer()
+            Button("Hide") { revealedMutedIds.remove(id) }
+                .font(.caption)
+                .foregroundStyle(Color.zapInteractive)
+                .accessibilityIdentifier("muted-reply-hide")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
     private var blockedPlaceholder: some View {
         HStack(spacing: 8) {
             Image(systemName: "nosign")
                 .font(.system(size: 13))
                 .foregroundStyle(.tertiary)
-            Text("Post from blocked user")
+            Text("Reply from an account you muted")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
             Spacer()

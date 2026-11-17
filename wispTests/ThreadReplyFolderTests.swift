@@ -162,10 +162,17 @@ struct ThreadReplyFolderTests {
                           createdAt: 0, tags: tags, content: "", sig: "")
     }
 
-    private func adjacency(_ events: [NostrEvent]) -> [String: [NostrEvent]] {
-        ThreadReplyFolder.adjacency(
-            events,
-            knownIds: Set(events.map(\.id)),
+    private func adjacency(_ events: [NostrEvent], hidden: Set<String> = []) -> [String: [NostrEvent]] {
+        let parentOf: (NostrEvent) -> String? = { event in
+            let es = event.tags.filter { $0.first == "e" && $0.count >= 2 }
+            return (es.first { $0.count >= 4 && $0[3] == "reply" } ?? es.first)?[1]
+        }
+        var hiddenParents: [String: String] = [:]
+        for event in events where hidden.contains(event.id) { hiddenParents[event.id] = parentOf(event) ?? "" }
+        return ThreadReplyFolder.adjacency(
+            events.filter { !hidden.contains($0.id) },
+            knownIds: Set(events.map(\.id)).subtracting(hidden),
+            hiddenParents: hiddenParents,
             parentOf: { event in
                 let es = event.tags.filter { $0.first == "e" && $0.count >= 2 }
                 return (es.first { $0.count >= 4 && $0[3] == "reply" } ?? es.first)?[1]
@@ -215,6 +222,41 @@ struct ThreadReplyFolderTests {
         let byParent = adjacency([root, orphan])
         #expect(byParent["mine"] == nil)
         #expect(byParent["root"]?.isEmpty ?? true)
+    }
+
+    /// The notification-tap bug: a stray kind-1 on a comment is hidden, and
+    /// the user's own comment chain hangs BELOW it. The chain must re-parent
+    /// to the stray's own parent, not be severed with it.
+    @Test func repliesBelowAHiddenStray_reparentToItsParent() {
+        let root = reply("root")
+        let comment = reply("muted-comment", parent: "root", root: "root", kind: 1111)
+        let stray = reply("stray", parent: "muted-comment", root: "root")      // kind-1 on a comment
+        let mine = reply("mine", parent: "stray", root: "root")
+        let deeper = reply("deeper", parent: "mine", root: "root", kind: 1111)
+        let byParent = adjacency([root, comment, stray, mine, deeper], hidden: ["stray"])
+        #expect(byParent["muted-comment"]?.map { $0.id } == ["mine"])
+        #expect(byParent["mine"]?.map { $0.id } == ["deeper"])
+        #expect(byParent["stray"] == nil)
+    }
+
+    @Test func chainOfHiddenStrays_resolvesToNearestVisibleAncestor() {
+        let root = reply("root")
+        let s1 = reply("s1", parent: "root", root: "root")
+        let s2 = reply("s2", parent: "s1", root: "root")
+        let mine = reply("mine", parent: "s2", root: "root")
+        let byParent = adjacency([root, s1, s2, mine], hidden: ["s1", "s2"])
+        #expect(byParent["root"]?.map { $0.id } == ["mine"])
+    }
+
+    /// A forged parent cycle among hidden notes must terminate.
+    @Test func hiddenParentCycle_terminates() {
+        let root = reply("root")
+        let s1 = reply("s1", parent: "s2", root: "root")
+        let s2 = reply("s2", parent: "s1", root: "root")
+        let mine = reply("mine", parent: "s1", root: "root")
+        let byParent = adjacency([root, s1, s2, mine], hidden: ["s1", "s2"])
+        // Unresolvable parent → falls back to graft on the root anchor.
+        #expect(byParent["root"]?.map { $0.id } == ["mine"])
     }
 
     /// Kind-1111 orphans graft the same way — their uppercase `E` names the
