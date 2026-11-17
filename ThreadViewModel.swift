@@ -367,6 +367,11 @@ final class ThreadViewModel {
         let rootBefore = rootId
         if rootEvent == nil {
             await fetchRoot(from: initialRelays)
+        } else if let held = rootEvent,
+                  let upstreamId = Nip10.rootId(of: held), upstreamId != held.id {
+            // Root came from cache (or is the tapped note) but is itself a
+            // reply — keep climbing to the real conversation root.
+            await climbToConversationRoot(from: held, relays: initialRelays)
         }
 
         // 5. Once the root is loaded, re-resolve relays (now using the real
@@ -871,6 +876,10 @@ final class ThreadViewModel {
         return second.first(where: { $0.id == id })
     }
 
+    /// Hard stop on the root climb. Real conversations are a handful of hops
+    /// deep; the cap only guards a malformed (or adversarial) root-pointer loop.
+    private static let maxRootHops = 8
+
     private func fetchRoot(from relays: [String]) async {
         guard let event = await fetchEvent(id: rootId, from: relays) else {
             await reRootToSeedIfRootUnreachable(relays: relays)
@@ -878,33 +887,104 @@ final class ThreadViewModel {
         }
         insertStructural(event)
         rootEvent = event
-        // The root we just fetched may itself be a reply; re-resolve and re-fetch.
-        if let trueRoot = Nip10.rootId(of: event), trueRoot != rootId {
-            rootId = trueRoot
-            // Keep the focal pinned to the (now higher) conversation root. start()
-            // restarts the reply stream because rootId changed, so the higher
-            // subtree subscribes. Re-arm the scroll target in case it was
-            // suppressed while we briefly believed the tapped note was the root.
-            focalEventId = trueRoot
-            if pendingScrollToId == nil && scrollTargetId == nil && seedTargetId != trueRoot {
-                pendingScrollToId = seedTargetId
+        await eventStore.persist([event])
+        await climbToConversationRoot(from: event, relays: relays)
+    }
+
+    /// Follow root pointers upward until the TRUE conversation root.
+    ///
+    /// The held event may itself be a reply: a kind-1111 comment anchors on
+    /// its uppercase `E` (which can be a kind-1 note that is itself a reply
+    /// in a longer thread), and a kind-1 reply names its NIP-10 root. A
+    /// single hop stops at the first anchor — so a notification for a comment
+    /// landed on the note the comment was *attached to*, with that note's own
+    /// ancestors (and anything hanging off them) invisible. Walking to a
+    /// fixed point renders the whole conversation, muted participants as
+    /// placeholders, with the tapped note scrolled into view.
+    ///
+    /// When an ancestor can't be retrieved the climb settles on the highest
+    /// event that WAS reached: a truncated thread beats an empty one, and
+    /// beats snapping back to the seed when a higher anchor did load.
+    private func climbToConversationRoot(from start: NostrEvent, relays: [String]) async {
+        var current = start
+        for _ in 0..<Self.maxRootHops {
+            guard let upstreamId = Nip10.rootId(of: current), upstreamId != current.id else { break }
+            var upstream = events[upstreamId]
+            if upstream == nil {
+                var fetched = await fetchEvent(id: upstreamId, from: relays)
+                if fetched == nil {
+                    // The shared set missed it. An ancestor lives on its
+                    // author's outbox, and a thread participant (a `p` tag)
+                    // is usually that author — widen to their write relays
+                    // before giving up on the climb.
+                    let extra = await ancestorRelayCandidates(for: upstreamId, in: current, excluding: relays)
+                    if !extra.isEmpty { fetched = await fetchEvent(id: upstreamId, from: extra) }
+                }
+                if let fetched {
+                    insertStructural(fetched)
+                    await eventStore.persist([fetched])
+                    upstream = fetched
+                }
             }
-            rootEvent = events[trueRoot]
-            if rootEvent == nil, let upstreamRoot = await fetchEvent(id: trueRoot, from: relays) {
-                insertStructural(upstreamRoot)
-                rootEvent = upstreamRoot
-            }
-            // The upstream root can be pruned too — same dead end as above, so
-            // fall back rather than leaving the focal pinned to a missing id.
-            if rootEvent == nil {
-                await eventStore.persist([event])
-                await reRootToSeedIfRootUnreachable(relays: relays)
+            guard let upstream else {
+                settleRoot(on: current)
                 return
             }
+            // Keep the focal pinned to the (now higher) conversation root.
+            // start() restarts the reply stream because rootId changed, so
+            // the higher subtree subscribes. Re-arm the scroll target in case
+            // it was suppressed while we briefly believed the tapped note
+            // was the root.
+            rootId = upstream.id
+            focalEventId = upstream.id
+            rootEvent = upstream
+            if pendingScrollToId == nil && scrollTargetId == nil && seedTargetId != upstream.id {
+                pendingScrollToId = seedTargetId
+            }
+            current = upstream
         }
-        await eventStore.persist([event])
         // Repaint with the (possibly re-rooted) focal — the live stream may not
         // have delivered anything yet on a cold load.
+        rebuildSlices()
+    }
+
+    /// Extra relays worth asking for the ancestor `id` named by `event`: the
+    /// tag's own relay hint, the hinted author's write relays, then the write
+    /// relays of the first few `p`-tagged participants.
+    private func ancestorRelayCandidates(for id: String, in event: NostrEvent, excluding known: [String]) async -> [String] {
+        var seen = Set(known)
+        var out: [String] = []
+        func add(_ url: String) {
+            let trimmed = url.trimmingCharacters(in: .whitespaces)
+            // Never dial relay.damus.io on our own initiative (AGENTS.md).
+            guard trimmed.hasPrefix("wss://"), !trimmed.contains("relay.damus.io"),
+                  seen.insert(trimmed).inserted else { return }
+            out.append(trimmed)
+        }
+        var pubkeys: [String] = []
+        for tag in event.tags where tag.count >= 2 && (tag[0] == "e" || tag[0] == "E") && tag[1] == id {
+            if tag.count >= 3 { add(tag[2]) }
+            // NIP-22 `E` carries the author at index 3; NIP-10 `e` at index 4.
+            let authorIdx = tag[0] == "E" ? 3 : 4
+            if tag.count > authorIdx, tag[authorIdx].count == 64 { pubkeys.append(tag[authorIdx]) }
+        }
+        for tag in event.tags where tag.count >= 2 && tag[0] == "p" && !pubkeys.contains(tag[1]) {
+            pubkeys.append(tag[1])
+        }
+        for pk in pubkeys.prefix(6) {
+            for url in await relayListRepo.getWriteRelays(pk) { add(url) }
+        }
+        return out
+    }
+
+    /// Pin the thread to `event` as its root after the climb above it dead-ended.
+    private func settleRoot(on event: NostrEvent) {
+        rootId = event.id
+        focalEventId = event.id
+        rootEvent = event
+        isLoading = false
+        // Nothing left to scroll to when the tapped note IS the settled root.
+        if event.id == seedTargetId { pendingScrollToId = nil }
         rebuildSlices()
     }
 
@@ -1352,25 +1432,35 @@ final class ThreadViewModel {
         // repost `e`-tags this note too but isn't a reply (without the guard it'd
         // surface as a duplicate card). This narrows `childCounts` to genuine
         // replies (it previously counted kind-6 reposts); childCounts feeds
-        // `effectiveReplyCount` as `max(local, remote)` in ThreadView, so the
+        // effectiveReplyCount as `max(local, remote)` in ThreadView, so the
         // narrowing is benign and arguably more consistent with the relay count.
-        var childrenByParent: [String: [NostrEvent]] = [:]
-        for event in events.values
-        where (event.kind == 1 || event.kind == Nip22.kindComment) && event.id != renderRootId {
-            // A kind-1 note replying to a comment is a stray main-feed note,
-            // not a comment-thread reply (NIP-22 threads are a 1111-only
-            // namespace) — hidden from the tree and excluded from counts.
-            // Private gift-wrapped replies are exempt: private comment
-            // publishing isn't implemented, so a private reply rumor is
-            // still kind 1.
-            if event.kind == 1,
-               !PrivateInteractionStore.shared.contains(event.id),
-               Nip22.isStrayKind1OnComment(event, parentKindOf: { self.events[$0]?.kind }) {
-                continue
-            }
-            guard let parentId = parent(of: event) else { continue }
-            childrenByParent[parentId, default: []].append(event)
+        // Replies whose parent never arrived (a muted author's note no relay
+        // returned) graft to their root anchor — see
+        // `ThreadReplyFolder.adjacency`.
+        let isStrayKind1: (NostrEvent) -> Bool = { event in
+            event.kind == 1
+                && !PrivateInteractionStore.shared.contains(event.id)
+                && Nip22.isStrayKind1OnComment(event, parentKindOf: { self.events[$0]?.kind })
         }
+        // Stray kind-1s are hidden but PASS THROUGH: replies below one
+        // (typically the user's own comment chain) re-parent to the stray's
+        // own parent rather than being severed with it.
+        var hiddenParents: [String: String] = [:]
+        for event in events.values where (event.kind == 1 || event.kind == Nip22.kindComment)
+            && event.id != renderRootId && isStrayKind1(event) {
+            hiddenParents[event.id] = parent(of: event) ?? ""
+        }
+        var childrenByParent = ThreadReplyFolder.adjacency(
+            events.values.lazy.filter {
+                ($0.kind == 1 || $0.kind == Nip22.kindComment)
+                    && $0.id != renderRootId
+                    && hiddenParents[$0.id] == nil
+            },
+            knownIds: Set(events.keys).subtracting(hiddenParents.keys),
+            hiddenParents: hiddenParents,
+            parentOf: { self.parent(of: $0) },
+            rootAnchorOf: { Nip10.rootId(of: $0) }
+        )
         for key in childrenByParent.keys {
             childrenByParent[key]?.sort { $0.createdAt < $1.createdAt }
         }

@@ -215,18 +215,26 @@ final class NotificationRepository {
             if !item.isPrivateZap, !SafetyFilter.shared.isWotQualified(item.actorPubkey) { return false }
             guard insertSeen(event.id) else { return false }
         }
-        // Sub-thread suppression: don't notify about a reply whose NIP-10 chain
-        // includes a blocked author. When non-blocked A replies to blocked B's
-        // reply to your note, A's event p-tags B (the ancestor author) — and
-        // B's own reply is never persisted, so that p-tag is the only surviving
-        // signal. Scope is `.reply` only: a `.mention`/`.quote` targets your
-        // content directly and merely incidentally p-tags a blocked user, so
-        // dropping those would hide legitimate notifications. This is the single
-        // ingest chokepoint, so it also covers the disk-seed hydration path.
-        if item.kind == .reply {
+        // Sub-thread suppression: for a reply that answers someone *else's*
+        // event nested under my content, drop it when that parent's author is
+        // blocked — when non-blocked A answers blocked B's reply, B's own
+        // event is never persisted, so the cached parent / e-tag author hint
+        // is the only surviving signal. A reply that targets one of my own
+        // events always notifies (zapcooking/zapcooking_ios#220): the p-tag
+        // chain is built by carry-forward and names every thread
+        // participant, so testing it chain-wide silently swallowed replies
+        // to my own notes whenever any participant was muted. Muting scopes
+        // to the actor — already judged at the chokepoint above — and muted
+        // content is hidden at render time. Scope is `.reply` only: a
+        // `.mention`/`.quote` targets your content directly and merely
+        // incidentally p-tags a blocked user, so dropping those would hide
+        // legitimate notifications. This is the single ingest chokepoint, so
+        // it also covers the disk-seed hydration path.
+        if item.kind == .reply, !item.replyTargetIsMine {
             let blocked = SafetyFilter.shared.snapshot.blockedPubkeys
             if !blocked.isEmpty,
-               event.tags.contains(where: { $0.count >= 2 && $0[0] == "p" && blocked.contains($0[1]) }) {
+               let parentAuthor = replyParentAuthor(of: item, source: event),
+               blocked.contains(parentAuthor) {
                 return false
             }
         }
@@ -649,19 +657,38 @@ final class NotificationRepository {
         )
     }
 
+    /// The author of a `.reply` row's immediate parent, when it can be
+    /// resolved without a fetch: the cached parent event, else the author
+    /// hint in the parent's e-tag (4th element — a NIP-22 lowercase `e`
+    /// always carries it; a kind-1 NIP-10 slot holds the "reply"/"root"
+    /// marker, which the hex check rejects). Nil when unknown: callers then
+    /// keep the row, since the mute policy scopes to the actor, judged
+    /// elsewhere.
+    private func replyParentAuthor(of item: FlatNotificationItem, source event: NostrEvent) -> String? {
+        if let cached = eventCache[item.referencedEventId]?.pubkey {
+            return cached
+        }
+        guard let parentTag = event.tags.first(where: { $0.count >= 4 && $0[0] == "e" && $0[1] == item.referencedEventId }),
+              parentTag[3].count == 64, parentTag[3].allSatisfy(\.isHexDigit)
+        else { return nil }
+        return parentTag[3].lowercased()
+    }
+
     /// Drop every trace of `pubkey` from the in-memory notification state.
     /// Called when the user blocks someone — without this, notifications they
     /// triggered linger in `flatItems` and `eventCache` until cold-launch.
     func purgeAuthor(_ pubkey: String) {
-        // Identify sub-thread rows BEFORE pruning eventCache: a reply by a
-        // non-blocked actor that p-tags the now-blocked `pubkey` is part of a
-        // sub-thread we no longer want (mirrors the ingest-time `.reply` drop).
-        // Its source event is the only place that link survives, so resolve it
-        // from the cache while it's still present.
+        // Identify sub-thread rows BEFORE pruning eventCache: a reply that
+        // answers an event authored by the now-blocked `pubkey` is part of a
+        // sub-thread we no longer want (mirrors the ingest-time `.reply`
+        // drop). The parent author is resolved from the cache while it is
+        // still present. Replies targeting the user's own events are kept —
+        // the ingest gate shows those no matter who else is muted (#220).
         let subThreadIds = Set(flatItems.compactMap { item -> String? in
-            guard item.kind == .reply, let ev = eventCache[item.id] else { return nil }
-            let involvesBlocked = ev.tags.contains { $0.count >= 2 && $0[0] == "p" && $0[1] == pubkey }
-            return involvesBlocked ? item.id : nil
+            guard item.kind == .reply, !item.replyTargetIsMine,
+                  let ev = eventCache[item.id],
+                  replyParentAuthor(of: item, source: ev) == pubkey else { return nil }
+            return item.id
         })
         eventCache = eventCache.filter { $0.value.pubkey != pubkey && !subThreadIds.contains($0.key) }
         flatItems.removeAll { $0.actorPubkey == pubkey || subThreadIds.contains($0.id) }
