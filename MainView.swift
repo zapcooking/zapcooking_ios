@@ -236,6 +236,17 @@ struct MainView: View {
                 selectedTab = .feed
                 feedPath.append(ThreadRoute(eventId: seed, authorPubkey: ThreadHarness.authorHint))
             }
+            // `-SearchHarness <query> [-SearchHarnessMode <mode>]` — land on
+            // the search tab with the query already typed (mode pre-selected
+            // so only one relay query fires), for screenshot UI tests.
+            if let harnessQuery = SearchHarness.query {
+                try? await Task.sleep(for: .seconds(3))
+                selectedTab = .search
+                if let harnessMode = SearchHarness.mode {
+                    searchVM.setMode(harnessMode)
+                }
+                searchVM.updateQuery(harnessQuery)
+            }
         }
         #endif
         .environment(walletStore)
