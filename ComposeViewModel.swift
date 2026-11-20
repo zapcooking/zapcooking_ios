@@ -1304,9 +1304,13 @@ final class ComposeViewModel {
         } else if let quoteTag = draft.tags.first(where: { $0.count >= 2 && $0[0] == "q" }) {
             let quotedId = quoteTag[1]
             let quotedAuthor = draft.tags.first(where: { $0.count >= 2 && $0[0] == "p" })?[1] ?? ""
+            // An `a` tag means the quoted event is addressable (recipe, article):
+            // keep its kind and d-tag so the reopened draft still embeds `naddr`.
+            let address = draft.tags.first(where: { $0.count >= 2 && $0[0] == "a" })
+                .flatMap { Nip18.parseCoordinate($0[1]) }
             let stub = NostrEvent(
-                id: quotedId, pubkey: quotedAuthor, kind: 1,
-                createdAt: 0, tags: [], content: "", sig: ""
+                id: quotedId, pubkey: address?.pubkey ?? quotedAuthor, kind: address?.kind ?? 1,
+                createdAt: 0, tags: address.map { [["d", $0.dTag]] } ?? [], content: "", sig: ""
             )
             mode = .quote(stub)
         }
@@ -1457,6 +1461,9 @@ final class ComposeViewModel {
         if galleryMode {
             return attachments.isEmpty ? "Add a photo." : nil
         }
+        // A quote is the attachment here: it renders in the preview with no
+        // text, but a bare quote is not a post — it needs a comment first.
+        if case .quote = mode, trimmed.isEmpty { return "Add a comment." }
         if trimmed.isEmpty && attachments.isEmpty { return "Write something or add a photo." }
         return nil
     }
@@ -1816,12 +1823,7 @@ final class ComposeViewModel {
     /// types their commentary in an empty composer instead of around a 60-char URI.
     private func appendQuoteUri(to body: String) -> String {
         guard case .quote(let event) = mode else { return body }
-        return Nip18.appendNoteUri(
-            content: body,
-            eventIdHex: event.id,
-            relayHints: [],
-            authorHex: event.pubkey
-        )
+        return Nip18.appendQuoteUri(content: body, quoting: event)
     }
 
     /// Content as it would appear in the published note, including any spliced

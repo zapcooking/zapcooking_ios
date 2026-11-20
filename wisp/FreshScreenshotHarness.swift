@@ -17,6 +17,10 @@ import Foundation
 /// - `-FreshScreenshotFixtures`: Fresh reads `FreshScreenshotFixtures` (six
 ///   invented cooks, served by an in-app relay) instead of the feed relay;
 ///   no real user appears and nothing is stored.
+/// - `-FreshScreenshotSigningAccount` (with the above): the new account is a
+///   throwaway keypair that CAN sign, for screenshots of signed-in-only
+///   controls (e.g. recipe "Share in Note"). Random key, simulator only; the
+///   screenshot tests never tap anything that publishes.
 /// - `-FreshVisitMarkSecondsAgo N`: set that account's last-visit mark to
 ///   now − N, so the "new since your last visit" divider has a place to go.
 /// - `-FreshScreenshotSpecials` (with fixtures): the special cards, for that
@@ -44,8 +48,16 @@ nonisolated enum FreshScreenshotHarness {
         guard isOn else { return nil }
         var created: Keypair?
         if existing == nil || arguments.contains("-FreshScreenshotNewAccount") {
-            let pubkey = Hex.encode(Data((0..<32).map { _ in UInt8.random(in: 0...255) }))
-            NostrKey.saveWatchOnly(pubkey: pubkey, acceptance: .now())
+            let pubkey: String
+            if arguments.contains("-FreshScreenshotSigningAccount") {
+                let priv = Schnorr.randomPrivkey()
+                let pub = (try? Schnorr.xonlyPubkey(privkey32: priv)) ?? Data(count: 32)
+                pubkey = Hex.encode(pub)
+                NostrKey.save(Keypair(privkey: Hex.encode(priv), pubkey: pubkey), acceptance: .now())
+            } else {
+                pubkey = Hex.encode(Data((0..<32).map { _ in UInt8.random(in: 0...255) }))
+                NostrKey.saveWatchOnly(pubkey: pubkey, acceptance: .now())
+            }
             NostrKey.markOnboardingComplete(pubkey: pubkey)
             created = NostrKey.load()
         }

@@ -20,6 +20,10 @@ import SwiftUI
 /// through the needs-key toast (deliberate divergence from Android's
 /// silent no-op).
 ///
+/// Share / Share in Note / Copy Link / Copy Event ID (#222) sit in every
+/// overflow variant (author, non-author, watch-only) via `RecipeShare`, the
+/// builder `ArticleView` uses. Share in Note needs a signing key.
+///
 /// Contract (`ZAPCOOKING_IOS_BUILD.md` §Phase 1 / 1.3):
 /// - Recipe bytes from `RecipeRepository` via `RecipeDetailViewModel`.
 /// - Nourish scores are an independent pantry read (Concern 3.5); a miss
@@ -58,6 +62,7 @@ struct RecipeDetailView: View {
     @State private var isDeleting = false
     @State private var deleteFailureMessage: String?
     @Environment(\.dismiss) private var dismiss
+    @Environment(ComposePresenter.self) private var composePresenter: ComposePresenter?
 
     private var activeUserIsWatchOnly: Bool {
         NostrKey.isWatchOnly(pubkey: keypair.pubkey)
@@ -183,6 +188,63 @@ struct RecipeDetailView: View {
         }
     }
 
+    /// Share / copy actions, in every overflow variant (author, non-author,
+    /// watch-only). Hidden when the event cannot be encoded, rather than
+    /// offering a dead link.
+    ///
+    /// - Share / Copy Link: the zap.cooking web URL.
+    /// - Share in Note: opens the quote composer, which embeds the recipe as
+    ///   `nostr:naddr` in a new kind-1. Needs a signing key, so watch-only
+    ///   accounts do not get it.
+    /// - Copy Event ID: the `naddr`, which keeps pointing at the recipe after
+    ///   the author edits it (an event id names one revision).
+    @ViewBuilder
+    private func shareButtons(_ event: NostrEvent) -> some View {
+        if let link = RecipeShare.url(for: event), let naddr = RecipeShare.naddr(for: event) {
+            Button {
+                // Next runloop tick, as `ArticleView` does: the menu is still
+                // the top presenter until its dismissal settles, and a share
+                // sheet presented under it goes nowhere.
+                DispatchQueue.main.async {
+                    ShareSheetPresenter.present(url: link)
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityIdentifier("share-recipe")
+            if !activeUserIsWatchOnly {
+                Button {
+                    composePresenter?.openQuote(event)
+                } label: {
+                    Label("Share in Note", systemImage: "square.and.pencil")
+                }
+                .accessibilityIdentifier("share-recipe-in-note")
+            }
+            Button {
+                UIPasteboard.general.string = link
+                QuickFollowToast.shared.show("Link copied")
+            } label: {
+                Label("Copy Link", systemImage: "link")
+            }
+            .accessibilityIdentifier("copy-recipe-link")
+            Button {
+                UIPasteboard.general.string = naddr
+                QuickFollowToast.shared.show("Event ID copied")
+            } label: {
+                Label("Copy Event ID", systemImage: "lanyardcard")
+            }
+            .accessibilityIdentifier("copy-recipe-event-id")
+        }
+    }
+
+    private var overflowLabel: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color.wispOnSurface)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+
     private var topBar: some View {
         HStack(spacing: 12) {
             BackChevronButton { dismiss() }
@@ -193,8 +255,12 @@ struct RecipeDetailView: View {
             Spacer(minLength: 0)
             if canStartCooking {
                 Button(action: startCooking) {
-                    Image(systemName: "cooktop.fill")
-                        .font(.system(size: 17, weight: .semibold))
+                    // The cooking pot the web nav used before Gadgets took its
+                    // slot (Phosphor `CookingPot`, bold).
+                    Image("ZapCookingPot")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 22, height: 22)
                         .foregroundStyle(Color.wispPrimary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
@@ -220,6 +286,7 @@ struct RecipeDetailView: View {
                 .accessibilityIdentifier("edit-recipe")
 
                 Menu {
+                    shareButtons(event)
                     saveToCollectionButton
                     Button(role: .destructive) {
                         showDeleteConfirm = true
@@ -240,6 +307,7 @@ struct RecipeDetailView: View {
             }
             if let event = viewModel.event, event.pubkey != keypair.pubkey {
                 Menu {
+                    shareButtons(event)
                     saveToCollectionButton
                     Button(role: .destructive) {
                         ReportPresenter.shared.present(.event(event))
@@ -267,6 +335,19 @@ struct RecipeDetailView: View {
                         .foregroundStyle(Color.wispOnSurface)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Recipe actions")
+                .accessibilityIdentifier("recipe-overflow")
+            }
+            // Watch-only on their own pubkey: no edit / delete, but sharing
+            // still works.
+            if let event = viewModel.event,
+               event.pubkey == keypair.pubkey,
+               activeUserIsWatchOnly {
+                Menu {
+                    shareButtons(event)
+                } label: {
+                    overflowLabel
                 }
                 .accessibilityLabel("Recipe actions")
                 .accessibilityIdentifier("recipe-overflow")
@@ -582,7 +663,14 @@ struct RecipeDetailView: View {
 
     private var startCookingButton: some View {
         Button(action: startCooking) {
-            Label("Start cooking", systemImage: "cooktop.fill")
+            Label {
+                Text("Start cooking")
+            } icon: {
+                Image("ZapCookingPotFill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+            }
                 .font(AppFont.titleMedium)
                 .foregroundStyle(Color.wispBackground)
                 .frame(maxWidth: .infinity)

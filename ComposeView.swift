@@ -571,7 +571,7 @@ struct ComposeView: View {
                 Text("Quoting \(profile?.displayString ?? Nip19.shortNpub(hex: quoted.pubkey))")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(previewContent(quoted.content, max: 200))
+                Text(quotedPreview(quoted))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -581,6 +581,15 @@ struct ComposeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.wispSurfaceVariant.opacity(0.4),
                     in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// A recipe's body is a markdown ingredient / direction dump, so quote it
+    /// by title; everything else previews its content.
+    private func quotedPreview(_ quoted: NostrEvent) -> String {
+        if RecipeParser.isRecipe(quoted), let title = RecipeParser.parse(quoted).title, !title.isEmpty {
+            return title
+        }
+        return previewContent(quoted.content, max: 200)
     }
 
     /// Render-friendly preview of an event's `.content`. When the content is
@@ -1497,6 +1506,10 @@ struct ComposeView: View {
         if viewModel.galleryMode { return false }
         let hasText = !viewModel.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !viewModel.attachments.isEmpty
+        // A quote renders as soon as the composer opens, so the author sees
+        // what is being shared even before typing (publishing still waits
+        // for a comment: `ComposeViewModel.publishBlocker`).
+        if case .quote = viewModel.mode { return true }
         return hasText || hasAttachments
     }
 
