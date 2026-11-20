@@ -183,9 +183,9 @@ struct SearchView: View {
                     viewModel.setRelayOption(.default)
                 } label: {
                     if viewModel.relayOption == .default {
-                        Label("Default (nos.today + nostrarchives)", systemImage: "checkmark")
+                        Label("Default (Brainstorm + nos.today)", systemImage: "checkmark")
                     } else {
-                        Text("Default (nos.today + nostrarchives)")
+                        Text("Default (Brainstorm + nos.today)")
                     }
                 }
 

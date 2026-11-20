@@ -3,16 +3,23 @@ import Testing
 @testable import wisp
 
 /// Search parity with web (zap.cooking): the default relay set fans across
-/// the same two NIP-50 search relays web queries, people results merge the
-/// nostrarchives username index with relay kind-0s under web's ranking
-/// tiers, recipe rows are re-checked client-side the way web's
-/// `recipeSearchResult` is, and keyword/hashtag completions come from the
-/// static food taxonomy. All pure seams — no network, no relays.
+/// Brainstorm (NosFabrica's vespa-relay, primary) and nos.today with
+/// per-relay search strings (the `observer:` token goes to Brainstorm only),
+/// people results are signature-verified and ranked under web's tiers,
+/// recipe rows are re-checked client-side the way web's `recipeSearchResult`
+/// is, and keyword/hashtag completions come from the static food taxonomy.
+/// All pure seams — no network, no relays.
+@Suite(.serialized)
 @MainActor
 struct SearchParityTests {
 
     private let alice = String(repeating: "a", count: 64)
     private let bob = String(repeating: "b", count: 64)
+
+    init() {
+        // Backoff is process-global; keep tests order-independent.
+        BrainstormSearch.clearBackoff()
+    }
 
     private func recipeEvent(
         pubkey: String,
@@ -32,9 +39,9 @@ struct SearchParityTests {
 
     // MARK: - Relay fan-out
 
-    @Test func defaultSearchRelays_matchWebPair() {
+    @Test func defaultSearchRelays_matchWebPair_brainstormPrimary() {
         #expect(SearchViewModel.defaultSearchRelays == [
-            "wss://search.nos.today", "wss://search.nostrarchives.com",
+            "wss://search.brainstorm.world", "wss://search.nos.today",
         ])
     }
 
@@ -48,7 +55,7 @@ struct SearchParityTests {
         vm.savedSearchRelays = ["wss://relay.example.com"]
         vm.relayOption = .all
         #expect(vm.relaysToQuery() == [
-            "wss://search.nos.today", "wss://search.nostrarchives.com", "wss://relay.example.com",
+            "wss://search.brainstorm.world", "wss://search.nos.today", "wss://relay.example.com",
         ])
     }
 
@@ -57,6 +64,98 @@ struct SearchParityTests {
         vm.relayOption = .individual
         vm.selectedRelayUrl = nil
         #expect(vm.relaysToQuery() == SearchViewModel.defaultSearchRelays)
+    }
+
+    @Test func relaysToQuery_brainstormBackoffLeavesNosToday() {
+        let vm = SearchViewModel(keypair: Keypair(privkey: "", pubkey: alice))
+        BrainstormSearch.markDown()
+        #expect(vm.relaysToQuery() == ["wss://search.nos.today"])
+        // An explicit individual pick is the user's own choice — not filtered.
+        vm.relayOption = .individual
+        vm.selectedRelayUrl = BrainstormSearch.relay
+        #expect(vm.relaysToQuery() == [BrainstormSearch.relay])
+        BrainstormSearch.clearBackoff()
+        vm.relayOption = .default
+        vm.selectedRelayUrl = nil
+        #expect(vm.relaysToQuery() == SearchViewModel.defaultSearchRelays)
+    }
+
+    // MARK: - Brainstorm query hygiene (web nameSearch rules)
+
+    @Test func cleanQuery_stripsRelayInstructionsAndControlChars() {
+        #expect(BrainstormSearch.cleanQuery("alice") == "alice")
+        #expect(BrainstormSearch.cleanQuery("@alice") == "alice")
+        #expect(BrainstormSearch.cleanQuery("observer:\(BrainstormSearch.houseObserver) alice") == "alice")
+        #expect(BrainstormSearch.cleanQuery("include:spam alice") == "alice")
+        #expect(BrainstormSearch.cleanQuery("sort:rank alice") == "alice")
+        #expect(BrainstormSearch.cleanQuery("-alice") == nil)
+        #expect(BrainstormSearch.cleanQuery("'\"*") == nil)
+        #expect(BrainstormSearch.cleanQuery("so\nup\tstick") == "so up stick")
+        #expect(BrainstormSearch.cleanQuery("  ") == nil)
+    }
+
+    @Test func cleanQuery_capsAt64Chars() {
+        let long = String(repeating: "a", count: 100)
+        #expect(BrainstormSearch.cleanQuery(long)?.count == 64)
+    }
+
+    @Test func searchQueryString_observerTokenOnlyForBrainstorm() {
+        let brainstorm = BrainstormSearch.searchQueryString(forRelay: BrainstormSearch.relay, query: "soup")
+        #expect(brainstorm == "soup observer:\(BrainstormSearch.houseObserver)")
+        let other = BrainstormSearch.searchQueryString(forRelay: "wss://search.nos.today", query: "soup")
+        #expect(other == "soup")
+        #expect(BrainstormSearch.searchQueryString(forRelay: "wss://search.nos.today", query: "-alice") == nil)
+    }
+
+    // MARK: - People verification gate (web toResults parity)
+
+    private func signedKind0(
+        privkeyHex: String, createdAt: Int, name: String
+    ) -> NostrEvent {
+        let privkey = Hex.decode(privkeyHex)!
+        let pubkey = Hex.encode(Secp256k1.publicKey(from: privkey)!)
+        return try! NostrEvent.sign(
+            privkey32: privkey, pubkey: pubkey, kind: 0, createdAt: createdAt,
+            tags: [], content: "{\"name\":\"\(name)\"}"
+        )
+    }
+
+    @Test func verifiedKind0_dropsForgedEvents() {
+        let signed = signedKind0(privkeyHex: String(repeating: "11", count: 32), createdAt: 100, name: "alice")
+        // A forgery keeps id and sig but changes content — the recomputed
+        // hash no longer matches, and the signature no longer covers it.
+        let forged = NostrEvent(
+            id: signed.id, pubkey: signed.pubkey, kind: 0, createdAt: signed.createdAt,
+            tags: signed.tags, content: "{\"name\":\"attacker\"}", sig: signed.sig
+        )
+        let verified = SearchViewModel.verifiedKind0Results([signed, forged])
+        #expect(verified.count == 1)
+        #expect(verified[0].content.contains("alice"))
+    }
+
+    @Test func verifiedKind0_newestPerPubkey_relayOrderKept() {
+        let keyA = String(repeating: "11", count: 32)
+        let keyB = String(repeating: "22", count: 32)
+        let aOld = signedKind0(privkeyHex: keyA, createdAt: 100, name: "a-old")
+        let bNew = signedKind0(privkeyHex: keyB, createdAt: 300, name: "b")
+        let aNew = signedKind0(privkeyHex: keyA, createdAt: 200, name: "a-new")
+        let verified = SearchViewModel.verifiedKind0Results([aOld, bNew, aNew])
+        #expect(verified.count == 2)
+        // First-seen key keeps its slot; its row is the newest event.
+        #expect(verified[0].content.contains("a-new"))
+        #expect(verified[1].content.contains("b"))
+    }
+
+    @Test func verifiedKind0_dropsNonKind0AndBadKeys() {
+        let note = NostrEvent(
+            id: "n1", pubkey: alice, kind: 1, createdAt: 1,
+            tags: [], content: "soup", sig: String(repeating: "0", count: 128)
+        )
+        let unsigned = NostrEvent(
+            id: "u1", pubkey: bob, kind: 0, createdAt: 1,
+            tags: [], content: "{}", sig: String(repeating: "0", count: 128)
+        )
+        #expect(SearchViewModel.verifiedKind0Results([note, unsigned]).isEmpty)
     }
 
     // MARK: - Recipe recheck (web recipeSearchResult parity)

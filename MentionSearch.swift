@@ -91,25 +91,38 @@ enum MentionSearch {
     ) async -> [MentionCandidate] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { return [] }
-        // Query the NIP-50 search relay only — matches the global People
-        // search. Adding the discovery indexers (damus / primal / coracle)
-        // hurts here: they don't honor `search`, so they EOSE almost
-        // instantly with zero results, which trips `RelayPool.query`'s
-        // first-EOSE fast path and shortens the window before the actual
-        // search relay has a chance to reply.
+        // Query the default search-relay pair, one subscription per relay:
+        // Brainstorm requires its `observer:` token and refuses a bare
+        // NIP-50 search, while other relays must never receive that token
+        // (they would match it as literal words). Adding the discovery
+        // indexers (primal / coracle) hurts here: they don't honor `search`,
+        // so they EOSE almost instantly with zero results, which shortens
+        // the window before the actual search relay has a chance to reply.
         //
         // `waitForAllRelays: true` skips the post-EOSE-then-stop fast path
         // — some NIP-50 relays send EOSE optimistically and stream the
         // matching kind-0 events afterwards, and we need the full window
         // for those rather than the 1.5 s grace.
-        let relays = [SearchViewModel.defaultSearchRelay]
-        let filter = NostrFilter(kinds: [0], limit: 20, search: trimmed)
-        let events = await RelayPool.query(
-            relays: relays,
-            filter: filter,
-            timeout: 6,
-            waitForAllRelays: true
-        )
+        let relays = SearchViewModel.defaultSearchRelays
+        let events = await withTaskGroup(of: [NostrEvent].self) { group in
+            for url in relays {
+                var filter = NostrFilter(kinds: [0], limit: 20)
+                filter.search = BrainstormSearch.searchQueryString(forRelay: url, query: trimmed)
+                group.addTask {
+                    await RelayPool.query(
+                        relays: [url],
+                        filter: filter,
+                        timeout: 6,
+                        waitForAllRelays: true
+                    )
+                }
+            }
+            var merged: [NostrEvent] = []
+            for await batch in group {
+                merged.append(contentsOf: batch)
+            }
+            return merged
+        }
         guard !events.isEmpty else { return [] }
 
         let q = trimmed.lowercased()
