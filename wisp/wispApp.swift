@@ -67,6 +67,8 @@ struct wispApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-ComposerDragHarness") {
                 ComposerDragHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-ZapGatingHarness") {
+                ZapGatingHarness()
             } else if ProcessInfo.processInfo.arguments.contains("-EmojiLibraryHarness") {
                 EmojiLibraryHarness()
             } else if ProcessInfo.processInfo.arguments.contains("-EmojiReactionHarness") {

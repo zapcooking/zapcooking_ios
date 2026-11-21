@@ -12,6 +12,19 @@ import Testing
         #expect(!ZapGate.postZapVisible(flagEnabled: false))
     }
 
+    /// A zap without a recipient lightning address always fails at send time
+    /// (`ZapSender.Failure.noLightningAddress`), so the flag alone isn't
+    /// enough — the affordance is only offered when the recipient has a
+    /// `lud16` (`ProfileData` is iOS's only address source).
+    @Test func postLevelRequiresRecipientAddress() {
+        #expect(ZapGate.postZapVisible(recipientLud16: "pleb@zap.cooking", flagEnabled: true))
+        #expect(!ZapGate.postZapVisible(recipientLud16: nil, flagEnabled: true))
+        #expect(!ZapGate.postZapVisible(recipientLud16: "", flagEnabled: true))
+        #expect(!ZapGate.postZapVisible(recipientLud16: "   ", flagEnabled: true))
+        #expect(!ZapGate.postZapVisible(recipientLud16: "pleb@zap.cooking", flagEnabled: false))
+        #expect(!ZapGate.postZapVisible(recipientLud16: nil, flagEnabled: false))
+    }
+
     @Test func profileLevelIsIndependentOfTheFlag() {
         #expect(ZapGate.profileZapVisible(flagEnabled: true))
         #expect(ZapGate.profileZapVisible(flagEnabled: false))
@@ -19,6 +32,8 @@ import Testing
 
     @Test func defaultsReadTheShippedFlag() {
         #expect(ZapGate.postZapVisible() == FeatureFlags.zapsOnPosts)
+        #expect(ZapGate.postZapVisible(recipientLud16: "pleb@zap.cooking") == FeatureFlags.zapsOnPosts)
+        #expect(!ZapGate.postZapVisible(recipientLud16: nil))
         #expect(ZapGate.profileZapVisible())
     }
 

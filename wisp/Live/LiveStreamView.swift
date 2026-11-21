@@ -581,8 +581,10 @@ private struct StreamInfoBar: View {
             }
             Spacer()
             // Zaps the host with the stream's `a` tag — tied to content, so
-            // it follows the §4.8 post-level kill switch.
-            if ZapGate.postZapVisible() {
+            // it follows the §4.8 post-level kill switch, and the same
+            // recipient-address gate as every other bolt: no host lud16,
+            // no zap button.
+            if ZapGate.postZapVisible(recipientLud16: profile?.lud16) {
                 Button(action: onZap) {
                     HStack(spacing: 4) {
                         Image(systemName: "bolt.fill")
@@ -779,8 +781,10 @@ private struct LiveChatBubble: View {
             } label: {
                 Label("React", systemImage: "face.smiling")
             }
-            // Zaps the chat message by id — post-level (§4.8 kill switch).
-            if ZapGate.postZapVisible() {
+            // Zaps the chat message by id — post-level (§4.8 kill switch),
+            // and gated on the sender having a lightning address like every
+            // other bolt.
+            if ZapGate.postZapVisible(recipientLud16: profile?.lud16) {
                 Button {
                     onZap()
                 } label: {

@@ -26,6 +26,21 @@ enum ZapGate {
         flagEnabled
     }
 
+    /// Whether a post-level zap affordance renders for a specific recipient:
+    /// the flag must be on AND the recipient must have a lightning address.
+    /// A zap without one always fails at send time ("Recipient has no
+    /// lightning address", `ZapSender`), so the bolt is never offered.
+    /// `lud16` is the only address iOS reads (`ProfileData`); nil, empty, or
+    /// whitespace-only counts as no address.
+    static func postZapVisible(recipientLud16: String?, flagEnabled: Bool = FeatureFlags.zapsOnPosts) -> Bool {
+        flagEnabled && hasLightningAddress(recipientLud16)
+    }
+
+    private static func hasLightningAddress(_ lud16: String?) -> Bool {
+        guard let lud16 else { return false }
+        return !lud16.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Profile-level zaps survive the flip — that is the whole point of the
     /// switch. Takes the flag so the truth table can prove independence.
     static func profileZapVisible(flagEnabled _: Bool = FeatureFlags.zapsOnPosts) -> Bool {
