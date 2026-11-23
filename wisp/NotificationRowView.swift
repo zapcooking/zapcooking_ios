@@ -111,6 +111,8 @@ struct NotificationRowView: View {
             // stay on `wispZapColor` in `mergedZapBreakdown`.
             Text("+\(extra) more")
                 .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(Color.zapInteractive)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
