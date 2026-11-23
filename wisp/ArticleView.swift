@@ -100,7 +100,8 @@ struct ArticleView: View {
                             article: article,
                             keypair: keypair,
                             replyCount: viewModel.comments.count,
-                            authorProfile: viewModel.profiles[article.pubkey]
+                            authorProfile: viewModel.profiles[article.pubkey],
+                            zapsOnPosts: ZapGate.postZapVisible(recipientLud16: viewModel.profiles[article.pubkey]?.lud16)
                         )
                         .padding(.horizontal, 8)
                     }
@@ -196,8 +197,10 @@ struct ArticleView: View {
             // the byline: overlaid on that row it collided with any display
             // name long enough to reach it.
             // Post-level zap, so the §4.8 kill switch applies here exactly as
-            // it does to the bolt in `ArticleActionBar` below the body.
-            if !activeUserIsWatchOnly, ZapGate.postZapVisible() {
+            // it does to the bolt in `ArticleActionBar` below the body — as
+            // does the recipient-address gate: no author lud16, no bolt.
+            if !activeUserIsWatchOnly,
+               ZapGate.postZapVisible(recipientLud16: viewModel.profiles[article.pubkey]?.lud16) {
                 Spacer().frame(height: 12)
                 ArticleZapRow(
                     article: article,
@@ -625,7 +628,10 @@ private struct ArticleZapRow: View {
 /// forking it. `zapsOnPosts` is Gate 0-F / §4.8: when false the bolt is not
 /// rendered at all — a tip button on the content is post-level whatever the
 /// zap request tags, so the affordance goes, not just the `e` tag. The
-/// author's profile keeps its zap button.
+/// author's profile keeps its zap button. Callers pass the recipient-gated
+/// value (`ZapGate.postZapVisible(recipientLud16: authorProfile?.lud16)`) —
+/// the flag alone isn't enough, a bolt without a recipient address always
+/// fails at send time.
 ///
 /// Bookmark routing (Concern 3.1b): `RecipeParser.isRecipe` →
 /// `RecipeBookmarkRepository` (kind 30001); otherwise the inherited

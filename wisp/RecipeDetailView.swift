@@ -456,7 +456,7 @@ struct RecipeDetailView: View {
                 keypair: keypair,
                 replyCount: 0,
                 authorProfile: viewModel.authorProfile,
-                zapsOnPosts: ZapGate.postZapVisible(),
+                zapsOnPosts: ZapGate.postZapVisible(recipientLud16: viewModel.authorProfile?.lud16),
                 knownBookmarkTarget: .recipeBookmark
             )
             .padding(.horizontal, 8)

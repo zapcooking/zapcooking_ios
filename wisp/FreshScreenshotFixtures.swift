@@ -29,8 +29,14 @@ enum FreshScreenshotFixtures {
         return Cook(name: name, about: about, priv: priv, pubkey: pubkey)
     }
 
-    static let profiles: [String: ProfileData] = Dictionary(uniqueKeysWithValues: cooks.map {
-        ($0.pubkey, ProfileData(pubkey: $0.pubkey, json: ["name": $0.name, "display_name": $0.name, "about": $0.about]))
+    static let profiles: [String: ProfileData] = Dictionary(uniqueKeysWithValues: cooks.enumerated().map {
+        // Marisol and Elena publish a lud16; the rest don't. The zap-gating
+        // screenshots (`ZapGatingScreenshotsUITests`) need both states in the
+        // same feed: the bolt only renders for cooks with an address.
+        let lud16: [Int: String] = [0: "marisol@zap.cooking", 5: "elena@zap.cooking"]
+        var json: [String: Any] = ["name": $1.name, "display_name": $1.name, "about": $1.about]
+        if let address = lud16[$0] { json["lud16"] = address }
+        return ($1.pubkey, ProfileData(pubkey: $1.pubkey, json: json))
     })
 
     private static func sign(_ cook: Int, minutesAgo: Int, kind: Int = 1, tags: [[String]] = [], _ content: String) -> NostrEvent? {

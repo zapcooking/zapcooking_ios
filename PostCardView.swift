@@ -666,7 +666,10 @@ struct PostCardView: View {
                         onZapVote: { idx in
                             zapPollOptionIndex = idx
                             triggerZapOrWalletSetup()
-                        }
+                        },
+                        // Zap votes are post-level zaps on the poll author —
+                        // same recipient-address gate as the action-bar bolt.
+                        zapVotingEnabled: ZapGate.postZapVisible(recipientLud16: displayProfile?.lud16)
                     )
                 }
 
@@ -1203,9 +1206,10 @@ struct PostCardView: View {
                 Spacer(minLength: 0)
             }
             // Post-level zap (tap, long-press quick zap). Hidden wholesale when
-            // `FeatureFlags.zapsOnPosts` is off (§4.8 kill switch); the
-            // author's profile keeps its own zap button.
-            if ZapGate.postZapVisible() {
+            // `FeatureFlags.zapsOnPosts` is off (§4.8 kill switch) or when the
+            // author has no lightning address — every zap would fail at send
+            // time (§ZapGate); the author's profile keeps its own zap button.
+            if ZapGate.postZapVisible(recipientLud16: resolveRepost().profile?.lud16) {
                 zapAction
                 Spacer(minLength: 0)
             }
@@ -1281,6 +1285,10 @@ struct PostCardView: View {
             }
         }
         .contentShape(Rectangle())
+        // XCUI can only see (and the zap-gating screenshot test can only
+        // assert on) elements, not bare gesture ZStacks.
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("post-zap-action")
         // Tap = open composer. Recorded behind the `zapLongPressFired`
         // guard so the same touch sequence that fires an instant zap
         // doesn't ALSO open the composer on finger-lift — SwiftUI fires
