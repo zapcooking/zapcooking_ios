@@ -184,3 +184,10 @@ The `Nip*.swift` files at the repo root each implement one NIP. Quick map: 04 (l
 ### Content rendering
 
 `ContentParser` tokenizes note content into `[ContentSegment]` (text, image/video/audio with NIP-92 imeta metadata, links with previews, nostr bech32 entities, custom emoji shortcodes, hashtags, BOLT11 invoices). `RichContentView` splits segments into inline rows (rendered through `RichInlineTextView`, a UITextView wrapper with NSAttributedString and tappable link ranges) and block rows (`InlineImageView`, `InlineVideoView`, `InlineAudioView`, `LinkPreviewView`, `QuotedNoteView`).
+
+## Composers and text fields
+
+Before changing a composer (notes, replies, articles, recipes) or any field whose text is
+published as written, read [`docs/composer-editor-matrix.md`](docs/composer-editor-matrix.md) and run
+[editor-matrix](https://github.com/dmnyc/editor-matrix) before and after the change. A
+composer bug no case caught gets a case there first.
