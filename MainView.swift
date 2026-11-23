@@ -129,6 +129,18 @@ struct MainView: View {
     /// list changes.
     @State private var onlyFoodFollow = FeedFollowState()
     @State private var generalFollow = FeedFollowState()
+    /// Chrome auto-hide, one detector per body (OnlyFood, general, Fresh) — see `FeedBarsAutoHide`.
+    /// Each body keeps its own scroll position, so each keeps its own
+    /// baseline; both flip the one `viewModel.barsVisible` bit. Reference
+    /// types on purpose: the geometry callback advances them every scroll
+    /// frame and must not invalidate this body doing so.
+    @State private var onlyFoodBarsScroll = FeedBarsScrollDetector()
+    @State private var generalBarsScroll = FeedBarsScrollDetector()
+    @State private var freshBarsScroll = FeedBarsScrollDetector()
+    /// The restore circle is on screen: trails `showsFeedBarsRestore` by the
+    /// collapse animation on the way in, follows it at once on the way out.
+    @State private var restoreChipShown = false
+    @State private var restoreChipGeneration = 0
     /// Android's `prevMode` guard for the picker (§7): re-pin only on an
     /// actual selection, never on first composition or tab re-entry.
     @State private var kindSwitchTracker = FeedKindSwitchTracker()
@@ -213,9 +225,18 @@ struct MainView: View {
                 wasBackgrounded = false
                 FeedTabRouting.resumeOnlyFoodIfActive(kind: viewModel.currentKind, onlyFood: onlyfoodFeedVM)
                 FeedTabRouting.freshDidBecomeActive(fresh: freshFeedVM)
+                // Coming back from the background re-enters the feed: bars up.
+                showFeedBarsOnReentry()
             default:
                 break
             }
+        }
+        .onChange(of: selectedTab) { _, tab in
+            // Re-entering the feed tab starts with the bars up, as Android's
+            // FeedScreen does on re-composition; the tab stays mounted here,
+            // so the reset is explicit. Leaving the feed needs nothing —
+            // `bottomBarVisible` shows the tab bar on every other tab.
+            if tab == .feed { showFeedBarsOnReentry() }
         }
         .task {
             // Launch janitor first: CFNetworkDownload leftovers stack up in
@@ -861,6 +882,42 @@ struct MainView: View {
                         .animation(.easeInOut(duration: 0.2), value: feedFabOpacity)
                         .animation(.smooth(duration: 0.22), value: audioPlayer.currentTrack != nil)
                 }
+                // Minimized tab bar (`FeedBarsRestoreChip`): opposite the
+                // FAB with centers level. Shown only once the collapse has
+                // settled (`restoreChipShown`) — this ZStack's bottom edge
+                // travels down with the tab bar for the length of the
+                // animation, and anything pinned to it meanwhile slides.
+                // `showsFeedBarsRestore` in the condition too: a tap (or any
+                // restore) removes the circle in the same update that raises
+                // the bars, not one `onChange` later.
+                if restoreChipShown && showsFeedBarsRestore {
+                    feedBarsRestoreChip
+                        .padding(.leading, 18)
+                        .padding(.bottom, 32 + (56 - FeedBarsRestoreChip.size) / 2
+                                 + (audioPlayer.currentTrack != nil ? MiniAudioPlayerView.collapsedHeight : 0))
+                        // Same scroll-phase fade as the FAB beside it.
+                        .opacity(feedFabOpacity)
+                        .animation(.easeInOut(duration: 0.2), value: feedFabOpacity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        // Fades in where it sits; leaves at once, so it
+                        // never rides the edge back up on restore.
+                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                }
+            }
+            .onChange(of: showsFeedBarsRestore) { _, show in
+                restoreChipGeneration &+= 1
+                if show {
+                    let generation = restoreChipGeneration
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(220))
+                        guard generation == restoreChipGeneration, showsFeedBarsRestore else { return }
+                        withAnimation(.easeOut(duration: 0.15)) { restoreChipShown = true }
+                    }
+                } else {
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { restoreChipShown = false }
+                }
             }
             // Frosted unified top header — same `.regularMaterial` look as
             // ProfileView. Inside the NavigationStack so it auto-disappears
@@ -869,8 +926,32 @@ struct MainView: View {
             // One flat alpha layer over the status-bar strip and the bar
             // together (Android wraps the whole top app bar in a 0.85-alpha
             // Box); a gradient reads as a seam between the two.
+            //
+            // Chrome auto-hide: only the control row collapses (bottom-
+            // anchored, so it shrinks up into the status-bar strip). The
+            // strip itself, the 10pt breather below it and the hairline
+            // stay painted whatever the bars are doing, so feed content
+            // scrolls under the clock without touching it and the "where
+            // chrome starts" line never disappears — Android's column of
+            // status-bar spacer, 10dp spacer, AnimatedVisibility, divider.
             .safeAreaInset(edge: .top, spacing: 0) {
-                topBar.background(Color.wispBackground.opacity(0.85))
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: FeedBarsLayout.topBreather)
+                    CollapsingBar(visible: viewModel.barsVisible, anchor: .bottom) {
+                        topBar
+                    }
+                    FeedBarsLayout.hairline
+                }
+                .background(
+                    Color.wispBackground.opacity(0.85)
+                        .ignoresSafeArea(edges: .top)
+                )
+                // Test hook: the chrome's collapsed state as a value, since
+                // a clipped, accessibility-hidden row stays in the tree and
+                // its hittability is not a reliable signal.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("feed-top-chrome")
+                .accessibilityValue(viewModel.barsVisible ? "up" : "down")
             }
             // The NavigationStack paints the system background (black in
             // dark mode) over the root ZStack's `wispBackground`, so the
@@ -950,6 +1031,22 @@ struct MainView: View {
                 FeedTabRouting.ensureOnlyFoodStarted(kind: kind, onlyFood: onlyfoodFeedVM)
                 // Fresh's socket is open only while Fresh is selected.
                 FeedTabRouting.syncFresh(kind: kind, fresh: freshFeedVM)
+                // The bodies swap and each keeps its own scroll position:
+                // drop both baselines so the incoming body's first offset
+                // event records where it is rather than diffing against the
+                // offset it had when it was last visible. The bars keep
+                // their state, as on Android where a kind change is the
+                // same screen.
+                onlyFoodBarsScroll.reset()
+                generalBarsScroll.reset()
+                freshBarsScroll.reset()
+            }
+            .onChange(of: feedPath.count) { was, count in
+                // Back on the feed root from a thread / profile / list the
+                // bars start visible, as on Android where returning to the
+                // FEED route re-composes FeedScreen. While something is
+                // pushed, `bottomBarVisible` keeps the tab bar up on its own.
+                if was > 0, count == 0 { showFeedBarsOnReentry() }
             }
             // §7 picker re-pin, guarded like Android's `prevMode`: the initial
             // observation only records the landing kind; a general kind
@@ -1247,12 +1344,13 @@ struct MainView: View {
                 onExpand: { showCookingUtilitiesSheet = true }
             )
 
+            // The separator above the tab row moved into `bottomBar` as the
+            // chrome hairline, which stays whether the row is up or down and
+            // now also sits under the mini player, as Android's does.
             Group {
                 if audioPlayer.currentTrack != nil {
                     MiniAudioPlayerView()
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else {
-                    Divider().overlay(Color.wispSurfaceVariant.opacity(0.5))
                 }
             }
             .animation(.smooth(duration: 0.22), value: audioPlayer.currentTrack != nil)
@@ -1825,13 +1923,16 @@ struct MainView: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
+                // Finds this body's UIScrollView so a restore tap can stop a fling.
+                .background(FeedScrollStopperAnchor(stopper: onlyFoodBarsScroll.stopper))
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .refreshable { await onlyfoodFeedVM.refreshAndWait() }
-            // One phase observer feeds both the FAB fade and §7's drag /
-            // settled bits.
+            // One phase observer feeds the FAB fade, §7's drag / settled
+            // bits and the chrome detector's user-driven bit.
             .onScrollPhaseChange { _, newPhase in
                 onlyFoodFollow.scrollPhase(newPhase)
+                onlyFoodBarsScroll.scrollPhase(newPhase)
                 switch newPhase {
                 case .tracking, .interacting:
                     feedFabOpacity = 0.35
@@ -1849,6 +1950,15 @@ struct MainView: View {
                 geo.contentOffset.y <= 0
             } action: { _, atTop in
                 onlyFoodFollow.atTop(atTop)
+            }
+            // Chrome auto-hide: the one per-frame read, into a detector
+            // SwiftUI does not track; only a flipped verdict writes state.
+            // The offset is adjusted by the content inset so "0" is the
+            // very top (SwiftUI reports rest-at-top as -inset).
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, offsetY in
+                applyFeedBarsVerdict(onlyFoodBarsScroll.offsetChanged(offsetY))
             }
             // Re-pin to the newest note when the head changes while
             // following: refresh, resume, the optimistic self-insert. A user
@@ -2008,6 +2118,8 @@ struct MainView: View {
                         FreshRecipeRow(recipes: freshFeedVM.recipePicks)
                     }
                 }
+                // Finds this body's UIScrollView so a restore tap can stop a fling.
+                .background(FeedScrollStopperAnchor(stopper: freshBarsScroll.stopper))
                 // Readable width on iPad, centred (no effect on iPhone).
                 .frame(maxWidth: FreshFeedLayout.maxContentWidth)
                 .frame(maxWidth: .infinity)
@@ -2015,12 +2127,19 @@ struct MainView: View {
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .refreshable { await freshFeedVM.refreshAndWait() }
             .onScrollPhaseChange { _, newPhase in
+                freshBarsScroll.scrollPhase(newPhase)
                 switch newPhase {
                 case .tracking, .interacting: feedFabOpacity = 0.35
                 case .decelerating, .animating: feedFabOpacity = 0.75
                 case .idle: feedFabOpacity = 1.0
                 @unknown default: feedFabOpacity = 1.0
                 }
+            }
+            // Chrome auto-hide — same detector wiring as the other bodies.
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, offsetY in
+                applyFeedBarsVerdict(freshBarsScroll.offsetChanged(offsetY))
             }
             .onChange(of: feedScrollToTopTrigger) { _, _ in
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -2195,6 +2314,8 @@ struct MainView: View {
                         // boundary; this is the last line of defense.
                         .transaction { $0.animation = nil }
                     }
+                    // Finds this body's UIScrollView so a restore tap can stop a fling.
+                    .background(FeedScrollStopperAnchor(stopper: generalBarsScroll.stopper))
                 }
                 // Anchor at the top on first mount so the feed never appears
                 // scrolled down after a cold launch or a content reset.
@@ -2205,10 +2326,11 @@ struct MainView: View {
                 // (Search, Hashtag, Trending, NoteList, PeopleList, Thread).
                 .ignoresSafeArea(.keyboard, edges: .bottom)
                 .refreshable { await viewModel.refresh() }
-                // One phase observer feeds both the FAB fade and §7's drag /
-                // settled bits.
+                // One phase observer feeds the FAB fade, §7's drag / settled
+                // bits and the chrome detector's user-driven bit.
                 .onScrollPhaseChange { _, newPhase in
                     generalFollow.scrollPhase(newPhase)
+                    generalBarsScroll.scrollPhase(newPhase)
                     switch newPhase {
                     case .tracking, .interacting:
                         feedFabOpacity = 0.35
@@ -2231,6 +2353,15 @@ struct MainView: View {
                     feedAtTop = top.nearTop
                     viewModel.setHoldNewPosts(!top.nearTop)
                     generalFollow.atTop(top.atTop)
+                }
+                // Chrome auto-hide: the one per-frame read, into a detector
+                // SwiftUI does not track; only a flipped verdict writes state.
+                // The offset is adjusted by the content inset so "0" is the
+                // very top (SwiftUI reports rest-at-top as -inset).
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y + geo.contentInsets.top
+                } action: { _, offsetY in
+                    applyFeedBarsVerdict(generalBarsScroll.offsetChanged(offsetY))
                 }
                 // Re-pin to the newest event when the head changes while
                 // following (the initial fill, live prepends at the top).
@@ -2307,7 +2438,35 @@ struct MainView: View {
     /// 21dp siblings), an 8pt amber unread dot on Messages and Notifications.
     /// Watch-only accounts get Android's read-only bar shape: Messages is
     /// dropped (it is drawer-gated for them today for the same reason).
+    ///
+    /// Chrome auto-hide: only the tab row collapses, top-anchored so it
+    /// shrinks down into the home-indicator area; the hairline above it and
+    /// the home-indicator reserve below it (painted by `mainShell`'s
+    /// `wispBackground`, the bar's own color) stay put — Android's
+    /// `AnimatedVisibility` around the row alone, nav-inset spacer outside
+    /// it. The watch-only bar is the same view, so it collapses the same.
     private var bottomBar: some View {
+        VStack(spacing: 0) {
+            FeedBarsLayout.hairline
+            CollapsingBar(visible: bottomBarVisible, anchor: .top) {
+                tabRow
+            }
+        }
+        // Test hook — see the header chrome's comment.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("feed-bottom-chrome")
+        .accessibilityValue(bottomBarVisible ? "up" : "down")
+    }
+
+    /// Only the feed tab's root list hides the tab bar. Every other tab, and
+    /// anything pushed on the feed stack, keeps it mounted and visible — so
+    /// leaving the feed mid-scroll shows the bar again on arrival (Android's
+    /// `currentRoute != FEED || barsVisible`).
+    private var bottomBarVisible: Bool {
+        selectedTab != .feed || !feedPath.isEmpty || viewModel.barsVisible
+    }
+
+    private var tabRow: some View {
         HStack {
             ForEach(BottomTab.bottomBarCases(watchOnly: isWatchOnly), id: \.self) { tab in
                 Button {
@@ -2370,6 +2529,77 @@ struct MainView: View {
     }
 
     // MARK: - Helpers
+
+    /// Chrome auto-hide: apply a detector verdict (`FeedBarsAutoHide`). A
+    /// verdict that matches the bars is dropped here, so the per-frame path
+    /// never writes the observable bit while the user keeps scrolling the
+    /// same way. A real flip is deferred one tick like `setHoldNewPosts`'s
+    /// merge: this runs inside `onScrollGeometryChange`, and reshaping the
+    /// layout synchronously there — the header is a safe-area inset of the
+    /// very scroll view reporting — risks the pass in flight. Animated as
+    /// Android's 200ms expand / shrink plus crossfade.
+    private func applyFeedBarsVerdict(_ verdict: Bool?) {
+        guard let verdict, verdict != viewModel.barsVisible else { return }
+        Task { @MainActor in
+            guard verdict != viewModel.barsVisible else { return }
+            withAnimation(.feedBarsCollapse) {
+                viewModel.setBarsVisible(verdict)
+            }
+        }
+    }
+
+    /// Re-entering the feed root — from another tab, from a pushed thread,
+    /// from the background — always starts with the bars up. Both detectors
+    /// drop their baseline so the next offset event cannot hide them again
+    /// off a stale delta.
+    /// The restore chip's tap: bars up, keeping the detectors' baselines so
+    /// the next scroll down hides them again from here.
+    private func showFeedBars() {
+        // A tap on the circle mid-fling must act like a tap on the list:
+        // stop it (`FeedScrollStopper`); the detectors then hold off hiding until the next touch, so nothing
+        // left of that gesture can take the bars down again.
+        onlyFoodBarsScroll.restored()
+        generalBarsScroll.restored()
+        freshBarsScroll.restored()
+        onlyFoodBarsScroll.stopper.stop()
+        generalBarsScroll.stopper.stop()
+        freshBarsScroll.stopper.stop()
+        guard !viewModel.barsVisible else { return }
+        withAnimation(.feedBarsCollapse) {
+            viewModel.setBarsVisible(true)
+        }
+    }
+
+    /// The restore control shows only on the feed root with the bars down.
+    /// Watch-only accounts get it too — they have no FAB, but they lose the
+    /// tab row all the same.
+    private var showsFeedBarsRestore: Bool {
+        selectedTab == .feed && feedPath.isEmpty && !viewModel.barsVisible && !drawerOpen
+    }
+
+    private var feedBarsRestoreChip: some View {
+        FeedBarsRestoreChip(
+            hasUnread: chromeHasUnread,
+            unreadColor: BottomTab.unreadDotColor(isDark: theme.isDark),
+            action: { showFeedBars() }
+        )
+    }
+
+    /// One dot on the restore chip for whatever badged tab the collapsed row
+    /// would be showing a dot on.
+    private var chromeHasUnread: Bool {
+        BottomTab.bottomBarCases(watchOnly: isWatchOnly).contains { hasUnreadBadge($0) }
+    }
+
+    private func showFeedBarsOnReentry() {
+        onlyFoodBarsScroll.reset()
+        generalBarsScroll.reset()
+        freshBarsScroll.reset()
+        guard !viewModel.barsVisible else { return }
+        withAnimation(.feedBarsCollapse) {
+            viewModel.setBarsVisible(true)
+        }
+    }
 
     /// §7 re-pin to `feedTop`, one run loop later and animated. Deferred so
     /// the LazyVStack has laid out the prepended rows before `feedTop` is
