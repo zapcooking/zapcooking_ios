@@ -6,7 +6,7 @@ import Observation
 final class SearchViewModel {
     let keypair: Keypair
 
-    enum Mode: String { case notes, people }
+    enum Mode: String { case people, notes, recipes }
     enum RelayOption: String { case `default`, all, individual }
 
     // MARK: - Inputs
@@ -28,11 +28,29 @@ final class SearchViewModel {
     var noteProfiles: [String: ProfileData] = [:]
     var people: [ProfileData] = []
     var authorResults: [ProfileData] = []
+    var recipes: [RecipeResult] = []
+    var recipeProfiles: [String: ProfileData] = [:]
+
+    /// Food-hashtag / keyword completions for the current query, from the
+    /// static taxonomy (`FoodHashtags.all`) — the iOS counterpart of web's
+    /// `recipeTags` suggestion rows. Shown as tappable chips above the
+    /// results in every mode; a tap opens the hashtag feed.
+    var tagMatches: [String] = []
 
     var engagement: [String: EngagementCounts] = [:]
     var isSearching = false
     var isAuthorSearching = false
     var hasSearched = false
+
+    /// True when the last search finished with zero of the queried search
+    /// relays answering (EOSE). The empty result list then means "nobody
+    /// answered" — relays down, network down, an outage or incident — and
+    /// must surface as an explicit failure, never as "No results found".
+    var searchUnreachable = false
+
+    /// True when only some of the queried search relays answered: the result
+    /// set may be incomplete. Never set together with `searchUnreachable`.
+    var searchPartialCoverage = false
 
     // MARK: - Internals
 
@@ -47,9 +65,29 @@ final class SearchViewModel {
     @ObservationIgnored private var searchCounter: Int = 0
     @ObservationIgnored private var authorCounter: Int = 0
 
+    /// The NIP-50 search-relay pair fanned for every full-text query:
+    /// Brainstorm (NosFabrica's vespa-relay) is primary — it serves people,
+    /// post and recipe search from one place and ranks by web of trust —
+    /// with nos.today kept behind it as the second relay, matching web's
+    /// post-Brainstorm search page. Nostr Archives leaves the set entirely
+    /// (unreliable, then unreachable in an incident; its empty EOSEs are
+    /// what blanked search in the first place).
+    ///
+    /// Because Brainstorm requires an `observer:` token on every search
+    /// (see ``BrainstormSearch``), the fan-out runs one subscription per
+    /// relay with per-relay search strings — never one shared filter.
+    /// Search queries run with `waitForAllRelays: true` so one relay's
+    /// empty EOSE can't truncate the other's stream.
+    static let defaultSearchRelays = [BrainstormSearch.relay, "wss://search.nos.today"]
+
+    /// Kept for the deliberate single-relay call sites outside search
+    /// (`OnlyFoodFeedViewModel.searchRelay` matches Android's hashtag path;
+    /// `FoodSeedRepository` seeds its own list).
     static let defaultSearchRelay = "wss://search.nostrarchives.com"
 
-    private let searchTimeout: TimeInterval = 5
+    /// Web's search page gives its relay subscriptions 6s including connect
+    /// time; match that — throttled relays answer late, not never (§7.4).
+    private let searchTimeout: TimeInterval = 6
     private let engagementTimeout: TimeInterval = 10
     private let authorTimeout: TimeInterval = 4
 
@@ -69,6 +107,10 @@ final class SearchViewModel {
                     if self.notes.contains(where: { $0.pubkey == pk }),
                        let p = self.profileRepo.get(pk) {
                         self.noteProfiles[pk] = p
+                    }
+                    if self.recipes.contains(where: { $0.author == pk }),
+                       let p = self.profileRepo.get(pk) {
+                        self.recipeProfiles[pk] = p
                     }
                 }
             }
@@ -157,12 +199,24 @@ final class SearchViewModel {
         if let implied = impliedMode(for: text), mode != implied {
             mode = implied
         }
+        // Keyword/hashtag completions track the text as typed (before the
+        // 500 ms debounce), like web's autocomplete rows. Identity intents
+        // (npub / hex / NIP-05 / note refs) never get tag rows.
+        if case .text = intent {
+            tagMatches = Self.matchingTags(for: text)
+        } else {
+            tagMatches = []
+        }
         guard isQueryActionable(intent) else {
             if case .text(let s) = intent, s.isEmpty {
                 notes = []
                 people = []
                 noteProfiles = [:]
                 engagement = [:]
+                recipes = []
+                recipeProfiles = [:]
+                searchUnreachable = false
+                searchPartialCoverage = false
                 hasSearched = false
             }
             return
@@ -250,10 +304,15 @@ final class SearchViewModel {
         searchTask?.cancel()
         isSearching = true
         hasSearched = true
+        searchUnreachable = false
+        searchPartialCoverage = false
         if mode == .notes {
             notes = []
             engagement = [:]
             noteProfiles = [:]
+        } else if mode == .recipes {
+            recipes = []
+            recipeProfiles = [:]
         } else {
             people = []
         }
@@ -262,8 +321,6 @@ final class SearchViewModel {
         searchTask = Task { [weak self] in
             guard let self else { return }
 
-            // For people search, NIP-05 identifiers need an async HTTP lookup
-            // before we can build the relay filter.
             if mode == .people, case .nip05(let identifier) = intent {
                 let pubkey = await Nip05Verifier.lookup(identifier: identifier)
                 guard !Task.isCancelled else { return }
@@ -296,16 +353,31 @@ final class SearchViewModel {
 
             let filter: NostrFilter
             let queryRelays: [String]
+            // Brainstorm refuses a NIP-50 search without an `observer:` token
+            // and treats `key:value` words as instructions, so the per-relay
+            // search string is built from the relay-safe cleaned form (see
+            // ``BrainstormSearch``). Nothing to send after cleaning means ask
+            // nobody: the result is an honest empty, not a failure.
+            var searchTerms: String?
             switch mode {
             case .people:
                 switch intent {
                 case .pubkey(let pubkey):
                     filter = NostrFilter(kinds: [0], authors: [pubkey], limit: 1)
-                    let combined = ([Self.defaultSearchRelay] + Array(RelayDefaults.indexers))
+                    let combined = (Self.defaultSearchRelays + Array(RelayDefaults.indexers))
                         .reduce(into: [String]()) { acc, url in if !acc.contains(url) { acc.append(url) } }
                     queryRelays = combined
                 case .text(let trimmed):
-                    filter = NostrFilter(kinds: [0], limit: 20, search: trimmed)
+                    guard let cleaned = BrainstormSearch.cleanQuery(trimmed) else {
+                        await MainActor.run {
+                            guard myCounter == self.searchCounter else { return }
+                            self.people = []
+                            self.isSearching = false
+                        }
+                        return
+                    }
+                    searchTerms = cleaned
+                    filter = NostrFilter(kinds: [0], limit: 20)
                     queryRelays = relays
                 case .nip05, .eventRef:
                     // Handled above via the early-return paths
@@ -322,33 +394,125 @@ final class SearchViewModel {
                     }
                     return
                 }
+                guard let cleaned = BrainstormSearch.cleanQuery(trimmed) else {
+                    await MainActor.run {
+                        guard myCounter == self.searchCounter else { return }
+                        self.notes = []
+                        self.isSearching = false
+                    }
+                    return
+                }
+                searchTerms = cleaned
                 filter = NostrFilter(
                     kinds: [1],
                     authors: authorPubkey.map { [$0] },
-                    limit: 50,
-                    search: trimmed
+                    limit: 50
+                )
+                queryRelays = relays
+            case .recipes:
+                // Web's recipe filter: kind-30023 long-form events carrying a
+                // zapcooking/nostrcooking `t` tag. (Web also queries kind
+                // 35000, its legacy premium-recipe kind; iOS's format seam and
+                // RecipeRoute are 30023-only, so those hits could not open.)
+                guard case .text(let trimmed) = intent else {
+                    await MainActor.run {
+                        guard myCounter == self.searchCounter else { return }
+                        self.isSearching = false
+                    }
+                    return
+                }
+                guard let cleaned = BrainstormSearch.cleanQuery(trimmed) else {
+                    await MainActor.run {
+                        guard myCounter == self.searchCounter else { return }
+                        self.recipes = []
+                        self.isSearching = false
+                    }
+                    return
+                }
+                searchTerms = cleaned
+                filter = NostrFilter(
+                    kinds: [RecipeParser.recipeKind],
+                    tTags: RecipeParser.recipeHashtags,
+                    limit: 25
                 )
                 queryRelays = relays
             }
 
-            let events = await RelayPool.query(relays: queryRelays, filter: filter, timeout: timeout)
+            // One subscription per relay with a per-relay search string: the
+            // observer token goes only to Brainstorm (another NIP-50 relay
+            // would match it as literal words and empty the results), and
+            // `waitForAllRelays` keeps either relay's instant empty EOSE from
+            // truncating the other's stream. queryDetailed (not query): "no
+            // relay answered at all" must be distinguishable from "answered,
+            // nothing matched" — when the search relays are down or under
+            // attack, an empty result list would tell the user the content
+            // doesn't exist.
+            let relaysForQuery = queryRelays
+            let outcomes = await withTaskGroup(
+                of: (url: String, events: [NostrEvent], responded: Int).self
+            ) { group in
+                for url in relaysForQuery {
+                    var relayFilter = filter
+                    relayFilter.search = searchTerms.flatMap {
+                        BrainstormSearch.searchQueryString(forRelay: url, query: $0)
+                    }
+                    group.addTask {
+                        let outcome = await RelayPool.queryDetailed(
+                            relays: [url], filter: relayFilter, timeout: timeout, waitForAllRelays: true
+                        )
+                        return (url, outcome.events, outcome.relaysResponded)
+                    }
+                }
+                var collected: [(url: String, events: [NostrEvent], responded: Int)] = []
+                for await pair in group {
+                    collected.append(pair)
+                }
+                return collected
+            }
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                for entry in outcomes {
+                    BrainstormSearch.recordAnswer(relay: entry.url, responded: entry.responded)
+                }
+            }
+            let events = outcomes.flatMap { $0.events }
+            let answered = outcomes.map { $0.responded }.reduce(0, +)
+            let coverage = Self.coverageFlags(responded: answered, queried: queryRelays.count)
+
+            await MainActor.run {
                 guard myCounter == self.searchCounter else { return }
+                self.searchUnreachable = coverage.unreachable
+                self.searchPartialCoverage = coverage.partial
                 switch mode {
-                case .people: self.handlePeopleResults(events)
+                case .people:
+                    if case .text(let trimmed) = intent {
+                        self.handlePeopleResults(events, query: trimmed)
+                    } else {
+                        self.handlePeopleResults(events)
+                    }
                 case .notes:  self.handleNoteResults(events)
+                case .recipes: self.handleRecipeResults(events)
                 }
                 self.isSearching = false
             }
         }
     }
 
+    /// How to present an empty (or thin) result set: zero of the queried
+    /// relays answered means the search never really ran — relays down,
+    /// network down, or an incident like nostrarchives' — and must surface
+    /// as an explicit failure, never as "No results found". Some-but-not-all
+    /// answering means the set may be incomplete.
+    static func coverageFlags(responded: Int, queried: Int) -> (unreachable: Bool, partial: Bool) {
+        guard queried > 0 else { return (false, false) }
+        return (responded == 0, responded > 0 && responded < queried)
+    }
+
     /// Fetch a single kind-0 by pubkey after a NIP-05 lookup resolved the pubkey.
     /// Runs a new sub-task so the NIP-05 path can return early from its task.
     private func runPubkeyFetch(pubkey: String, counter: Int, timeout: TimeInterval) {
         let filter = NostrFilter(kinds: [0], authors: [pubkey], limit: 1)
-        let combined = ([Self.defaultSearchRelay] + Array(RelayDefaults.indexers))
+        let combined = (Self.defaultSearchRelays + Array(RelayDefaults.indexers))
             .reduce(into: [String]()) { acc, url in if !acc.contains(url) { acc.append(url) } }
         searchTask = Task { [weak self] in
             let events = await RelayPool.query(relays: combined, filter: filter, timeout: timeout)
@@ -426,7 +590,28 @@ final class SearchViewModel {
         isSearching = false
     }
 
-    private func handlePeopleResults(_ events: [NostrEvent]) {
+    /// Web `toResults`' gate for name search, ported: kind-0 only, real
+    /// 64-hex key, Schnorr signature checked (relay output is otherwise
+    /// unverified app-wide, and Brainstorm's ranked rows are third-party
+    /// signed), one row per pubkey with the newest winning, relay order kept.
+    static func verifiedKind0Results(_ events: [NostrEvent]) -> [NostrEvent] {
+        var newest: [String: NostrEvent] = [:]
+        var order: [String] = []
+        for event in events where event.kind == 0 {
+            let pk = event.pubkey.lowercased()
+            guard pk.count == 64, pk.allSatisfy({ $0.isHexDigit }) else { continue }
+            guard event.hasValidSignature() else { continue }
+            if let had = newest[pk] {
+                if event.createdAt > had.createdAt { newest[pk] = event }
+            } else {
+                newest[pk] = event
+                order.append(pk)
+            }
+        }
+        return order.compactMap { newest[$0] }
+    }
+
+    private func handlePeopleResults(_ events: [NostrEvent], query: String? = nil) {
         var seen = Set<String>()
         var results: [ProfileData] = []
         // Blocked users still surface here (unlike note search) — it's the
@@ -434,7 +619,11 @@ final class SearchViewModel {
         // and profile no longer appear anywhere else. Kind-0 is WoT-exempt
         // by design (profiles stay resolvable), so people search keeps
         // working with the WoT filter on.
-        for event in events where event.kind == 0 {
+        // Ranked text searches pass through the same signature check web's
+        // name search applies; the pubkey intent keeps the plain loop (its
+        // events come from an authors-filter we asked for by key).
+        let candidates = query != nil ? Self.verifiedKind0Results(events) : events
+        for event in candidates where event.kind == 0 {
             guard seen.insert(canonicalPubkey(event.pubkey)).inserted else { continue }
             if let profile = profileRepo.updateFromEvent(event) {
                 results.append(profile)
@@ -442,6 +631,19 @@ final class SearchViewModel {
                 results.append(ProfileData(pubkey: event.pubkey))
             }
         }
+
+        if let query {
+            let follows = FollowsCache.shared.followsSet(for: keypair.pubkey)
+            // Brainstorm ignores `limit` on short and prefix queries — cap
+            // after ranking, like web slices client-side.
+            people = Array(Self.rankedPeople(results, query: query, follows: follows).prefix(20))
+            let missing = Set(people.map(\.pubkey)).filter { profileRepo.get($0) == nil }
+            if !missing.isEmpty {
+                MissingProfileWatcher.shared.observePubkeys(missing)
+            }
+            return
+        }
+
         let follows = FollowsCache.shared.followsSet(for: keypair.pubkey)
         results.sort { lhs, rhs in
             let lf = follows.contains(lhs.pubkey)
@@ -469,7 +671,11 @@ final class SearchViewModel {
                 ordered.append(event)
             }
         }
-        notes = ordered
+        // Two relays fan in out of order (web sorts the merged fan-in the
+        // same way), and Brainstorm ignores `limit` on short queries — keep
+        // the list newest-first and capped.
+        ordered.sort { $0.createdAt > $1.createdAt }
+        notes = Array(ordered.prefix(50))
 
         // Seed profiles from cache so names/avatars render immediately.
         var seedProfiles: [String: ProfileData] = [:]
@@ -487,6 +693,31 @@ final class SearchViewModel {
         }
         if !missingPubkeys.isEmpty {
             MissingProfileWatcher.shared.observePubkeys(missingPubkeys)
+        }
+    }
+
+    private func handleRecipeResults(_ events: [NostrEvent]) {
+        var seen = Set<String>()
+        var results: [RecipeResult] = []
+        for event in events {
+            guard let result = Self.recipeResult(from: event) else { continue }
+            guard seen.insert(result.id).inserted else { continue }
+            results.append(result)
+        }
+        recipes = Array(results.prefix(25))
+
+        // Seed author names/avatars from cache; the rest resolve through the
+        // same missing-profile watcher the note results use.
+        var seed: [String: ProfileData] = [:]
+        for pubkey in Set(results.map(\.author)) {
+            if let p = profileRepo.get(pubkey) {
+                seed[pubkey] = p
+            }
+        }
+        recipeProfiles = seed
+        let missing = Set(results.map(\.author)).filter { recipeProfiles[$0] == nil }
+        if !missing.isEmpty {
+            MissingProfileWatcher.shared.observePubkeys(missing)
         }
     }
 
@@ -562,7 +793,8 @@ final class SearchViewModel {
             let events = await RelayPool.query(
                 relays: relays,
                 filter: NostrFilter(kinds: [0], limit: 10, search: trimmed),
-                timeout: timeout
+                timeout: timeout,
+                waitForAllRelays: true
             )
             guard let self else { return }
             await MainActor.run {
@@ -596,7 +828,97 @@ final class SearchViewModel {
         case eventRef(id: String, relays: [String])  // note1/nevent1 → ids: lookup
     }
 
+    /// One recipe row: the addressable coordinate plus the display title.
+    /// The detail page re-loads the event itself, so the event needn't be kept.
+    struct RecipeResult: Identifiable, Equatable {
+        let author: String
+        let dTag: String
+        let title: String
+
+        var id: String {
+            RecipeRepository.coordinate(kind: RecipeParser.recipeKind, author: author, dTag: dTag)
+        }
+    }
+
     // MARK: - Helpers
+
+    /// Keyword / hashtag completions from the static food taxonomy — iOS's
+    /// counterpart of web's `recipeTags` suggestion rows. Prefix matches come
+    /// first, then substring matches, capped at `limit`.
+    static func matchingTags(for query: String, limit: Int = 8) -> [String] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard q.count >= 2 else { return [] }
+        var prefix: [String] = []
+        var contains: [String] = []
+        for tag in FoodHashtags.all {
+            let t = tag.lowercased()
+            if t.hasPrefix(q) { prefix.append(tag) }
+            else if t.contains(q) { contains.append(tag) }
+        }
+        return Array((prefix + contains).prefix(limit))
+    }
+
+    /// Client-side recheck of a relay's answer to the recipe filter — search
+    /// relays sometimes ignore `#t`/kind constraints, and web's
+    /// `recipeSearchResult` guards the same way. Web additionally accepts
+    /// kind 35000 (its legacy premium-recipe kind); iOS's format seam and
+    /// `RecipeRoute` are kind-30023 only, so a 35000 hit would route to a
+    /// detail page that can never load it — those stay out of results.
+    static func recipeResult(from event: NostrEvent) -> RecipeResult? {
+        guard event.kind == RecipeParser.recipeKind else { return nil }
+        let tagged = event.tags.contains {
+            $0.count >= 2 && $0[0] == "t"
+                && RecipeParser.recipeHashtags.contains($0[1].lowercased())
+        }
+        guard tagged else { return nil }
+
+        let d = RecipeParser.dTag(event)
+        guard !d.isEmpty else { return nil }
+        let pubkey = event.pubkey.lowercased()
+        guard pubkey.count == 64, pubkey.allSatisfy({ $0.isHexDigit }) else { return nil }
+
+        guard !HiddenRecipes.isHidden(kind: RecipeParser.recipeKind, pubkey: pubkey, dTag: d)
+        else { return nil }
+        let coordinate = RecipeRepository.coordinate(
+            kind: RecipeParser.recipeKind, author: pubkey, dTag: d
+        )
+        guard !ReportedContent.shared.isHidden(coordinate: coordinate) else { return nil }
+
+        let title = event.tags
+            .first(where: { $0.count >= 2 && $0[0] == "title" })?
+            .dropFirst()
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return RecipeResult(author: pubkey, dTag: d, title: (title?.isEmpty == false) ? title! : d)
+    }
+
+    /// Port of web `rankProfiles`: exact name, name prefix, NIP-05 local-part
+    /// exact, NIP-05 prefix, then the rest. Within a tier, followed accounts
+    /// surface first (the old iOS ordering), then input order — relay kind-0
+    /// rows are passed in ahead of index-only rows.
+    static func rankedPeople(
+        _ profiles: [ProfileData], query: String, follows: Set<String>
+    ) -> [ProfileData] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        func tier(_ p: ProfileData) -> Int {
+            let names = [p.displayName, p.name].compactMap { $0?.lowercased() }
+            if names.contains(q) { return 0 }
+            if names.contains(where: { $0.hasPrefix(q) }) { return 1 }
+            let local = p.nip05?.split(separator: "@").first.map { String($0).lowercased() }
+            if local == q { return 2 }
+            if local?.hasPrefix(q) == true { return 3 }
+            return 4
+        }
+        return profiles.enumerated()
+            .sorted { a, b in
+                let (ta, tb) = (tier(a.element), tier(b.element))
+                if ta != tb { return ta < tb }
+                let (fa, fb) = (follows.contains(a.element.pubkey), follows.contains(b.element.pubkey))
+                if fa != fb { return fa && !fb }
+                return a.offset < b.offset
+            }
+            .map(\.element)
+    }
 
     /// Collapse the different string forms the same identity can arrive in
     /// from a search relay — mixed-case or whitespace-padded hex, or an
@@ -612,19 +934,28 @@ final class SearchViewModel {
         return lower
     }
 
-    private func relaysToQuery() -> [String] {
+    func relaysToQuery() -> [String] {
         switch relayOption {
         case .default:
-            return [Self.defaultSearchRelay]
+            return availableDefaults(Self.defaultSearchRelays, fallback: Self.defaultSearchRelays)
         case .all:
-            let combined = ([Self.defaultSearchRelay] + savedSearchRelays).reduce(into: [String]()) { acc, url in
+            let combined = (Self.defaultSearchRelays + savedSearchRelays).reduce(into: [String]()) { acc, url in
                 if !acc.contains(url) { acc.append(url) }
             }
-            return combined.isEmpty ? [Self.defaultSearchRelay] : combined
+            return availableDefaults(combined, fallback: combined)
         case .individual:
             if let url = selectedRelayUrl, !url.isEmpty { return [url] }
-            return [Self.defaultSearchRelay]
+            return availableDefaults(Self.defaultSearchRelays, fallback: Self.defaultSearchRelays)
         }
+    }
+
+    /// Drop Brainstorm from a computed relay list while its backoff window
+    /// is active (it failed to answer a recent search), falling back to the
+    /// unfiltered list so the search always has somewhere to go. An explicit
+    /// individual selection is the user's own choice and is never filtered.
+    private func availableDefaults(_ relays: [String], fallback: [String]) -> [String] {
+        let filtered = relays.filter { $0 != BrainstormSearch.relay || !BrainstormSearch.isDown }
+        return filtered.isEmpty ? fallback : filtered
     }
 
     private func engagementRelays() -> [String] {

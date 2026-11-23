@@ -13,6 +13,10 @@ struct ThreadView: View {
     @State private var suppressNextDisappearChainRemoval: Bool = false
     /// Anchors whose depth-capped subtree the user expanded inline.
     @State private var expandedBranchIds: Set<String> = []
+    /// Muted replies the reader chose to view, per reply (web parity,
+    /// zapcooking/frontend#1004): revealing one never unmutes the account or
+    /// surfaces its other replies. Ephemeral — a fresh screen starts collapsed.
+    @State private var revealedMutedIds: Set<String> = []
     /// Reply row ids currently on-screen (via onAppear/onDisappear), used to
     /// pick the sticky reply bar's target — the topmost visible reply,
     /// falling back to the thread's default parent.
@@ -471,8 +475,8 @@ struct ThreadView: View {
 
     @ViewBuilder
     private func replyRow(_ row: ThreadRow, replyingTo: NostrEvent?) -> some View {
-        if row.isBlocked {
-            blockedPlaceholder
+        if row.isBlocked && !revealedMutedIds.contains(row.id) {
+            mutedReplyPlaceholder(revealing: row.id)
         } else if row.isWotHidden {
             // Replies normally drop outright before reaching a row; this only
             // renders if a WoT-hidden id slips into a slice (belt-and-
@@ -494,6 +498,7 @@ struct ThreadView: View {
                 profiles: viewModel.profiles,
                 engagement: engagement(for: row.event.id),
                 replyToLabelOverride: replyingTo.map(replyToLabel),
+                onHideMuted: row.isBlocked ? { revealedMutedIds.remove(row.id) } : nil,
                 isPrivate: row.isPrivate,
                 onProfileTap: { pk in push(ProfileRoute(pubkey: pk)) },
                 // Tap on an embedded quoted note pushes that note as
@@ -584,12 +589,37 @@ struct ThreadView: View {
         return counts
     }
 
+    /// Collapsed muted reply: a one-liner that doesn't name the account, with
+    /// a per-reply "View" reveal (web parity, zapcooking/frontend#1004).
+    private func mutedReplyPlaceholder(revealing id: String) -> some View {
+        Button {
+            revealedMutedIds.insert(id)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "nosign")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+                (Text("Reply from an account you muted · ")
+                    .foregroundStyle(.tertiary)
+                    + Text("View").foregroundStyle(Color.zapInteractive))
+                    .font(.subheadline)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("muted-reply-reveal")
+    }
+
     private var blockedPlaceholder: some View {
         HStack(spacing: 8) {
             Image(systemName: "nosign")
                 .font(.system(size: 13))
                 .foregroundStyle(.tertiary)
-            Text("Post from blocked user")
+            Text("Reply from an account you muted")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
             Spacer()

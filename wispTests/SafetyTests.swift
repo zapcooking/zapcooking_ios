@@ -384,6 +384,19 @@ struct SafetyTests {
         let me = "me_" + UUID().uuidString
         let myNote = "mynote_" + UUID().uuidString
 
+        let repo = NotificationRepository.shared
+        repo.bind(activePubkey: me)
+        repo.selfEventIds = [myNote]
+
+        // Bob answered my note before being blocked — his reply lands in the
+        // cache, which is the parent-author signal the sub-thread gate reads.
+        let bobReply = makeEvent(
+            kind: 1, pubkey: "bob", content: "bob here",
+            tags: [["e", myNote, "", "root"], ["p", me]],
+            id: "bob_reply_" + UUID().uuidString
+        )
+        #expect(repo.ingest(bobReply, relayUrl: "", persist: false) == true)
+
         let snap = SafetyFilterSnapshot(
             mutedWords: [], blockedPubkeys: ["bob"], mutedThreads: [],
             wotEnabled: false, qualifiedNetwork: [], userPubkey: me
@@ -391,18 +404,25 @@ struct SafetyTests {
         SafetyFilter.shared.install(snap)
         defer { SafetyFilter.shared.install(.empty) }
 
-        let repo = NotificationRepository.shared
-        repo.bind(activePubkey: me)
-        repo.selfEventIds = [myNote]
-
-        // Non-blocked alice replies inside blocked bob's sub-thread: her reply
-        // p-tags bob (the NIP-10 ancestor author). Dropped.
+        // Non-blocked alice answers blocked bob's cached reply — a sub-thread
+        // led by a blocked author, dropped via the parent-author gate.
         let blockedSubThread = makeEvent(
             kind: 1, pubkey: "alice", content: "+1",
-            tags: [["e", myNote, "", "reply"], ["p", me], ["p", "bob"]],
+            tags: [["e", myNote, "", "root"], ["e", bobReply.id, "", "reply"],
+                   ["p", me], ["p", "bob"]],
             id: "reply_blocked_" + UUID().uuidString
         )
         #expect(repo.ingest(blockedSubThread, relayUrl: "", persist: false) == false)
+
+        // A reply aimed straight at MY note that merely p-tags bob in the
+        // carry-forward chain still notifies — the mute scopes to the actor,
+        // not the whole thread (zapcooking/zapcooking_ios#220).
+        let replyToMyNote = makeEvent(
+            kind: 1, pubkey: "alice", content: "+1",
+            tags: [["e", myNote, "", "reply"], ["p", me], ["p", "bob"]],
+            id: "reply_own_" + UUID().uuidString
+        )
+        #expect(repo.ingest(replyToMyNote, relayUrl: "", persist: false) == true)
 
         // Same reply with no blocked ancestor still notifies.
         let cleanReply = makeEvent(

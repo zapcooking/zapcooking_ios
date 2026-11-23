@@ -43,6 +43,25 @@ struct wispApp: App {
         UINavigationBar.appearance().compactAppearance = appearance
     }
 
+    #if DEBUG
+    /// Relay-driven verification hook: seed a watch-only login so harness
+    /// screens (`-ThreadHarnessSeed` and friends) can run against real
+    /// relay data without driving the sign-up UI. No-op once any account
+    /// exists — a real login is never overwritten.
+    private static func seedWatchOnlyLoginIfRequested() {
+        guard let pk = launchValue(of: "-WatchOnlyLogin"), NostrKey.load() == nil else { return }
+        NostrKey.saveWatchOnly(pubkey: pk, acceptance: .now())
+        UserDefaults.standard.set(true, forKey: "onboarding_done_\(pk)")
+    }
+
+    /// Value following a launch flag, e.g. `-WatchOnlyLogin <pubkey>`.
+    private static func launchValue(of flag: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: flag), index + 1 < args.count else { return nil }
+        return args[index + 1]
+    }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             #if DEBUG
@@ -67,6 +86,9 @@ struct wispApp: App {
     /// two-line branch instead of wrapping the whole modifier chain.
     @ViewBuilder
     private var rootContent: some View {
+        #if DEBUG
+        let _ = Self.seedWatchOnlyLoginIfRequested()
+        #endif
         RootContainer()
             .environment(settings)
             .environment(powPrefs)

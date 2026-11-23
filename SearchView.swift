@@ -96,6 +96,7 @@ struct SearchView: View {
                                 .frame(width: 32, height: 32)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("search-advanced-toggle")
                     }
                 }
                 // Scope the animation to just the Cancel ↔ Settings swap.
@@ -114,13 +115,14 @@ struct SearchView: View {
         .padding(.vertical, 8)
     }
 
-    /// Two-segment toggle for the search mode. Both options are always
+    /// Three-segment toggle for the search mode. All options are always
     /// visible — replaces the previous Menu-style pill that hid the
     /// non-active mode behind a dropdown.
     private var modePill: some View {
         HStack(spacing: 4) {
-            modeChip(.people, icon: "person.crop.circle", label: "People")
-            modeChip(.notes,  icon: "text.bubble",        label: "Notes")
+            modeChip(.people,  icon: "person.crop.circle", label: "People")
+            modeChip(.notes,   icon: "text.bubble",        label: "Notes")
+            modeChip(.recipes, icon: "fork.knife",         label: "Recipes")
         }
         .padding(4)
         .background(Color.wispSurfaceVariant, in: RoundedRectangle(cornerRadius: 22))
@@ -148,6 +150,11 @@ struct SearchView: View {
             .contentShape(RoundedRectangle(cornerRadius: 18))
         }
         .buttonStyle(.plain)
+        // Disambiguates from the bottom-tab bar's Recipes button in
+        // UI tests (`tab-recipes` vs `search-mode-recipes`). Applied to
+        // the Button itself — inside the label it doesn't reach the
+        // accessibility element.
+        .accessibilityIdentifier("search-mode-\(label.lowercased())")
     }
 
     // MARK: - Advanced panel
@@ -176,9 +183,9 @@ struct SearchView: View {
                     viewModel.setRelayOption(.default)
                 } label: {
                     if viewModel.relayOption == .default {
-                        Label("Default (search.nostrarchives.com)", systemImage: "checkmark")
+                        Label("Default (Brainstorm + nos.today)", systemImage: "checkmark")
                     } else {
-                        Text("Default (search.nostrarchives.com)")
+                        Text("Default (Brainstorm + nos.today)")
                     }
                 }
 
@@ -352,7 +359,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private var results: some View {
-        if viewModel.isSearching && currentResultsEmpty {
+        if viewModel.isSearching && currentResultsEmpty && viewModel.tagMatches.isEmpty {
             VStack(spacing: 12) {
                 ProgressView()
                 Text("Searching\u{2026}")
@@ -360,17 +367,34 @@ struct SearchView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if !viewModel.hasSearched && currentResultsEmpty {
+        } else if !viewModel.hasSearched && currentResultsEmpty && viewModel.tagMatches.isEmpty {
             emptyHint(icon: "magnifyingglass", text: "Start typing to search")
-        } else if viewModel.hasSearched && currentResultsEmpty && !viewModel.isSearching {
-            emptyHint(icon: "tray", text: "No results found")
+        } else if viewModel.hasSearched && currentResultsEmpty && !viewModel.isSearching && viewModel.searchUnreachable {
+            unreachableHint
+        } else if viewModel.hasSearched && currentResultsEmpty && !viewModel.isSearching && viewModel.tagMatches.isEmpty {
+            VStack(spacing: 8) {
+                emptyHint(icon: "tray", text: "No results found")
+                if viewModel.searchPartialCoverage {
+                    partialCoverageFootnote
+                }
+            }
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if viewModel.mode == .notes {
-                        notesList
+                    tagSuggestions
+                    if viewModel.searchUnreachable && !viewModel.isSearching {
+                        unreachableHint
                     } else {
-                        peopleList
+                        if viewModel.searchPartialCoverage && !viewModel.isSearching {
+                            partialCoverageFootnote
+                        }
+                        if viewModel.mode == .notes {
+                            notesList
+                        } else if viewModel.mode == .recipes {
+                            recipesList
+                        } else {
+                            peopleList
+                        }
                     }
                 }
             }
@@ -379,6 +403,131 @@ struct SearchView: View {
             // row raise the keyboard — see NoteListFeedView for the full
             // rationale.
             .ignoresSafeArea(.keyboard, edges: .bottom)
+        }
+    }
+
+    /// The relay fan-out completed with nobody answering. An empty list
+    /// here doesn't mean the content doesn't exist — the search never
+    /// ran — so this is an explicit failure state with a retry, not the
+    /// plain "No results found" hint. Rendered full-height when there are
+    /// no tag chips, and as a plain row beneath the chips otherwise.
+    private var unreachableHint: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text("Couldn't reach search relays")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("No search relay answered. Check your connection and try again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button {
+                viewModel.runSearch()
+            } label: {
+                Text("Try again")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(Color.wispSurfaceVariant, in: Capsule())
+                    .foregroundStyle(Color.wispOnSurface)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+    }
+
+    /// Some queried search relays never answered (EOSE) — whatever this
+    /// list holds, the same query on the missing relays may hold more.
+    private var partialCoverageFootnote: some View {
+        Text("Some search relays didn't answer — results may be incomplete.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+    }
+
+    /// Keyword / hashtag chips above the results — mirrors web's tag
+    /// autocomplete rows, which route to /tag/<tag>. A tap opens the
+    /// hashtag feed. Visible in every mode while the query matches the
+    /// static taxonomy, including while a search is still in flight.
+    private var tagSuggestions: some View {
+        let tags = viewModel.tagMatches
+        return Group {
+            if !tags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hashtags")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(tags, id: \.self) { tag in
+                                Button {
+                                    queryFocused = false
+                                    path.append(HashtagFeedRoute(tag: tag))
+                                } label: {
+                                    Text("#\(tag)")
+                                        .font(.caption.weight(.medium))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.wispSurfaceVariant, in: Capsule())
+                                        .foregroundStyle(Color.wispOnSurface)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                    Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
+                }
+            }
+        }
+    }
+
+    private var recipesList: some View {
+        ForEach(viewModel.recipes) { recipe in
+            Button {
+                queryFocused = false
+                DispatchQueue.main.async {
+                    path.append(RecipeRoute(author: recipe.author, dTag: recipe.dTag))
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "fork.knife")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .background(Color.wispSurfaceVariant, in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recipe.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.wispOnSurface)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if let author = viewModel.recipeProfiles[recipe.author] {
+                            Text(author.displayString)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded { queryFocused = false })
+            Divider().overlay(Color.wispSurfaceVariant.opacity(0.3))
         }
     }
 
@@ -506,7 +655,11 @@ struct SearchView: View {
     }
 
     private var currentResultsEmpty: Bool {
-        viewModel.mode == .notes ? viewModel.notes.isEmpty : viewModel.people.isEmpty
+        switch viewModel.mode {
+        case .notes: return viewModel.notes.isEmpty
+        case .recipes: return viewModel.recipes.isEmpty
+        case .people: return viewModel.people.isEmpty
+        }
     }
 
     private func emptyHint(icon: String, text: String) -> some View {
