@@ -77,6 +77,7 @@ final class AppSettings {
         static let autoTranslate = "wisp_settings_auto_translate"
         static let includeRepliesInFeed = "wisp_settings_include_replies_in_feed"
         static let showsLiveContent = "wisp_settings_shows_live_content"
+        static let autoHideFeedBars = "wisp_settings_auto_hide_feed_bars"
         static func quickZapEnabled(for pubkey: String?) -> String {
             pubkey.map { "wisp_settings_quick_zap_enabled_\($0)" } ?? "wisp_settings_quick_zap_enabled"
         }
@@ -228,6 +229,12 @@ final class AppSettings {
     var showsLiveContent: Bool {
         didSet { UserDefaults.standard.set(showsLiveContent, forKey: Keys.showsLiveContent) }
     }
+    /// When true, scrolling the feed down collapses its header and the tab
+    /// bar (`FeedBarsAutoHide`); scrolling up or the restore circle brings
+    /// them back. Off by default — the bars stay put.
+    var autoHideFeedBars: Bool {
+        didSet { UserDefaults.standard.set(autoHideFeedBars, forKey: Keys.autoHideFeedBars) }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -258,6 +265,7 @@ final class AppSettings {
         self.autoTranslate = defaults.object(forKey: Keys.autoTranslate) as? Bool ?? false
         self.includeRepliesInFeed = defaults.object(forKey: Keys.includeRepliesInFeed) as? Bool ?? false
         self.showsLiveContent = defaults.object(forKey: Keys.showsLiveContent) as? Bool ?? true
+        self.autoHideFeedBars = defaults.object(forKey: Keys.autoHideFeedBars) as? Bool ?? false
         let qzPubkey = NostrKey.load()?.pubkey
         self.quickZapEnabled = defaults.object(forKey: Keys.quickZapEnabled(for: qzPubkey)) as? Bool ?? false
         let storedQuickInt = defaults.integer(forKey: Keys.quickZapAmountSats(for: qzPubkey))
