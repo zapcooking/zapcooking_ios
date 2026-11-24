@@ -38,7 +38,7 @@ Wisp implements a full NIP-65 outbox/inbox model with relay scoring:
 - **Inbox writes** — delivers replies, reactions, and DMs to the recipient's *read relays* so they actually see them
 - **Relay scoring** — `RelayScoreBoard` ranks relays by author coverage and picks the smallest useful set for each query (top-20 by default for the home feed)
 - **Two-pool model** — `RelayPool` opens fresh sockets per query for one-shot reads (feeds, profiles, threads), while `GroupRelayPool` keeps long-lived sockets for groups and other persistent subscriptions, with auto-reconnect, refcounted relay usage, and inline frame demultiplexing
-- **NIP-42 authentication** — handles relay AUTH challenges automatically and supports `auth-required` retries on publish, used by groups, DMs, and the scheduler relay
+- **NIP-42 authentication** — handles relay AUTH challenges automatically and supports `auth-required` retries on publish, used by groups and DMs
 - **Indexer-vs-content separation** — discovery queries (kinds 0/3/10002) hit a small set of indexer relays; content queries follow each author's own outbox
 
 ### Privacy & Private Messaging
@@ -80,7 +80,7 @@ A built-in non-custodial Lightning wallet powered by [Breez SDK (Spark)](https:/
 - **Emoji reactions** (NIP-25) with **custom emoji packs** (NIP-30)
 - **Reply threading** (NIP-10) with root resolution and marked e-tags
 - **Drafts** (NIP-37, kind 31234) — save unfinished posts encrypted to yourself and synced through your relays so they follow you across devices
-- **Scheduled posts** — publish in the future via a dedicated NIP-42-authenticated scheduler relay
+- **Scheduled posts** — sign a post now for a time from 5 minutes to 90 days out; Zap Cooking's scheduler (`/api/schedule`, NIP-98) holds the signed event and broadcasts it, unchanged, at that time. One list across the app and zap.cooking, with cancel
 - **Proof-of-work** (NIP-13) — optional PoW mining with configurable difficulty and cooperative cancellation
 
 ### Groups & Communities

@@ -356,7 +356,7 @@ than Android did — but plan against that order of magnitude, not against
 | Hashtag feeds | `HashtagFeedViewModel`, `Nip51Hashtags` | OnlyFood feed is a hashtag feed with a curated tag set |
 | Deletion | `Nip09`, `DeletionSender` | Recipe delete/tombstone |
 | **Apple** sign-in (key recovery) | `AppleSignInManager`, `KeychainBackupService` | Google Sign-In removed (Concern 0.2); SIWA retained for iCloud Keychain nsec backup |
-| Drafts + **scheduled posts** | `Nip37`, `DraftsViewModel`, `ScheduleSheet`, `DraftsScheduledView` | iOS is *ahead* of Android here |
+| Drafts + **scheduled posts** | `Nip37`, `DraftsViewModel`, `ScheduleSheet`, `DraftsScheduledView`; scheduling through `ScheduleApi` / `ScheduleSubmitter` / `ScheduledPosts` | Drafts are NIP-37 on relays. Scheduled posts go to Zap Cooking's scheduler API (`/api/schedule`, below), **not** a relay: Wisp's `wss://scheduler.nostrarchives.com` is gone and nothing dials it. Web is live on the same API, so one list is shared across clients |
 
 ### Net-new for iOS (the actual work)
 
@@ -434,6 +434,25 @@ verified against in the concern's report.
 | `POST /api/membership/check-status` | **NIP-98** | success = `owner: true`; bad sig **silently degrades**, does not 4xx; `403` = server flag off |
 | note-review / credit-invoice / credit-status | **NIP-98** | members |
 | `GET /api/stats/recipes-by-week` | none | trend pill |
+| `POST /api/schedule` (`{event, relay_mode, relays?}`) | **NIP-98 required**, `payload` tag over the exact body; the scheduled event's pubkey must be the header's | any account that can sign (not member-gated). Event signed on the device with `created_at` = publish time, 5 min to 90 days out (server floor 120 s). Limits: 50 pending, 30 creates/hour, 64 KiB, at most 4 `relays`. Kinds 1, 20, 21, 22, 1068, 1111, 6969, 30023 in `all` mode |
+| `GET /api/schedule[?status=…]` | **NIP-98 required**, signs the bare URL (no query) | the caller's own rows, newest publish time first, at most 100, no paging. iOS asks for `pending` and `failed` |
+| `DELETE /api/schedule/{id}` | **NIP-98 required** | only a `pending` row; `409 not_cancellable` carries the row's `status` |
+
+**Scheduled posts contract.** The three `/api/schedule` rows are a summary of
+`docs/schedule-contract.md` on `main` in `zapcooking/frontend`, which is the
+source of truth and wins over this table: requests, responses, every error
+code with suggested copy, NIP-98 rules, limits, known limitations. Verified
+against the web handlers at frontend `5ccb9be` (2026-11-24) and a production
+round trip (`ScheduleLiveTests`: schedule two hours out with a throwaway key,
+list, cancel; it never posts; opt in with `touch wispTests/.schedule_live_enable`).
+Three differences from the other endpoints here, all deliberate:
+- **Error codes are in the body's `error` field**, not `code`. `ScheduleApi`
+  decodes them itself; `ZapCookingApi.throwErrorIfNeeded` is not used.
+- **Every request signs its own header.** `Nip98HeaderCache` is not used, and
+  a 401 is retried once with a fresh header.
+- **Known limitation:** a scheduled reply, quote or mention is broadcast to
+  `nos.lol`, `relay.primal.net` and the author's own write relays only, not to
+  the inbox relays of the people it tags.
 
 Keep request models auth-agnostic so the remaining pubkey-in-body endpoints are
 a one-call swap when the server finishes migrating to NIP-98.

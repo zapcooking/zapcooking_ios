@@ -4,23 +4,35 @@ import Observation
 /// View model for the "Drafts & Scheduled" screen.
 ///
 /// Drafts are NIP-37 (kind 31234) addressable events on the user's write relays,
-/// self-encrypted with NIP-44. Scheduled posts are normal kind-1 (and friends)
-/// events with a future `created_at`, parked on `wss://scheduler.nostrarchives.com`
-/// (NIP-42 AUTH required), which broadcasts them at the scheduled time.
-///
-/// Mirrors `DraftsViewModel.kt` in the Android client.
+/// self-encrypted with NIP-44. Scheduled posts are events signed with a future
+/// `created_at` and held by Zap Cooking's scheduler API (`ScheduleApi`,
+/// `docs/schedule-contract.md` in zapcooking/frontend), which broadcasts them
+/// at that time. The list is the account's rows there, so a post scheduled on
+/// web or Android shows here too.
 @Observable
 @MainActor
 final class DraftsViewModel {
-
-    static let schedulerRelay = "wss://scheduler.nostrarchives.com"
 
     enum Tab: Hashable { case drafts, scheduled }
 
     let keypair: Keypair
 
     var drafts: [Nip37.Draft] = []
-    var scheduledPosts: [NostrEvent] = []
+    /// Waiting to go out, next up first.
+    private(set) var pendingPosts: [ScheduledPost] = []
+    /// Gave up; shown under the pending ones with a plain explanation.
+    private(set) var failedPosts: [ScheduledPost] = []
+    /// Every row the Scheduled tab shows, in order.
+    var scheduledPosts: [ScheduledPost] { pendingPosts + failedPosts }
+    /// Why the pending list could not be loaded, when it could not.
+    var scheduledLoadError: String?
+    /// What happened to the last cancel that did not simply work.
+    var scheduledNotice: String?
+    /// Rows with a cancel in flight.
+    private(set) var cancellingIds: Set<String> = []
+    /// Test and harness seam; nil means `ScheduledPostsApi.live`.
+    @ObservationIgnored var scheduledListing: (any ScheduledListing)?
+    @ObservationIgnored private var scheduledLoadGeneration = 0
     var isLoadingDrafts: Bool = false
     var isLoadingScheduled: Bool = false
     var selectedTab: Tab = .drafts
@@ -131,65 +143,66 @@ final class DraftsViewModel {
 
     // MARK: - Scheduled posts
 
-    /// Connect to the scheduler relay (with NIP-42 AUTH), subscribe for our own
-    /// future-dated kind-1 events, collect until EOSE+grace, then return.
+    private var listing: any ScheduledListing { scheduledListing ?? ScheduledPostsApi.live }
+
+    /// Load the account's pending and failed posts from the scheduler API,
+    /// both at once. The pending ones are shown the moment they arrive; the
+    /// failed ones join when theirs does, and if that request fails the
+    /// pending list stands on its own. Nothing is cached between calls: every
+    /// load is the server's current answer.
     func loadScheduledPosts() async {
+        scheduledLoadGeneration += 1
+        let generation = scheduledLoadGeneration
         isLoadingScheduled = true
-        errorMessage = nil
-        defer { isLoadingScheduled = false }
+        let listing = listing
+        let keypair = keypair
 
-        let relay = Self.schedulerRelay
-        await GroupRelayPool.shared.ensureRelay(relay, keypair: keypair)
-        await GroupRelayPool.shared.waitForAuthIfNeeded(relayUrl: relay, timeout: 5)
-
-        var filter = NostrFilter()
-        filter.kinds = [1]
-        filter.authors = [keypair.pubkey]
-        filter.limit = 100
-
-        let subId = "scheduled_\(Int(Date().timeIntervalSince1970))"
-        let stream = await GroupRelayPool.shared.subscribe(relayUrl: relay, filter: filter, subId: subId)
-
-        var collected: [String: NostrEvent] = [:]
-        var refusal: String?
-        let collectTask = Task { @MainActor in
-            for await item in stream {
-                switch item {
-                case .event(let event):
-                    collected[event.id] = event
-                case .authUnavailable:
-                    refusal = "Scheduled posts need an account with a signing key."
-                case .authFailed(let reason), .notMember(let reason), .closed(let reason):
-                    refusal = "Scheduler relay refused the query: \(reason)"
-                }
+        async let failedResult = listing.list(status: .failed, keypair: keypair)
+        let pendingResult = await listing.list(status: .pending, keypair: keypair)
+        // A newer load (a pull to refresh during this one) owns the screen.
+        if generation == scheduledLoadGeneration {
+            switch pendingResult {
+            case .success(let posts):
+                pendingPosts = ScheduledList.pendingOrder(posts)
+                scheduledLoadError = nil
+            case .failure(let failure):
+                scheduledLoadError = ScheduledList.loadMessage(for: failure)
             }
+            isLoadingScheduled = false
         }
-        // Give the relay 10s to deliver everything (matches Android).
-        try? await Task.sleep(for: .seconds(10))
-        await GroupRelayPool.shared.cancelSubscription(relayUrl: relay, subId: subId)
-        collectTask.cancel()
 
-        scheduledPosts = collected.values.sorted { $0.createdAt > $1.createdAt }
-        // A relay refusal with nothing delivered was a silent empty list
-        // before issue #6 made the state explicit.
-        if scheduledPosts.isEmpty, let refusal {
-            errorMessage = refusal
+        let failed = await failedResult
+        guard generation == scheduledLoadGeneration else { return }
+        // On an error the failed rows already on screen stay as they are.
+        if case .success(let posts) = failed {
+            failedPosts = ScheduledList.failedOrder(posts)
         }
     }
 
-    /// Sign a NIP-09 deletion (kind 5 with `e`+`k` tags) and send it to the
-    /// scheduler relay via the AUTH-aware retry path.
-    func deleteScheduledPost(eventId: String) async {
-        scheduledPosts.removeAll { $0.id == eventId }
-        guard Signer.canSign(keypair) else { return }
-        let tags = Nip09.deletionTagsForEvent(id: eventId, kind: 1)
-        guard let event = try? await Signer.sign(
-            keypair: keypair,
-            kind: Nip09.kindDeletion, tags: tags, content: ""
-        ) else { return }
-        let relay = Self.schedulerRelay
-        await GroupRelayPool.shared.ensureRelay(relay, keypair: keypair)
-        _ = await GroupRelayPool.shared.publishWithAuthRetry(event, to: relay)
+    /// Cancel a pending post. The row stays, marked as cancelling, until the
+    /// server answers: it is removed only once the post really is cancelled.
+    /// If it cannot be cancelled any more (it is being published, or already
+    /// went out) the list says so and reloads to show what is true now.
+    func cancelScheduledPost(id: String) async {
+        guard !cancellingIds.contains(id) else { return }
+        cancellingIds.insert(id)
+        scheduledNotice = nil
+        let result = await listing.cancel(id: id, keypair: keypair)
+        cancellingIds.remove(id)
+
+        switch result {
+        case .success:
+            pendingPosts.removeAll { $0.id == id }
+        case .failure(let failure):
+            scheduledNotice = failure.message
+            switch failure {
+            case .notCancellable, .notFound:
+                // The row on screen is out of date: fetch what is true now.
+                await loadScheduledPosts()
+            default:
+                break
+            }
+        }
     }
 
     // MARK: - Helpers
