@@ -145,6 +145,49 @@ struct ScheduleComposeTests {
         #expect(UserDefaults.standard.dictionary(forKey: fixture.autosaveKey) == nil)
     }
 
+    /// A scheduled post has not been posted, and the toast must not say so.
+    @Test func theToastSaysScheduledForTheTime_neverPosted() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let submitter = fixture.submitter()
+        let (vm, publishAt) = scheduledComposer(fixture, submitter)
+        let date = Date(timeIntervalSince1970: TimeInterval(publishAt))
+
+        try await publish(vm)
+
+        // Read after success, as the view does when `publishedEventId` lands.
+        #expect(vm.publishedEventId != nil)
+        #expect(vm.publishToastMessage == "Scheduled for " + date.formatted(date: .abbreviated, time: .shortened))
+        #expect(vm.publishToastMessage.hasPrefix("Scheduled for "))
+        #expect(!vm.publishToastMessage.contains("Posted"))
+    }
+
+    @Test func theToastForEveryScheduledKindSaysScheduled() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let at = Date(timeIntervalSince1970: TimeInterval(NostrClock.now() + 3_600))
+
+        let poll = ComposeViewModel(keypair: fixture.keypair)
+        poll.pollEnabled = true
+        poll.setSchedule(at)
+        #expect(poll.publishToastMessage == ComposeViewModel.scheduledToastMessage(for: at))
+
+        let scheduledReply = ComposeViewModel(keypair: fixture.keypair, mode: try reply(to: fixture.keypair))
+        scheduledReply.setSchedule(at)
+        #expect(scheduledReply.publishToastMessage == ComposeViewModel.scheduledToastMessage(for: at))
+    }
+
+    @Test func theToastForAPostSentNowIsUnchanged() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let note = ComposeViewModel(keypair: fixture.keypair)
+        #expect(note.publishToastMessage == "Posted")
+        note.pollEnabled = true
+        #expect(note.publishToastMessage == "Poll posted")
+        let sentReply = ComposeViewModel(keypair: fixture.keypair, mode: try reply(to: fixture.keypair))
+        #expect(sentReply.publishToastMessage == "Reply sent")
+    }
+
     @Test(arguments: [
         ScheduleFailure.network, .internal, .unknown, .authFailed, .notConfigured, .rateLimited,
         .quotaExceeded, .badRelays, .badRequest, .badRelayMode, .badSignature, .pubkeyMismatch,

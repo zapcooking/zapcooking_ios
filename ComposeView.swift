@@ -1424,7 +1424,7 @@ struct ComposeView: View {
             // top toast in that case. DMs and scheduled posts still finish
             // in-sheet and surface through the toast as before.
             if newId != "handed-off" {
-                SuccessToast.shared.show(publishToastMessage)
+                SuccessToast.shared.show(viewModel.publishToastMessage)
             }
             dismiss()
         }
@@ -1474,14 +1474,6 @@ struct ComposeView: View {
             Button("Keep Editing", role: .cancel) {}
         } message: {
             Text("You have unsaved content.")
-        }
-    }
-
-    private var publishToastMessage: String {
-        switch viewModel.mode {
-        case .reply: return "Reply sent"
-        case .quote: return "Quote posted"
-        case .new: return viewModel.pollEnabled ? "Poll posted" : "Posted"
         }
     }
 

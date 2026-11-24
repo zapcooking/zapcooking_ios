@@ -1643,6 +1643,24 @@ final class ComposeViewModel {
         publishedEventId = "handed-off"
     }
 
+    /// The toast shown when the composer finishes in-sheet. A scheduled post
+    /// has not been posted, so it never says "Posted": it says when it will be.
+    var publishToastMessage: String {
+        if let scheduleAt {
+            return Self.scheduledToastMessage(for: scheduleAt)
+        }
+        switch mode {
+        case .reply: return "Reply sent"
+        case .quote: return "Quote posted"
+        case .new: return pollEnabled ? "Poll posted" : "Posted"
+        }
+    }
+
+    /// "Scheduled for Nov 27, 2026 at 9:00 AM" — the More sheet's wording.
+    static func scheduledToastMessage(for date: Date) -> String {
+        "Scheduled for " + date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     /// Where Publish goes, decided in one place so the private-reply rule
     /// has a test that never sends anything.
     enum PublishRoute: Equatable {
