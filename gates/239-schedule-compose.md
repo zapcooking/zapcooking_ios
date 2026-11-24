@@ -1,10 +1,16 @@
 # Gate 239: the composer schedules through /api/schedule (scheduled posts 2/3)
 
-Branch `concern/schedule-compose`, **stacked on #237**
-(`concern/schedule-api-client` at 8c53f28; #237 was still open when this was
-cut). The PR's base is that branch, so its diff is this work only.
-**Code frozen at 2b6f2d9.** This file is the only commit after it, and it is
-the HEAD commit. A review fix breaks the freeze: push a fresh gate file last.
+Branch `concern/schedule-compose`. Cut stacked on #237; #237 has since merged
+(main e66dd9f) and main is merged into this branch, so the PR's base is `main`
+and its diff is this work only.
+**Code frozen at ede3c74** (the merge of main; the last code commit is 40d840c,
+the review fix below). This file is the only commit after it, and it is the
+HEAD commit. A review fix breaks the freeze: push a fresh gate file last.
+
+**Review fix (40d840c):** a scheduled post's toast said "Posted". It now says
+"Scheduled for <time>", in the same toast. The wording moved from
+`ComposeView` to `ComposeViewModel.publishToastMessage` so it is tested; posts
+sent now keep "Posted", "Poll posted", "Reply sent", "Quote posted".
 
 Changes: `ComposeViewModel.swift`, `ComposeView.swift`, `ScheduleSheet.swift`,
 `PollOptionsEditor.swift`, `wisp/ComposerDragHarness.swift` (two DEBUG launch
@@ -24,9 +30,12 @@ Same commands as `gates/237-schedule-api-client.md`.
 
 | | passed | failed | skipped | total |
 |---|---|---|---|---|
-| Baseline, #237 at 6dee7f0 | 2075 | 4 | 24 | 2103 |
-| Branch, 2b6f2d9 | 2103 | 4 | 24 | 2131 |
-| Difference | +28 | 0 | 0 | +28 |
+| Baseline, #237 at 6dee7f0 (= main e66dd9f) | 2075 | 4 | 24 | 2103 |
+| Branch as first gated, 2b6f2d9 | 2103 | 4 | 24 | 2131 |
+| Branch, ede3c74 | 2106 | 4 | 24 | 2134 |
+| Difference from baseline | +31 | 0 | 0 | +31 |
+
+The +3 since the first gate are the toast tests.
 
 **Failures are the same four on both:** the known set (#4, #117, #134) and
 `BlockInstantHideTests/thread_swapsBlockedRepliesForThePlaceholder`, which
@@ -37,7 +46,7 @@ fails on main and is issue #238. It is not in `KNOWN_FAILURES`, so
 |---|---|
 | Build | TEST BUILD SUCCEEDED; with every touched file recompiled, no warning in any of them |
 | New and schedule suites alone | `ScheduleComposeTests`, `ScheduleApiRequestTests`, `ScheduleApiSignTests`, `ScheduleApiRelayTests`: all pass |
-| UI screenshots | `ComposerScheduleScreenshotsUITests` 3/3 pass |
+| UI screenshots | `ComposerScheduleScreenshotsUITests` 3/3 pass at 2b6f2d9; not re-shot, the fix changes a toast's words only and no captured screen |
 | pbxproj | no diff |
 
 The live suite (`ScheduleLiveTests`) was not run for this branch: the sentinel
@@ -54,9 +63,12 @@ is absent and the request code it covers is unchanged from #237.
   "Ends" is one day after the scheduled time.
 
 ## Not covered here
-- **editor-matrix was not run.** AGENTS.md asks for it before and after a
-  composer change; this repository has no runner yet. The change does not
-  touch how text is edited or built into `content`.
+- **editor-matrix: waived for this PR (Seth, 2026-11-24).** AGENTS.md asks for
+  it before and after a composer change. The reason for the waiver: the diff
+  does not change how content or tags are built, apart from the poll close
+  time, which has its own tests (`ScheduleComposeTests`, the poll section).
+  This repository has no runner yet; issue #240 is open for writing it so the
+  rule can be met in future.
 - No request left the simulator: scheduling from the composer against
   zap.cooking, and with a real signer app, is the by-hand list in the PR
   thread.
