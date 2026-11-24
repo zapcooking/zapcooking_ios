@@ -149,6 +149,9 @@ struct ComposeView: View {
                     if viewModel.scheduleEnabled {
                         scheduleBanner
                     }
+                    if let notice = viewModel.scheduleNotice {
+                        scheduleNoticeBanner(notice)
+                    }
 
                     Divider().overlay(Color.wispSurfaceVariant.opacity(0.5))
 
@@ -1191,6 +1194,33 @@ struct ComposeView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.wispPrimary.opacity(0.1))
+    }
+
+    /// Shown when the composer removed a schedule time itself (the saved time
+    /// had passed, or the reply was made private): without it, Publish would
+    /// post straight away with nothing to say the time was gone.
+    private func scheduleNoticeBanner(_ notice: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+            Text(notice)
+                .font(.caption.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button {
+                viewModel.scheduleNotice = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("schedule-notice")
     }
 
     private var nsfwBanner: some View {

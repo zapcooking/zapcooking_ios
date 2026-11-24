@@ -210,11 +210,21 @@ struct PollOptionsEditor: View {
                 }
             }
 
-            if let endsAt = viewModel.pollEndsAt {
+            // As it will be published: for a scheduled poll a preset counts
+            // from the publish time, not from now.
+            if let endsAt = viewModel.pollEndsAtForPublish {
                 let endDate = Date(timeIntervalSince1970: TimeInterval(endsAt))
                 Text("Ends \(Self.endDateFormatter.string(from: endDate))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("poll-ends")
+            }
+            if viewModel.pollClosesBeforeScheduledPublish {
+                Text(ComposeViewModel.pollClosesBeforePublishMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("poll-closes-early")
             }
         }
     }
