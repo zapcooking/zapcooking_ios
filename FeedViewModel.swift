@@ -146,6 +146,13 @@ final class FeedViewModel {
     /// new events arrive. Stays at zero while the feed is parked at top
     /// (events flush straight into `events` so the user always sees them).
     private(set) var pendingNewCount: Int = 0
+    /// Feed chrome auto-hide (`FeedBarsAutoHide`): false while the feed's
+    /// scroll-direction detector has collapsed the top header and the tab
+    /// bar. One bit for both — they are never independent — set by whichever
+    /// feed body is scrolling and read by the header and `MainView`'s tab
+    /// bar. Every other tab keeps its bar regardless (Android's
+    /// `FeedViewModel.barsVisible`).
+    private(set) var barsVisible = true
 
     @ObservationIgnored private var seenIds = Set<String>()
     /// Latched by the first `start()` for the VM's lifetime. `.task` re-fires
@@ -897,6 +904,14 @@ final class FeedViewModel {
                 flushPendingInserts()
             }
         }
+    }
+
+    /// Flip the feed chrome from the view layer (`barsVisible`). The caller
+    /// wraps a real change in `withAnimation` and skips no-op writes, so the
+    /// per-frame scroll detector never produces an observable mutation while
+    /// the verdict holds steady.
+    func setBarsVisible(_ visible: Bool) {
+        barsVisible = visible
     }
 
     /// Apply the held buffer immediately. Called when the user taps the
