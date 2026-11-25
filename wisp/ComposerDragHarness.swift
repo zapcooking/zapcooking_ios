@@ -51,6 +51,10 @@ final class ReorderTrace {
 /// overflows it, so the strip genuinely scrolls. `-ComposerDragHarnessGIFs YES`
 /// makes every slot an animated GIF, which the strip draws with a UIKit
 /// `UIImageView` instead of a SwiftUI `Image`.
+///
+/// `-ComposerHarnessStaleSchedule YES` and `-ComposerHarnessScheduledPoll 3`
+/// open the composer in two scheduling states for
+/// `ComposerScheduleScreenshotsUITests`.
 struct ComposerDragHarness: View {
     @State private var viewModel: ComposeViewModel
     private let labels: [UUID: String]
@@ -62,7 +66,27 @@ struct ComposerDragHarness: View {
         let kp = Keypair(privkey: Hex.encode(priv), pubkey: Hex.encode(pub))
         UserDefaults.standard.removeObject(forKey: "compose_autosave_new_\(kp.pubkey)")
 
+        // `-ComposerHarnessStaleSchedule YES`: an autosave whose schedule
+        // time has passed, so the composer opens on the "no longer
+        // scheduled" notice.
+        if UserDefaults.standard.bool(forKey: "ComposerHarnessStaleSchedule") {
+            UserDefaults.standard.set(
+                ["content": "Sunday roast, step by step",
+                 "scheduleAt": Date().addingTimeInterval(-3_600).timeIntervalSince1970],
+                forKey: "compose_autosave_new_\(kp.pubkey)"
+            )
+        }
+
         let vm = ComposeViewModel(keypair: kp, mode: .new)
+        // `-ComposerHarnessScheduledPoll <days>`: a one-day poll scheduled
+        // that many days out, so the editor's "Ends…" line can be read.
+        let pollDays = UserDefaults.standard.integer(forKey: "ComposerHarnessScheduledPoll")
+        if pollDays > 0 {
+            vm.content = "Brisket or ribs?"
+            vm.pollOptions = ["Brisket", "Ribs"]
+            vm.pollEnabled = true
+            vm.setSchedule(Date().addingTimeInterval(TimeInterval(pollDays) * 86_400))
+        }
         let palette: [(String, (CGFloat, CGFloat, CGFloat))] = [
             ("A", (0.85, 0.30, 0.20)),
             ("B", (0.15, 0.55, 0.35)),
@@ -77,7 +101,8 @@ struct ComposerDragHarness: View {
         let seeds = palette.prefix(requested > 0 ? min(requested, palette.count) : 3)
         let gifs = UserDefaults.standard.bool(forKey: "ComposerDragHarnessGIFs")
         var labels: [UUID: String] = [:]
-        vm.attachments = seeds.map { name, rgb in
+        // The poll state shows the poll editor, not the strip: no slots.
+        vm.attachments = (pollDays > 0 ? [] : Array(seeds)).map { name, rgb in
             let id = UUID()
             labels[id] = name
             return ComposeAttachment(
