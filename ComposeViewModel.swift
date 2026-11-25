@@ -90,8 +90,27 @@ final class ComposeViewModel {
     /// Set when the composer is opened from an existing draft. Reused on
     /// subsequent saves so the same `d` tag updates the same draft.
     var currentDraftId: String?
-    /// When non-nil, publish goes to the scheduler relay with this `created_at`.
+    /// When non-nil, publish goes to the scheduler API (`ScheduleApi`) with
+    /// this as the event's `created_at`.
     var scheduleAt: Date?
+    /// Set when the composer removed a schedule time on its own (the saved
+    /// time had passed, or the reply was made private), so the person is told
+    /// rather than left to find out when Publish posts straight away.
+    var scheduleNotice: String?
+    /// Test seam; nil means `ScheduleSubmitter.live`.
+    @ObservationIgnored var scheduleSubmitter: (any ScheduleSubmitting)?
+    /// The signed event of a schedule attempt whose request failed around it.
+    /// Sent again as is if the same post is retried: a re-signed event has a
+    /// new id and would be scheduled twice.
+    @ObservationIgnored private var heldScheduledEvent: NostrEvent?
+
+    static let scheduleTimePassedNotice =
+        "The time you picked for this post has passed, so it's no longer scheduled. Pick a new time, or post it now."
+    static let scheduleClearedForPrivateNotice =
+        "Private replies can't be scheduled, so the scheduled time was removed."
+    static let privateScheduleConflictMessage =
+        "Private replies can't be scheduled. Remove the scheduled time, or turn off Private."
+    static let pollClosesBeforePublishMessage = ScheduleFailure.pollClosesBeforePublish.message
     /// Set after a successful `saveDraft()` — UI uses this to dismiss.
     var draftSaved: Bool = false
     /// True once the user has explicitly chosen to discard via the Cancel dialog.
@@ -351,7 +370,20 @@ final class ComposeViewModel {
         // The per-post override; an autosave without it keeps the Settings default.
         if let pow = payload["powEnabled"] as? Bool { powEnabled = pow }
         if let ts = payload["scheduleAt"] as? TimeInterval {
+            restoreSchedule(savedAt: ts)
+        }
+    }
+
+    /// Put a saved schedule time back, unless it can no longer be used: it
+    /// has passed, or is too close for `ScheduleApi.sign` to accept. Then the
+    /// time is dropped and the composer says so, instead of failing at submit.
+    private func restoreSchedule(savedAt ts: TimeInterval, now: Int = NostrClock.now()) {
+        guard !isPrivate else { return }
+        if Int(ts) > now + ScheduleApi.signMinLeadSeconds {
             scheduleAt = Date(timeIntervalSince1970: ts)
+        } else {
+            scheduleAt = nil
+            scheduleNotice = Self.scheduleTimePassedNotice
         }
     }
 
@@ -434,6 +466,13 @@ final class ComposeViewModel {
     func togglePrivate() {
         guard !isPrivateLocked else { return }
         isPrivate.toggle()
+        // A private reply is sent now or not at all: the scheduler takes no
+        // gift wraps. A time left set would be silently ignored, so it goes,
+        // and the composer says so.
+        if isPrivate, scheduleAt != nil {
+            scheduleAt = nil
+            scheduleNotice = Self.scheduleClearedForPrivateNotice
+        }
     }
 
     // MARK: - Poll mutation
@@ -1151,7 +1190,7 @@ final class ComposeViewModel {
     /// Begin the 10-second undo countdown. Caller must keep the view alive — the
     /// publish fires after the timer elapses unless `cancelPublish()` is called.
     /// When `scheduleAt` is set, the countdown is skipped (no rush — the
-    /// scheduler relay holds the post until the chosen time).
+    /// scheduler holds the post until the chosen time).
     func publish() {
         guard countdownSeconds == nil, !isPublishing else { return }
         if let validation = validate() {
@@ -1435,7 +1474,31 @@ final class ComposeViewModel {
     // MARK: - Scheduling
 
     func setSchedule(_ date: Date?) {
+        // The schedule control is disabled for a private reply; this is the
+        // same rule for any other caller.
+        if date != nil, isPrivate { return }
         scheduleAt = date
+        scheduleNotice = nil
+    }
+
+    /// When the poll closes, as it will be published. Posted now, that is the
+    /// time the editor stamped. Scheduled, a preset counts from the *publish*
+    /// time (a one-day poll scheduled for Friday closes on Saturday, and is
+    /// not refused by the server for closing before it opens); a custom end
+    /// date stays the date that was picked.
+    var pollEndsAtForPublish: Int? {
+        guard let scheduleAt else { return pollEndsAt }
+        if pollDurationIsCustom { return pollEndsAt }
+        guard let preset = pollDurationPreset else { return nil }
+        return Int(scheduleAt.timeIntervalSince1970) + Int(preset.seconds)
+    }
+
+    /// A scheduled poll must stay open more than 60 s after it publishes
+    /// (the contract's `poll_closes_before_publish`). Only a custom end date
+    /// can break that; it is blocked here rather than at the server.
+    var pollClosesBeforeScheduledPublish: Bool {
+        guard pollEnabled, let scheduleAt, let endsAt = pollEndsAtForPublish else { return false }
+        return endsAt <= Int(scheduleAt.timeIntervalSince1970) + 60
     }
 
     /// True when the composer has enough content to publish. Drives the
@@ -1456,6 +1519,7 @@ final class ComposeViewModel {
                 .filter { !$0.isEmpty }
             if trimmed.isEmpty { return "Add a question." }
             if nonBlank.count < 2 { return "Add at least 2 options." }
+            if pollClosesBeforeScheduledPublish { return "Move the poll's closing time later." }
             return nil
         }
         if galleryMode {
@@ -1482,6 +1546,7 @@ final class ComposeViewModel {
             if nonBlank.count > 10 { return "Maximum 10 poll options." }
             let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return "Add a poll question." }
+            if pollClosesBeforeScheduledPublish { return Self.pollClosesBeforePublishMessage }
             return nil
         }
         if galleryMode {
@@ -1502,12 +1567,22 @@ final class ComposeViewModel {
 
         // Private-reply branch: skip the public kind-1 pipeline entirely. We
         // also skip PoW (gift wraps don't benefit from spam mining the same
-        // way), scheduling (no scheduler relay accepts kind-1059 wraps). The
-        // rumor body goes through `composeNoteContent` like every other
-        // publish path, so attachments ride the same slots.
-        if case .reply(let parent, let root) = mode, isPrivate {
-            await runPrivateReplyPipeline(parent: parent, root: root)
+        // way). A private reply cannot be scheduled (the scheduler takes no
+        // kind-1059 wraps), and one with a schedule time set is never sent
+        // immediately: `publishRoute` blocks it. The rumor body goes through
+        // `composeNoteContent` like every other publish path, so attachments
+        // ride the same slots.
+        switch publishRoute {
+        case .blocked(let reason):
+            lastError = reason
             return
+        case .privateReply:
+            if case .reply(let parent, let root) = mode {
+                await runPrivateReplyPipeline(parent: parent, root: root)
+            }
+            return
+        case .schedule, .now:
+            break
         }
 
         let kind = determineKind()
@@ -1515,9 +1590,9 @@ final class ComposeViewModel {
         let tags = buildBaseTags(kind: kind, materializedContent: materialized)
         let postContent = bodyForPublish(kind: kind, materialized: materialized)
 
-        // Scheduled posts route through the scheduler relay synchronously — the
-        // sheet stays open until the relay ack returns. PoW + scheduling don't
-        // mix (mining mutates `created_at`), so PoW is silently skipped here.
+        // Scheduled posts go to the scheduler API synchronously — the sheet
+        // stays open until it answers. PoW + scheduling don't mix (mining
+        // mutates `created_at`), so PoW is silently skipped here.
         if let scheduleTimestamp = scheduleAt.map({ Int($0.timeIntervalSince1970) }) {
             await runScheduledPublish(
                 kind: kind, tags: tags, content: postContent, createdAt: scheduleTimestamp
@@ -1568,31 +1643,83 @@ final class ComposeViewModel {
         publishedEventId = "handed-off"
     }
 
-    private func runScheduledPublish(kind: Int, tags: [[String]], content: String, createdAt: Int) async {
-        let event: NostrEvent
-        do {
-            event = try await Signer.sign(
-                keypair: signingKeypair,
-                kind: kind,
-                tags: tags,
-                content: content,
-                createdAt: createdAt
-            )
-        } catch {
-            lastError = "Signing failed: \(error)"
-            return
+    /// The toast shown when the composer finishes in-sheet. A scheduled post
+    /// has not been posted, so it never says "Posted": it says when it will be.
+    var publishToastMessage: String {
+        if let scheduleAt {
+            return Self.scheduledToastMessage(for: scheduleAt)
         }
-        let relay = DraftsViewModel.schedulerRelay
-        await GroupRelayPool.shared.ensureRelay(relay, keypair: signingKeypair)
-        let result = await GroupRelayPool.shared.publishWithAuthRetry(event, to: relay)
-        switch result {
-        case .ok, .duplicate:
+        switch mode {
+        case .reply: return "Reply sent"
+        case .quote: return "Quote posted"
+        case .new: return pollEnabled ? "Poll posted" : "Posted"
+        }
+    }
+
+    /// "Scheduled for Nov 27, 2026 at 9:00 AM" — the More sheet's wording.
+    static func scheduledToastMessage(for date: Date) -> String {
+        "Scheduled for " + date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// Where Publish goes, decided in one place so the private-reply rule
+    /// has a test that never sends anything.
+    enum PublishRoute: Equatable {
+        /// Gift-wrapped, sent now.
+        case privateReply
+        /// Signed for this time and handed to the scheduler API.
+        case schedule(at: Int)
+        /// Nothing is sent; the reason is shown.
+        case blocked(String)
+        /// The normal publish.
+        case now
+    }
+
+    var publishRoute: PublishRoute {
+        if case .reply = mode, isPrivate {
+            // Never "send it now anyway": the person asked for a later time.
+            return scheduleAt == nil ? .privateReply : .blocked(Self.privateScheduleConflictMessage)
+        }
+        if let scheduleAt { return .schedule(at: Int(scheduleAt.timeIntervalSince1970)) }
+        return .now
+    }
+
+    /// Sign the post for its publish time and hand it to the scheduler API
+    /// (`ScheduleApi`, through `ScheduleSubmitting`). On any failure the
+    /// composer stays open with everything in it and says what happened.
+    private func runScheduledPublish(kind: Int, tags: [[String]], content: String, createdAt: Int) async {
+        let submitter: any ScheduleSubmitting = scheduleSubmitter ?? ScheduleSubmitter.live
+        let keypair = signingKeypair
+
+        let event: NostrEvent
+        if let held = heldScheduledEvent,
+           createdAt > NostrClock.now() + ScheduleApi.signMinLeadSeconds,
+           ScheduleRetry.isSamePost(held, kind: kind, tags: tags, content: content,
+                                    publishAt: createdAt, pubkey: keypair.pubkey) {
+            // The same post again after a failed request: the same signed
+            // event, so an attempt that did land is recognized, not doubled.
+            event = held
+        } else {
+            heldScheduledEvent = nil
+            switch await submitter.sign(kind: kind, tags: tags, content: content,
+                                        publishAt: createdAt, keypair: keypair) {
+            case .success(let signed):
+                event = signed
+            case .failure(let failure):
+                lastError = failure.message
+                return
+            }
+        }
+
+        switch await submitter.send(event, keypair: keypair) {
+        case .success:
+            heldScheduledEvent = nil
             publishedEventId = event.id
             clearLocalAutosave()
             await clearDraftOnPublish()
             Haptics.shared.pulse()
-        default:
-            lastError = "Scheduler relay rejected the post."
+        case .failure(let failure):
+            heldScheduledEvent = failure.keepsSignedEvent ? event : nil
+            lastError = failure.message
         }
     }
 
@@ -1992,7 +2119,7 @@ final class ComposeViewModel {
                     valueMinimum: zapPollMinSats,
                     valueMaximum: zapPollMaxSats,
                     consensusThreshold: nil,
-                    closedAt: pollEndsAt,
+                    closedAt: pollEndsAtForPublish,
                     relayUrls: pollRelays
                 ))
             } else {
@@ -2000,7 +2127,7 @@ final class ComposeViewModel {
                 tags.append(contentsOf: Nip88.buildPollTags(
                     options: opts,
                     pollType: pollType,
-                    endsAt: pollEndsAt,
+                    endsAt: pollEndsAtForPublish,
                     relayUrls: pollRelays
                 ))
             }
