@@ -77,8 +77,11 @@ struct RecipeCardView: View {
                     RecipePlaceholderTile(seed: event.id)
                 }
             }
-            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            // clipShape only clips drawing, not hit-testing: a landscape image
+            // scaled to fill overflows the 2:3 frame sideways, and that
+            // invisible overflow would take taps meant for the next column.
+            .contentShape(RoundedRectangle(cornerRadius: 16))
             .accessibilityHidden(true)
     }
 }
