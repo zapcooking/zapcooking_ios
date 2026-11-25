@@ -77,6 +77,8 @@ struct wispApp: App {
                 EmojiReactionHarness()
             } else if ProcessInfo.processInfo.arguments.contains("-WalletAddressHarness") {
                 WalletAddressHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("-RecipeGridHarness") {
+                RecipeGridHarness()
             } else if ProcessInfo.processInfo.arguments.contains("-NotificationRowHarness") {
                 NotificationRowHarness()
                     .environment(settings)
