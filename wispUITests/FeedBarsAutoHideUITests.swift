@@ -28,6 +28,12 @@ private enum Quiescence {
 /// still take a tap. Skipped when no saved account or no hydrated cards.
 final class FeedBarsAutoHideUITests: XCTestCase {
 
+    /// "Hide bars while scrolling" is off by default; these pin it through
+    /// the launch-argument defaults domain so a run never depends on (or
+    /// changes) what the simulator's saved settings say.
+    private static let autoHideOn = ["-wisp_settings_auto_hide_feed_bars", "<true/>"]
+    private static let autoHideOff = ["-wisp_settings_auto_hide_feed_bars", "<false/>"]
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -59,6 +65,7 @@ final class FeedBarsAutoHideUITests: XCTestCase {
     @MainActor
     func testScrollDownHidesBothBars_ScrollUpReturnsThem() throws {
         let app = XCUIApplication()
+        app.launchArguments = Self.autoHideOn
         app.launch()
 
         let feedTab = app.buttons["tab-feed"]
@@ -121,7 +128,7 @@ final class FeedBarsAutoHideUITests: XCTestCase {
         app.launchArguments = [
             "-FreshScreenshotAccount", "-FreshScreenshotNewAccount",
             "-FreshScreenshotSigningAccount", "-FreshScreenshotFixtures",
-        ]
+        ] + Self.autoHideOn
         app.launch()
 
         let any = app.descendants(matching: .any)
@@ -177,7 +184,7 @@ final class FeedBarsAutoHideUITests: XCTestCase {
         app.launchArguments = [
             "-FreshScreenshotAccount", "-FreshScreenshotNewAccount",
             "-FreshScreenshotSigningAccount", "-FreshScreenshotFixtures",
-        ]
+        ] + Self.autoHideOn
         app.launch()
         let any = app.descendants(matching: .any)
         let topChrome = any["feed-top-chrome"]
@@ -211,5 +218,79 @@ final class FeedBarsAutoHideUITests: XCTestCase {
         attach(app, "fling-restore")
         XCTAssertEqual(topChrome.value as? String, "up", "bars should stay up after a mid-fling restore")
         XCTAssertEqual(bottomChrome.value as? String, "up", "bars should stay up after a mid-fling restore")
+    }
+
+    /// The setting's default: off. Scrolling down leaves both bars up and
+    /// the restore circle never appears.
+    @MainActor
+    func testAutoHideOff_scrollKeepsBarsUp() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-FreshScreenshotAccount", "-FreshScreenshotNewAccount",
+            "-FreshScreenshotSigningAccount", "-FreshScreenshotFixtures",
+        ] + Self.autoHideOff
+        app.launch()
+        let any = app.descendants(matching: .any)
+        let topChrome = any["feed-top-chrome"]
+        let bottomChrome = any["feed-bottom-chrome"]
+        XCTAssertTrue(topChrome.waitForExistence(timeout: 25), "header chrome missing")
+
+        for _ in 0..<3 { drag(app: app, from: 0.65, to: 0.2) }
+        Thread.sleep(forTimeInterval: 1.5)
+        attach(app, "auto-hide-off-scrolled")
+        XCTAssertEqual(topChrome.value as? String, "up", "header should stay with auto-hide off")
+        XCTAssertEqual(bottomChrome.value as? String, "up", "tab bar should stay with auto-hide off")
+        XCTAssertFalse(app.buttons["feed-bars-restore"].exists, "no restore circle with auto-hide off")
+    }
+
+    /// Drawer → Settings → Interface: the switch sits under Appearance, reads
+    /// off by default, and turning it on takes effect on the feed at once.
+    @MainActor
+    func testInterfaceToggle_offByDefault_turningOnHidesBars() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-FreshScreenshotAccount", "-FreshScreenshotNewAccount",
+            "-FreshScreenshotSigningAccount", "-FreshScreenshotFixtures",
+        ] + Self.autoHideOff
+        app.launch()
+        let any = app.descendants(matching: .any)
+        let topChrome = any["feed-top-chrome"]
+        let bottomChrome = any["feed-bottom-chrome"]
+        XCTAssertTrue(topChrome.waitForExistence(timeout: 25), "header chrome missing")
+
+        let avatar = app.buttons["feed-avatar"]
+        XCTAssertTrue(avatar.waitForExistence(timeout: 5), "avatar entry should exist")
+        avatar.tap()
+        let settingsRow = app.buttons["Settings"]
+        XCTAssertTrue(settingsRow.waitForExistence(timeout: 5), "drawer should open")
+        XCTAssertTrue(wait(until: { settingsRow.isHittable }, timeout: 5))
+        settingsRow.tap()
+        let interfaceRow = app.buttons["Interface"]
+        XCTAssertTrue(interfaceRow.waitForExistence(timeout: 5), "Interface row should appear")
+        interfaceRow.tap()
+
+        let toggle = app.switches["settings-auto-hide-feed-bars"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "auto-hide switch missing")
+        XCTAssertEqual(toggle.value as? String, "0", "auto-hide should be off by default")
+        Thread.sleep(forTimeInterval: 0.5)
+        attach(app, "settings-auto-hide-off")
+
+        // Tap the switch itself (trailing edge), not the label.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertTrue(wait(until: { (toggle.value as? String) == "1" }, timeout: 3), "switch should turn on")
+        Thread.sleep(forTimeInterval: 0.5)
+        attach(app, "settings-auto-hide-on")
+
+        // Close the sheet and the drawer, then scroll: the bars now go.
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(wait(until: { !toggle.exists }, timeout: 5), "settings sheet should close")
+        if app.buttons["Settings"].isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(wait(until: { app.buttons["feed-avatar"].isHittable }, timeout: 5), "drawer should close")
+        for _ in 0..<3 { drag(app: app, from: 0.65, to: 0.2) }
+        XCTAssertTrue(wait(until: {
+            (topChrome.value as? String) == "down" && (bottomChrome.value as? String) == "down"
+        }, timeout: 6), "turning the switch on should enable auto-hide right away")
     }
 }

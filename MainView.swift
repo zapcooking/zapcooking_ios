@@ -558,6 +558,11 @@ struct MainView: View {
             guard let item = note.object as? PendingShareItem else { return }
             pendingShare = item
         }
+        .onChange(of: settings.autoHideFeedBars) { _, enabled in
+            // Switched off while the bars are down: bring them back now
+            // rather than leaving them stranded until the next scroll up.
+            if !enabled { showFeedBarsOnReentry() }
+        }
         .onChange(of: settings.showsLiveContent) { _, enabled in
             // Apply the "Show live streams" switch immediately: start or tear
             // down NIP-53 discovery without waiting for the next app launch.
@@ -2538,10 +2543,13 @@ struct MainView: View {
     /// layout synchronously there — the header is a safe-area inset of the
     /// very scroll view reporting — risks the pass in flight. Animated as
     /// Android's 200ms expand / shrink plus crossfade.
+    /// With "Hide bars while scrolling" off every verdict is dropped, so the
+    /// bars never leave.
     private func applyFeedBarsVerdict(_ verdict: Bool?) {
+        guard settings.autoHideFeedBars else { return }
         guard let verdict, verdict != viewModel.barsVisible else { return }
         Task { @MainActor in
-            guard verdict != viewModel.barsVisible else { return }
+            guard settings.autoHideFeedBars, verdict != viewModel.barsVisible else { return }
             withAnimation(.feedBarsCollapse) {
                 viewModel.setBarsVisible(verdict)
             }

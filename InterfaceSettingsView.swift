@@ -37,6 +37,12 @@ struct InterfaceSettingsView: View {
                             }
                         }
                     }
+                    Toggle("Hide bars while scrolling", isOn: $settings.autoHideFeedBars)
+                        .toggleStyle(SwitchToggleStyle(tint: theme.primary))
+                        .accessibilityIdentifier("settings-auto-hide-feed-bars")
+                    Text("Scrolling down the feed hides the top bar and the tab bar. Scroll up or tap the menu circle to bring them back.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.palette.onSurfaceVariant)
                 }
 
                 section(title: "Startup") {
