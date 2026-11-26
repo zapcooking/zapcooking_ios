@@ -319,7 +319,7 @@ struct SafetySettingsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(theme.palette.onSurfaceVariant)
-                    TextField("Filter blocked users", text: $userFilterQuery)
+                    TextField("Filter muted users", text: $userFilterQuery)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     if !userFilterQuery.isEmpty {
@@ -337,9 +337,9 @@ struct SafetySettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
-            section(title: "Blocked users") {
+            section(title: "Muted users") {
                 if mutes.blockedPubkeys.isEmpty {
-                    Text("No blocked users")
+                    Text("No muted users")
                         .font(.system(size: 14))
                         .foregroundStyle(theme.palette.onSurfaceVariant)
                 } else if filteredBlockedPubkeys.isEmpty {
@@ -355,9 +355,9 @@ struct SafetySettingsView: View {
         }
     }
 
-    /// Blocked pubkeys matching `userFilterQuery` against display name or
+    /// Muted pubkeys matching `userFilterQuery` against display name or
     /// npub (case-insensitive substring), sorted by display name so a long
-    /// list — mostly bare npubs from relay-only blocks — stays scannable.
+    /// list — mostly bare npubs from relay-only mutes — stays scannable.
     private var filteredBlockedPubkeys: [String] {
         let all = Array(mutes.blockedPubkeys)
         let query = userFilterQuery.trimmingCharacters(in: .whitespaces).lowercased()
@@ -388,7 +388,7 @@ struct SafetySettingsView: View {
             }
             Spacer()
             if !keypair.isWatchOnly {
-                Button("Unblock") {
+                Button("Unmute") {
                     mutes.unblockUser(pubkey)
                 }
                 .font(.system(size: 13, weight: .semibold))

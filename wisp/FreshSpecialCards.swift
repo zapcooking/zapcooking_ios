@@ -85,7 +85,7 @@ struct FreshSpotlightCard: View {
 }
 
 /// One spotlight post: author, a few lines, the first picture. Tap opens the
-/// thread; the "…" button (and a long press) has Report and Block.
+/// thread; the "…" button (and a long press) has Report and Mute.
 struct FreshSpotlightTile: View {
     let event: NostrEvent
     let profile: ProfileData?
@@ -180,7 +180,7 @@ struct FreshSpotlightTile: View {
         Button(role: .destructive) {
             MuteRepository.shared.blockUser(event.pubkey, context: .event(id: event.id, kind: event.kind))
         } label: {
-            Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+            Label("Mute User", systemImage: "person.crop.circle.badge.xmark")
         }
         .accessibilityIdentifier("block-spotlight-post")
     }

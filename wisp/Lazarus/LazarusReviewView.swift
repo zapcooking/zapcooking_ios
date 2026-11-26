@@ -171,7 +171,7 @@ struct LazarusReviewView: View {
             LazarusNotice(text: "An old relay list can point at relays that no longer exist, stranding you and silently breaking delivery. Make sure the relays in this version still work.")
         }
         if profile.kind == 10000, let candidate = model.reviewCandidate, model.undecryptable.contains(candidate.id) {
-            LazarusNotice(text: "This app can't read this version's private items, so a later mute or block made in this app would drop them.", style: .info)
+            LazarusNotice(text: "This app can't read this version's private items, so a later mute made in this app would drop them.", style: .info)
         }
     }
 

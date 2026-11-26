@@ -247,7 +247,7 @@ private struct MemberRow: View {
                     .background(Color.wispPrimary.opacity(0.2), in: Capsule())
             }
             if isBlocked {
-                Text("blocked").font(.caption2)
+                Text("muted").font(.caption2)
                     .padding(.horizontal, 4).padding(.vertical, 1)
                     .background(Color.secondary.opacity(0.15), in: Capsule())
             }
@@ -256,9 +256,9 @@ private struct MemberRow: View {
                 Menu {
                     if canBlock {
                         if isBlocked {
-                            Button("Unblock User", action: onUnblock)
+                            Button("Unmute User", action: onUnblock)
                         } else {
-                            Button("Block User", role: .destructive, action: onBlock)
+                            Button("Mute User", role: .destructive, action: onBlock)
                         }
                     }
                     if showActions {

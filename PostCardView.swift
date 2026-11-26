@@ -878,11 +878,11 @@ struct PostCardView: View {
             Text("Publishes a NIP-09 deletion request. Relays may keep their copy.")
         }
         .confirmationDialog(
-            muteCandidate.map { "Block \($0.displayName)?" } ?? "Block this user?",
+            muteCandidate.map { "Mute \($0.displayName)?" } ?? "Mute this user?",
             isPresented: $showMuteUserConfirm,
             titleVisibility: .visible
         ) {
-            Button("Block", role: .destructive) {
+            Button("Mute", role: .destructive) {
                 if let candidate = muteCandidate {
                     MuteRepository.shared.blockUser(candidate.pubkey, context: candidate.context)
                 }
@@ -1502,17 +1502,17 @@ struct PostCardView: View {
                     .accessibilityIdentifier("report-post")
                     Divider()
                     popoverMenuItem(
-                        title: userMuted ? "Unblock User" : "Block User",
+                        title: userMuted ? "Unmute User" : "Mute User",
                         systemImage: "speaker.slash"
                     ) {
                         showOverflowMenu = false
                         if userMuted {
                             muteRepo.unblockUser(target.pubkey)
                         } else {
-                            // Confirmation prompt before blocking — a
-                            // direct block can collapse the thread the
-                            // user is reading (per #69) and is hard to
-                            // discover how to undo.
+                            // Confirmation prompt before muting — a direct
+                            // mute can collapse the thread the user is
+                            // reading (per #69) and is hard to discover how
+                            // to undo.
                             let displayed = profiles[target.pubkey]?.displayString
                                 ?? profile?.displayString
                                 ?? Nip19.shortNpub(hex: target.pubkey)

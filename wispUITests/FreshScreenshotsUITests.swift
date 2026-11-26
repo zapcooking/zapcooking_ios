@@ -147,7 +147,7 @@ final class FreshScreenshotsUITests: XCTestCase {
                 if menu.waitForExistence(timeout: 5) {
                     menu.tap()
                     XCTAssertTrue(app.buttons["Report"].waitForExistence(timeout: 5), "no Report in the spotlight menu")
-                    XCTAssertTrue(app.buttons["Block User"].exists, "no Block User in the spotlight menu")
+                    XCTAssertTrue(app.buttons["Mute User"].exists, "no Mute User in the spotlight menu")
                     sleep(1)
                     shot("spotlight-menu", orientation)
                 } else {

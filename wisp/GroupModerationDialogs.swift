@@ -24,7 +24,7 @@ final class GroupModerationPrompts {
 
 /// The confirmation dialogs behind the room's moderation menus — shared by
 /// the chat bubbles (`GroupRoomView`) and the member list (`GroupDetailView`).
-/// Copy matches the feed's block dialog and Android's remove & ban
+/// Copy matches the feed's mute dialog and Android's remove & ban
 /// confirmation.
 struct GroupModerationDialogs: ViewModifier {
     @Bindable var prompts: GroupModerationPrompts
@@ -33,11 +33,11 @@ struct GroupModerationDialogs: ViewModifier {
     func body(content: Content) -> some View {
         content
             .confirmationDialog(
-                prompts.blockCandidate.map { "Block \($0.displayName)?" } ?? "Block this user?",
+                prompts.blockCandidate.map { "Mute \($0.displayName)?" } ?? "Mute this user?",
                 isPresented: presented(\.blockCandidate),
                 titleVisibility: .visible
             ) {
-                Button("Block", role: .destructive) {
+                Button("Mute", role: .destructive) {
                     if let candidate = prompts.blockCandidate {
                         viewModel.blockAuthor(candidate.pubkey)
                     }

@@ -207,7 +207,7 @@ struct ProfileView: View {
                             muteRepo.blockUser(pubkey, context: .profile)
                         }
                     } label: {
-                        Label(blocked ? "Unblock User" : "Block User",
+                        Label(blocked ? "Unmute User" : "Mute User",
                               systemImage: blocked ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.xmark")
                     }
                     .accessibilityIdentifier("block-profile")
@@ -318,17 +318,17 @@ struct ProfileView: View {
             Image(systemName: "nosign")
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
-            Text("You've blocked this user")
+            Text("You've muted this user")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("Their posts are hidden. Unblock to see their content.")
+            Text("Their posts are hidden. Unmute to see their content.")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
             Button {
                 muteRepo.unblockUser(pubkey)
             } label: {
-                Text("Unblock")
+                Text("Unmute")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 24)
                     .padding(.vertical, 10)
@@ -795,7 +795,7 @@ private struct ProfileHeaderView: View {
                 active: blocked,
                 activeTint: .red,
                 disabled: false,
-                accessibilityLabel: blocked ? "Unblock" : "Block",
+                accessibilityLabel: blocked ? "Unmute" : "Mute",
                 action: { toggleBlock(currentlyBlocked: blocked) }
             )
         }
