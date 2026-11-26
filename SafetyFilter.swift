@@ -91,6 +91,16 @@ final class SafetyFilter: @unchecked Sendable {
             return true
         }
 
+        // The user's own content is never hidden by their own safety filters —
+        // a muted word, muted thread, report, hellthread, or WoT miss on a
+        // self-authored event is always a false positive. Deletion stays above
+        // this: a note the user retracted should disappear like anyone else's.
+        // Kind-6 reposts by the user still fall through so a repost of a
+        // blocked author's note keeps its inner-author gates.
+        if !s.userPubkey.isEmpty, event.pubkey == s.userPubkey, event.kind != 6 {
+            return false
+        }
+
         if !s.reportedEventIds.isEmpty, s.reportedEventIds.contains(event.id) {
             return true
         }
