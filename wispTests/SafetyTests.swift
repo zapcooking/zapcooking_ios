@@ -169,6 +169,55 @@ struct SafetyTests {
         #expect(!SafetyFilter.shared.shouldDrop(event: myNote, context: .feed))
     }
 
+    @Test func ownContentNeverHiddenBySafetyFilters() {
+        // Every user-tunable gate is armed and matches the event — a muted
+        // word in the content, a muted thread in an e-tag, a hellthread's
+        // worth of p-tags, a report on the id and on the author, and WoT with
+        // an empty network. None of them may hide the user's own article.
+        let ownId = String(repeating: "a", count: 64)
+        let snap = SafetyFilterSnapshot(
+            mutedWords: ["cranberry"],
+            blockedPubkeys: [],
+            mutedThreads: ["root"],
+            wotEnabled: true,
+            qualifiedNetwork: [],
+            userPubkey: "me",
+            hellthreadFilterEnabled: true,
+            hellthreadThreshold: 2,
+            reportedEventIds: [ownId],
+            reportedPubkeys: ["me"]
+        )
+        SafetyFilter.shared.install(snap)
+        defer { SafetyFilter.shared.install(.empty) }
+
+        let article = makeEvent(
+            kind: 30023, pubkey: "me", content: "Killer cranberry sauce",
+            tags: [["e", "root"], ["p", "x"], ["p", "y"], ["p", "z"]],
+            id: ownId
+        )
+        for context in [SafetyContext.feed, .notifications, .thread(rootId: "root"), .messages] {
+            #expect(!SafetyFilter.shared.shouldDrop(event: article, context: context))
+        }
+
+        // The same event from someone else is still hidden.
+        let strangers = makeEvent(kind: 30023, pubkey: "stranger", content: "Killer cranberry sauce")
+        #expect(SafetyFilter.shared.shouldDrop(event: strangers, context: .feed))
+    }
+
+    @Test func ownRepostOfBlockedAuthorStillDropped() {
+        // The self exemption skips kind 6: a repost's inner author is someone
+        // else, so the blocked-author gate must still apply.
+        let snap = SafetyFilterSnapshot(
+            mutedWords: [], blockedPubkeys: ["blocked"], mutedThreads: [],
+            wotEnabled: false, qualifiedNetwork: [], userPubkey: "me"
+        )
+        SafetyFilter.shared.install(snap)
+        defer { SafetyFilter.shared.install(.empty) }
+
+        let repost = makeEvent(kind: 6, pubkey: "me", content: "", tags: [["p", "blocked"]])
+        #expect(SafetyFilter.shared.shouldDrop(event: repost, context: .feed))
+    }
+
     @Test func wotKind6RequiresBothAuthorsQualified() {
         let snap = SafetyFilterSnapshot(
             mutedWords: [], blockedPubkeys: [], mutedThreads: [],
