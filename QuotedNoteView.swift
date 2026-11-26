@@ -338,14 +338,14 @@ struct QuotedNoteView: View {
         )
     }
 
-    /// Shown when the quoted note's author is blocked. Their content is never
+    /// Shown when the quoted note's author is muted. Their content is never
     /// rendered; a neutral stub keeps the surrounding card from looking broken
     /// (or showing a misleading "Quoted note not found").
     private var blockedCard: some View {
         HStack(spacing: 8) {
             Image(systemName: "nosign")
                 .foregroundStyle(.secondary)
-            Text("Note from a blocked user")
+            Text("Note from a muted user")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -357,7 +357,7 @@ struct QuotedNoteView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.wispSurfaceVariant, lineWidth: 1)
         )
-        .accessibilityLabel("Note from a blocked user")
+        .accessibilityLabel("Note from a muted user")
     }
 
     /// Shown when the safety filter (Web of Trust, muted word) hides the

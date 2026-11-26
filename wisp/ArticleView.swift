@@ -310,7 +310,7 @@ struct ArticleView: View {
                         ReportPresenter.shared.present(.event(article))
                     }
                     Divider()
-                    articleMenuItem(title: "Block User", systemImage: "person.crop.circle.badge.xmark") {
+                    articleMenuItem(title: "Mute User", systemImage: "person.crop.circle.badge.xmark") {
                         showOverflowMenu = false
                         MuteRepository.shared.blockUser(
                             article.pubkey, context: .event(id: article.id, kind: article.kind)

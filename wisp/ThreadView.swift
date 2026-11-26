@@ -600,9 +600,9 @@ struct ThreadView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
                 (Text("Reply from an account you muted · ")
-                    .foregroundStyle(.tertiary)
-                    + Text("View").foregroundStyle(Color.zapInteractive))
+                    + Text("View"))
                     .font(.subheadline)
+                    .foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.horizontal, 16)

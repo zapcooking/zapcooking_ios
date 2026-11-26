@@ -50,7 +50,7 @@ struct RecipeCardView: View {
                         event.pubkey, context: .event(id: event.id, kind: event.kind)
                     )
                 } label: {
-                    Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+                    Label("Mute User", systemImage: "person.crop.circle.badge.xmark")
                 }
                 .accessibilityIdentifier("block-recipe-card")
             }

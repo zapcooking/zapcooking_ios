@@ -296,7 +296,7 @@ private struct ModerationMenu: ViewModifier {
                 }
                 if let onBlock {
                     Button(role: .destructive, action: onBlock) {
-                        Label("Block User", systemImage: "person.crop.circle.badge.xmark")
+                        Label("Mute User", systemImage: "person.crop.circle.badge.xmark")
                     }
                     .accessibilityIdentifier("block-group-message-author")
                 }

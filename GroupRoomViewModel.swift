@@ -88,7 +88,7 @@ final class GroupRoomViewModel: EmojiComposing {
         ))
     }
 
-    /// Block = the app-wide NIP-51 block (`MuteRepository`): their messages
+    /// Mute = the app-wide NIP-51 mute (`MuteRepository`): their messages
     /// leave this room and their posts leave every feed, and the list is
     /// republished. Same word and same store as the feed and profile menus.
     func blockAuthor(_ pubkey: String) {

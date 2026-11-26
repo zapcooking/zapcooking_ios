@@ -33,7 +33,7 @@ struct ArticleCardView: View {
     var body: some View {
         Group {
             if blocked {
-                stubCard(icon: "nosign", text: "Article from a blocked user")
+                stubCard(icon: "nosign", text: "Article from a muted user")
             } else if safetyHidden {
                 stubCard(icon: "eye.slash", text: "Article hidden by your safety filters")
             } else if let event {

@@ -324,7 +324,7 @@ struct RecipeDetailView: View {
                         }
                     } label: {
                         Label(
-                            blocked ? "Unblock User" : "Block User",
+                            blocked ? "Unmute User" : "Mute User",
                             systemImage: blocked ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.xmark"
                         )
                     }

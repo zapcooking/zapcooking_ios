@@ -637,15 +637,15 @@ struct SearchView: View {
 
     // MARK: - Helpers
 
-    /// Shown next to a blocked user's name in results — search is the only
+    /// Shown next to a muted user's name in results — search is the only
     /// place their profile is still discoverable, so it's worth flagging
-    /// before the user taps in (their profile page shows the full unblock
+    /// before the user taps in (their profile page shows the full unmute
     /// banner in place of notes).
     private var blockedBadge: some View {
         HStack(spacing: 3) {
             Image(systemName: "nosign")
                 .font(.system(size: 9, weight: .semibold))
-            Text("Blocked")
+            Text("Muted")
                 .font(.caption2.weight(.medium))
         }
         .foregroundStyle(.secondary)
