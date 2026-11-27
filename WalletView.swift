@@ -400,6 +400,18 @@ struct WalletView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .opacity(showUnitLabel ? 1 : 0)
+                    // The opt-in USDB balance rides under the sats figure —
+                    // the two are distinct piles of money and are never
+                    // summed. Hidden with the balance itself.
+                    if !awaitingBalance && mode != .hidden,
+                       let stable = store.stableBalance,
+                       let compact = stable.amountCompact,
+                       stable.hasBalance {
+                        Text("$\(compact) \(stable.ticker)")
+                            .font(.callout.weight(.medium).monospacedDigit())
+                            .foregroundStyle(stable.active ? Color.wispZapColor : .secondary)
+                            .animation(.easeInOut(duration: 0.25), value: stable.amountCompact)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }

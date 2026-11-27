@@ -62,12 +62,95 @@ struct WalletTransaction: Identifiable, Codable {
     }
 }
 
+/// The wallet's USD (USDB) stablecoin balance and whether USD mode is on.
+/// Spark-only: NWC wallets have no equivalent.
+///
+/// Deliberately separate from the sats balance — `GetInfoResponse.balanceSats`
+/// is sats-only and tokens live in their own `tokenBalances` map, so the two
+/// are genuinely distinct piles of money and are never summed. `amount` is
+/// scaled to whole units at full precision as a decimal string, because token
+/// base units are `U128` and can exceed `Int64`.
+struct StableBalanceState: Codable, Equatable {
+    var active: Bool
+    var ticker: String
+    /// Raw token base units as a decimal string; nil before the token metadata
+    /// has arrived (a wallet with zero USDB reports none at all).
+    var baseUnits: String?
+    var decimals: UInt32
+
+    /// Scaled to whole units at full precision, e.g. "15.766673".
+    var amount: String? {
+        baseUnits.map { Self.scaleTokenAmount(baseUnits: $0, decimals: decimals) }
+    }
+
+    /// Row-sized form of [amount], e.g. "15.77". Dust that would round away
+    /// to "0.00" keeps its full precision — a real balance must never read
+    /// as nothing having arrived.
+    var amountCompact: String? {
+        amount.map { Self.compactTokenAmount($0) }
+    }
+
+    /// True when there is USDB in the wallet, regardless of [active].
+    var hasBalance: Bool {
+        guard let baseUnits else { return false }
+        return baseUnits.contains(":") == false
+            && baseUnits.allSatisfy(\.isNumber)
+            && !baseUnits.allSatisfy({ $0 == "0" })
+    }
+
+    /// Shift a token's base-unit amount by its decimal places for display.
+    ///
+    /// Operates on the decimal string rather than a numeric type on purpose:
+    /// base units are `U128` and can exceed `Int64`, and `Double` would start
+    /// losing cents well before that. Trailing zeros are dropped so a whole
+    /// amount reads "150" rather than "150.000000".
+    static func scaleTokenAmount(baseUnits: String, decimals: UInt32) -> String {
+        let digits = baseUnits.trimmingCharacters(in: .whitespaces)
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return baseUnits }
+        guard decimals > 0 else { return digits }
+
+        let places = Int(decimals)
+        let padded = digits.count > places
+            ? digits
+            : String(repeating: "0", count: places - digits.count + 1) + digits
+        let splitIndex = padded.index(padded.endIndex, offsetBy: -places)
+        let whole = String(padded[padded.startIndex..<splitIndex])
+        var fraction = String(padded[splitIndex...])
+
+        while fraction.last == "0" { fraction.removeLast() }
+        return fraction.isEmpty ? whole : "\(whole).\(fraction)"
+    }
+
+    /// Round a scaled token amount to two decimal places for display.
+    ///
+    /// Uses `Decimal`, not `Double`: these are money-shaped values and binary
+    /// floating point starts misrepresenting cents well before the range a
+    /// `U128` token can reach. Anything `Decimal` can't parse — or any amount
+    /// that would round to zero without being zero — is passed through at full
+    /// precision rather than displayed as a number it isn't.
+    static func compactTokenAmount(_ scaled: String, places: Int = 2) -> String {
+        guard scaled.contains("."), let value = Decimal(string: scaled) else { return scaled }
+        var input = value
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &input, places, .plain)
+        if rounded.isZero && !value.isZero { return scaled }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = places
+        formatter.maximumFractionDigits = places
+        formatter.usesGroupingSeparator = true
+        return formatter.string(from: rounded as NSDecimalNumber) ?? scaled
+    }
+}
+
 /// On-disk cache of last-known wallet state per pubkey. Lets the wallet tab
 /// show real numbers instantly on cold launch instead of `?` while the network
 /// catches up. Updated by `WalletStore` on every balance/transaction refresh.
 enum WalletCache {
     private static func balanceKey(_ pubkey: String) -> String { "wallet_balance_msats_\(pubkey)" }
     private static func txsKey(_ pubkey: String) -> String { "wallet_transactions_\(pubkey)" }
+    private static func stableKey(_ pubkey: String) -> String { "wallet_stable_balance_\(pubkey)" }
 
     static func loadBalance(for pubkey: String) -> Int64? {
         let v = UserDefaults.standard.object(forKey: balanceKey(pubkey)) as? NSNumber
@@ -92,9 +175,24 @@ enum WalletCache {
         }
     }
 
+    static func loadStableBalance(for pubkey: String) -> StableBalanceState? {
+        guard let data = UserDefaults.standard.data(forKey: stableKey(pubkey)),
+              let state = try? JSONDecoder().decode(StableBalanceState.self, from: data) else {
+            return nil
+        }
+        return state
+    }
+
+    static func saveStableBalance(_ state: StableBalanceState, for pubkey: String) {
+        if let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: stableKey(pubkey))
+        }
+    }
+
     static func clear(for pubkey: String) {
         UserDefaults.standard.removeObject(forKey: balanceKey(pubkey))
         UserDefaults.standard.removeObject(forKey: txsKey(pubkey))
+        UserDefaults.standard.removeObject(forKey: stableKey(pubkey))
     }
 }
 

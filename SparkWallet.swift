@@ -14,6 +14,10 @@ final class SparkWallet: Wallet {
     private var listenerId: String?
 
     private(set) var balanceMsats: Int64?
+    /// The wallet's USD (USDB) stablecoin balance and whether USD mode is on.
+    /// Never summed with [balanceMsats] — sats and tokens are distinct piles
+    /// of money. Nil before the first balance refresh.
+    private(set) var stableBalance: StableBalanceState?
     private(set) var isConnected: Bool = false
     /// Whether a full sync has landed this session. Until it has, a zero from
     /// the SDK means "nothing loaded yet", not "no funds".
@@ -58,6 +62,7 @@ final class SparkWallet: Wallet {
         WalletKeychain.deleteSparkMnemonic(for: pubkey)
         UserDefaults.standard.removeObject(forKey: "spark_seed_acked_\(pubkey)")
         balanceMsats = nil
+        stableBalance = nil
         isConnected = false
     }
 
@@ -144,6 +149,20 @@ final class SparkWallet: Wallet {
             var config = defaultConfig(network: Network.mainnet)
             config.apiKey = BreezConfig.apiKey
             config.lnurlDomain = BreezConfig.lnurlDomain
+            // Register USDB so the SDK can run the Bitcoin↔USDB conversions
+            // behind the opt-in USD balance. Declaring the token does nothing
+            // on its own — nothing converts until the user turns USD mode on
+            // via setStableBalanceEnabled(_:), which is what sets
+            // `UserSettings.stableBalanceActiveLabel`. Omitting
+            // defaultActiveLabel keeps it deactivated at connect.
+            config.stableBalanceConfig = StableBalanceConfig(
+                tokens: [
+                    StableBalanceToken(
+                        label: BreezConfig.usdBalanceLabel,
+                        tokenIdentifier: BreezConfig.usdTokenIdentifier
+                    )
+                ]
+            )
 
             let sdk = try await BreezSdkSpark.connect(
                 request: ConnectRequest(
@@ -231,9 +250,46 @@ final class SparkWallet: Wallet {
             guard msats != 0 || hasSyncedOnce else { return }
             balanceMsats = msats
             balanceContinuation.yield(msats)
+            await refreshStableBalance(sdk, info)
         } catch {
             emit("Balance refresh failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Read the USDB token balance and whether USD mode is on off an info
+    /// response the caller already fetched. A wallet holding no USDB reports
+    /// no token metadata at all, so the ticker falls back to the label and
+    /// decimals to USDB's six — getting that wrong would misplace the decimal
+    /// point on the first render.
+    private func refreshStableBalance(_ sdk: BreezSdk, _ info: GetInfoResponse) async {
+        let token = info.tokenBalances[BreezConfig.usdTokenIdentifier]
+        var active = false
+        if let settings = try? await sdk.getUserSettings() {
+            active = settings.stableBalanceActiveLabel == BreezConfig.usdBalanceLabel
+        }
+        stableBalance = StableBalanceState(
+            active: active,
+            ticker: token?.tokenMetadata.ticker ?? BreezConfig.usdBalanceLabel,
+            baseUnits: token.map { $0.balance.description },
+            decimals: token?.tokenMetadata.decimals ?? 6
+        )
+    }
+
+    /// Turn the USD balance on or off. The conversion itself happens inside
+    /// the Spark SDK: enabling converts eligible incoming bitcoin to USDB,
+    /// disabling converts the whole USDB balance back. Sync + refresh after
+    /// so the dashboard doesn't keep showing the pre-toggle figures — the
+    /// conversion can take seconds.
+    func setStableBalanceEnabled(_ enabled: Bool) async throws {
+        guard let sdk else { throw WalletError.notConnected }
+        try await sdk.updateUserSettings(request: UpdateUserSettingsRequest(
+            sparkPrivateModeEnabled: nil,
+            stableBalanceActiveLabel: enabled
+                ? .set(label: BreezConfig.usdBalanceLabel)
+                : .unset
+        ))
+        try await sdk.syncWallet(request: SyncWalletRequest())
+        await refreshBalance()
     }
 
     // MARK: - On-chain deposit claiming
