@@ -571,11 +571,78 @@ final class SparkWallet: Wallet {
                 )
             )
             let txs: [WalletTransaction] = response.payments.map { payment in
-                let amountSats = Int64(payment.amount.description) ?? 0
-                let feeSats = Int64(payment.fees.description) ?? 0
                 var paymentHash = payment.id
                 var description: String? = nil
                 var bitcoinTxId: String? = nil
+
+                // Direct token transfers carry their own metadata: ticker and
+                // decimals come from the token's definition, and the row's
+                // payment hash is the token tx hash — the identifier that
+                // matches what the network shows for it.
+                var tokenMetadata: TokenMetadata?
+                if case .token(let metadata, let txHash, _, _, _) = payment.details {
+                    tokenMetadata = metadata
+                    paymentHash = txHash
+                }
+
+                // One leg of a Bitcoin↔USDB conversion, flattened for the
+                // extraction helpers. A conversion row reads in the
+                // denomination of what the conversion produced: "Converted
+                // from Bitcoin" arrived as USDB (token row), "Converted from
+                // USDB" arrived as sats (plain sats row). Applying the token
+                // side to both legs — the web client's current rule — makes a
+                // USD-mode round-trip read as two identical "1.20 USDB" rows
+                // with the sats leg's outcome invisible.
+                let conversions = (payment.conversionDetails?.conversions ?? []).map { conversion in
+                    SparkConversion(
+                        from: ConversionAssetSide(from: conversion.from),
+                        to: ConversionAssetSide(from: conversion.to)
+                    )
+                }
+                let toBitcoin = conversionDestinedForBitcoin(conversions)
+                let asset = toBitcoin
+                    ? nil
+                    : extractPaymentAsset(
+                        amountBaseUnits: payment.amount.description,
+                        isTokenMethod: payment.method == .token,
+                        tokenTicker: tokenMetadata?.ticker,
+                        tokenDecimals: tokenMetadata.map { $0.decimals },
+                        conversions: conversions
+                    )
+                let hasConversion = !conversions.isEmpty
+                let amountBaseUnits = payment.amount.description
+                let amountSats: Int64
+                let feeSats: Int64
+                if asset != nil || toBitcoin {
+                    // A token row has no honest sats value; a to-bitcoin
+                    // conversion's sats come off the conversion's bitcoin leg
+                    // — payment.amount may hold the token units that left.
+                    amountSats = extractPaymentSats(
+                        amountBaseUnits: amountBaseUnits,
+                        hasAsset: asset != nil || toBitcoin,
+                        conversions: conversions
+                    )
+                    // Fees on an asset row live in [assetFee] or nowhere;
+                    // never in the sats field alongside a token amount.
+                    // Conversion rows drop them too — payment.fees' denomination
+                    // isn't stated for them.
+                    feeSats = 0
+                } else {
+                    // `.toLong()` on a u128 BigInteger wraps silently past
+                    // Int64.MAX_VALUE — the description parse returns nil
+                    // instead, which reads as zero rather than garbage.
+                    amountSats = Int64(amountBaseUnits) ?? 0
+                    feeSats = Int64(payment.fees.description) ?? 0
+                }
+                let assetFee: String?
+                if let asset, asset.feeInAsset, payment.fees.description != "0" {
+                    assetFee = StableBalanceState.scaleTokenAmount(
+                        baseUnits: payment.fees.description,
+                        decimals: asset.decimals
+                    )
+                } else {
+                    assetFee = nil
+                }
 
                 if let details = payment.details {
                     switch details {
@@ -613,6 +680,15 @@ final class SparkWallet: Wallet {
                 // don't trust that flag for on-chain rows.
                 tx.pending = !isOnchain && payment.status == .pending
                 tx.bitcoinTxId = bitcoinTxId
+                tx.assetTicker = asset?.ticker
+                tx.assetAmount = asset.map {
+                    StableBalanceState.scaleTokenAmount(
+                        baseUnits: $0.baseUnits,
+                        decimals: $0.decimals
+                    )
+                }
+                tx.assetFee = assetFee
+                tx.conversionFrom = extractConversionFrom(conversions)
                 return tx
             }
             return .success(txs)

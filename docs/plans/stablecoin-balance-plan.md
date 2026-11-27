@@ -1,8 +1,8 @@
 # Stablecoin (USDB) Balance & Transactions — Follow-up Plan
 
-Status: Phases 1–2 landed on `feat/usdb-balance` (config at connect, USDB
-balance surfaced on the dashboard and in wallet settings, USD-mode toggle
-with resume prompt). Phases 3–4 below remain. The web app is the behavioral
+Status: Phases 1–2 landed on `feat/usdb-balance`; Phase 3 (transaction asset
+mapping + conversion rendering) landed on `feat/usdb-transactions`. Phase 4
+(send conversion disclosures) remains. The web app is the behavioral
 reference; it already ships most of this behind "USD mode".
 
 ## Goal
