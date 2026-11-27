@@ -108,6 +108,13 @@ enum ContentParser {
         options: [.caseInsensitive]
     )
 
+    /// Legacy NIP-08 mentions: `#[3]` refers to the tag at index 3 of the
+    /// tags array. Pre-NIP-27 clients (Damus circa 2023, etc.) published
+    /// mentions this way; those notes still circulate and must resolve.
+    private static let legacyMentionRegex = try! NSRegularExpression(
+        pattern: #"(?<!\w)#\[(\d+)\]"#
+    )
+
     private static let emojiShortcodeRegex = try! NSRegularExpression(pattern: #":([a-zA-Z0-9_-]+):"#)
 
     /// A run of two or more newlines, tolerating spaces / tabs / stray CRs on
@@ -217,6 +224,7 @@ enum ContentParser {
         }
         return parse(
             content: content,
+            tags: tags,
             emojiMap: emojiMap,
             imetaMap: imetaMap,
             imetaUrlOrder: imetaUrlOrder,
@@ -248,6 +256,7 @@ enum ContentParser {
 
     static func parse(
         content: String,
+        tags: [[String]] = [],
         emojiMap: [String: String] = [:],
         imetaMap: [String: MediaMeta] = [:],
         imetaUrlOrder: [String] = [],
@@ -364,6 +373,24 @@ enum ContentParser {
                 // the same file (another mirror) doesn't add yet another copy.
                 seenUrls.insert(url)
                 if let metaHash { seenHashes.insert(metaHash) }
+            }
+        }
+
+        // Pass 1.5: legacy NIP-08 #[index] mentions.
+        //
+        // Notes published before NIP-27 referenced people and events by tag
+        // position — "Congratulations to #[1] #[2]…" with matching ["p", …]
+        // tags. The combined regex never matches these (the hashtag class
+        // rejects the bracket), so each #[N] sits inside a text segment;
+        // split them out here, resolving against the tags array. Out-of-range
+        // or non-p/e indices stay literal text, matching how the note reads
+        // on web clients that no longer resolve them.
+        if !tags.isEmpty {
+            segments = segments.flatMap { seg -> [ContentSegment] in
+                if case .text(let text) = seg {
+                    return splitTextForLegacyMentions(text, tags: tags)
+                }
+                return [seg]
             }
         }
 
@@ -771,6 +798,57 @@ enum ContentParser {
             result.append(.text(ns.substring(from: lastEnd)))
         }
         return result
+    }
+
+    /// Splits a text run on legacy NIP-08 `#[index]` mentions, resolving each
+    /// index against `tags`. Profile mentions render inline like npub mentions;
+    /// event mentions render like `nostr:note1…` references. Indices that don't
+    /// land on a resolvable tag stay as text.
+    private static func splitTextForLegacyMentions(_ text: String, tags: [[String]]) -> [ContentSegment] {
+        let ns = text as NSString
+        let matches = legacyMentionRegex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        if matches.isEmpty { return [.text(text)] }
+
+        var result: [ContentSegment] = []
+        var lastEnd = 0
+        var anyFound = false
+        for match in matches {
+            let indexRange = match.range(at: 1)
+            guard indexRange.location != NSNotFound,
+                  let index = Int(ns.substring(with: indexRange)),
+                  let segment = legacyMentionSegment(index: index, tags: tags) else { continue }
+            anyFound = true
+            let r = match.range
+            if r.location > lastEnd {
+                result.append(.text(ns.substring(with: NSRange(location: lastEnd, length: r.location - lastEnd))))
+            }
+            result.append(segment)
+            lastEnd = r.location + r.length
+        }
+        if !anyFound { return [.text(text)] }
+        if lastEnd < ns.length {
+            result.append(.text(ns.substring(from: lastEnd)))
+        }
+        return result
+    }
+
+    /// `tags[index]` → segment for a NIP-08 mention: `["p", pubkey, relay?]`
+    /// becomes a profile mention, `["e", id, relay?]` an event reference.
+    private static func legacyMentionSegment(index: Int, tags: [[String]]) -> ContentSegment? {
+        guard index >= 0, index < tags.count else { return nil }
+        let tag = tags[index]
+        func hints(_ tag: [String]) -> [String] {
+            tag.count > 2 && !tag[2].isEmpty ? [tag[2]] : []
+        }
+        switch tag.first {
+        case "p" where tag.count >= 2:
+            return .nostrProfile(pubkey: tag[1], relayHints: hints(tag))
+        case "e" where tag.count >= 2:
+            let author = tag.count > 4 && !tag[4].isEmpty ? tag[4] : nil
+            return .nostrNote(eventId: tag[1], relayHints: hints(tag), author: author)
+        default:
+            return nil
+        }
     }
 
     // MARK: - Image split (short free-form text)
