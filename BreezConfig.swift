@@ -17,6 +17,19 @@ enum BreezConfig {
     /// Passed to the SDK as `config.lnurlDomain` at connect time.
     static let lnurlDomain = "sats.zap.cooking"
 
+    /// Spark's USDB stablecoin — the asset behind the wallet's opt-in USD
+    /// balance. The identifier is the token's own on-network id and is the
+    /// same value the web and Android clients use, so a seed shared across
+    /// devices lands on the same token.
+    static let usdTokenIdentifier =
+        "btkn1xgrvjwey5ngcagvap2dzzvsy4uk8ua9x69k82dwvt5e7ef9drm9qztux87"
+
+    /// Label the SDK keys the stable balance under. Written into
+    /// `StableBalanceConfig` at connect and read back off
+    /// `UserSettings.stableBalanceActiveLabel` to tell whether the user
+    /// has USD mode on.
+    static let usdBalanceLabel = "USDB"
+
     /// Pinned Breez Spark SDK version, mirrored from
     /// `wisp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
     /// Update this string whenever the SDK is bumped — there's no runtime

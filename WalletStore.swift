@@ -20,6 +20,9 @@ final class WalletStore {
     /// surfaces it as an alert; `disconnect()` clears it.
     private(set) var nwcConnectionProblem: String?
     private(set) var transactions: [WalletTransaction] = []
+    /// The wallet's USD (USDB) stablecoin balance and whether USD mode is on.
+    /// Spark-only — nil for NWC or before the first balance refresh.
+    private(set) var stableBalance: StableBalanceState?
 
     /// Backup search/publish progress for the Spark relay-backup flow.
     private(set) var relayBackupSearchState: BackupSearchState = .idle
@@ -81,6 +84,7 @@ final class WalletStore {
         self.mode = WalletMode.load(for: keypair.pubkey)
         self.balanceMsats = WalletCache.loadBalance(for: keypair.pubkey)
         self.transactions = WalletCache.loadTransactions(for: keypair.pubkey)
+        self.stableBalance = WalletCache.loadStableBalance(for: keypair.pubkey)
         // NWC lud16 is embedded in the stored URI — no connection needed.
         self.lightningAddress = Self.cachedLightningAddress(for: keypair.pubkey)
     }
@@ -136,6 +140,7 @@ final class WalletStore {
         WalletMode.clear(for: currentPubkey)
         mode = nil
         balanceMsats = nil
+        stableBalance = nil
         transactions = []
         lightningAddress = nil
         nwcNodeAlias = nil
@@ -155,6 +160,7 @@ final class WalletStore {
         self.mode = WalletMode.load(for: keypair.pubkey)
         self.balanceMsats = WalletCache.loadBalance(for: keypair.pubkey)
         self.transactions = WalletCache.loadTransactions(for: keypair.pubkey)
+        self.stableBalance = WalletCache.loadStableBalance(for: keypair.pubkey)
         self.lightningAddress = Self.cachedLightningAddress(for: keypair.pubkey)
         self.nwcNodeAlias = nil
     }
@@ -471,9 +477,32 @@ final class WalletStore {
             for await msats in wallet.balanceUpdates {
                 guard let self else { return }
                 self.balanceMsats = msats
+                self.syncStableBalanceFromWallet()
                 WalletCache.saveBalance(msats, for: self.keypair.pubkey)
             }
         }
+    }
+
+    /// Mirror the Spark wallet's USDB state into the observable store and the
+    /// on-disk cache. No-op for NWC.
+    private func syncStableBalanceFromWallet() {
+        guard let spark = wallet as? SparkWallet else { return }
+        if let state = spark.stableBalance {
+            stableBalance = state
+            WalletCache.saveStableBalance(state, for: keypair.pubkey)
+        }
+    }
+
+    // MARK: - USD balance (Spark USDB)
+
+    /// Turn the USD balance on or off. The conversion happens inside the
+    /// Spark SDK and can take seconds; the balance stream and a follow-up
+    /// refresh bring the dashboard up to date afterwards.
+    func setStableBalanceEnabled(_ enabled: Bool) async throws {
+        guard let spark = wallet as? SparkWallet else { throw WalletError.notConnected }
+        try await spark.setStableBalanceEnabled(enabled)
+        syncStableBalanceFromWallet()
+        await fetchBalance()
     }
 
     // MARK: - Wallet ops (proxied)
@@ -483,6 +512,7 @@ final class WalletStore {
         guard let wallet else { return nil }
         if case .success(let msats) = await wallet.fetchBalance() {
             balanceMsats = msats
+            syncStableBalanceFromWallet()
             WalletCache.saveBalance(msats, for: keypair.pubkey)
             return msats
         }

@@ -87,6 +87,9 @@ struct WalletSettingsView: View {
     @State private var showRemoveAddressAlert = false
     @State private var showNwcDetails = false
     @State private var showSparkDetails = false
+    @State private var showUsdEnableConfirm = false
+    @State private var usdUpdating = false
+    @State private var usdError: String?
     @AppStorage private var balanceDisplayRaw: String
     @AppStorage("walletBalanceUnit") private var balanceUnitRaw: String = WalletBalanceUnit.sats.rawValue
 
@@ -121,6 +124,7 @@ struct WalletSettingsView: View {
                 transactionsSection
                 if store.mode == .spark {
                     lightningAddressSection
+                    usdBalanceSection
                     sparkInfoSection
                 }
                 if store.mode == .nwc {
@@ -247,6 +251,102 @@ struct WalletSettingsView: View {
     }
 
     // MARK: - Lightning address (Spark only)
+
+    // MARK: - USD balance
+
+    /// The opt-in USDB balance, matching the web client and Android: the
+    /// toggle drives `UserSettings.stableBalanceActiveLabel`; enabling
+    /// converts eligible incoming bitcoin to USDB, disabling converts the
+    /// whole USDB balance back. The conversion runs inside the SDK and can
+    /// take seconds, hence the progress state. Holding USDB with USD mode
+    /// off offers Resume rather than leaving the balance stranded.
+    private var usdBalanceSection: some View {
+        let state = store.stableBalance
+        let active = state?.active == true
+        return settingsGroup(header: "USD Balance") {
+            HStack(spacing: 12) {
+                Image(systemName: active ? "dollarsign.circle.fill" : "dollarsign.circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(active ? Color.wispZapColor : .secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(active ? "Stable balance active" : "USD balance")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Text(active
+                        ? "Your main balance is shown in \(state?.ticker ?? "USDB"). Bitcoin payments automatically convert from your USD balance when needed."
+                        : "Protect future wallet value from Bitcoin price movement.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let compact = state?.amountCompact, state?.hasBalance == true {
+                    Text("$\(compact) \(state?.ticker ?? "USDB")")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            Divider().opacity(0.25).padding(.leading, 50)
+
+            Button {
+                if active {
+                    updateUsdBalance(false)
+                } else {
+                    showUsdEnableConfirm = true
+                }
+            } label: {
+                HStack {
+                    Spacer()
+                    Text(usdUpdating
+                        ? "Updating…"
+                        : active ? "Use Bitcoin" : (state?.hasBalance == true ? "Resume USD" : "Enable USD"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(usdUpdating ? .secondary : Color.wispZapColor)
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(usdUpdating)
+
+            if let usdError {
+                Text(usdError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+        }
+        .alert(
+            usdError == nil && store.stableBalance?.hasBalance == true && !active
+                ? "Resume USD balance?"
+                : "Enable USD balance?",
+            isPresented: $showUsdEnableConfirm
+        ) {
+            Button("Enable USD") { updateUsdBalance(true) }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("Eligible incoming Bitcoin converts to USDB. Turning this off converts remaining USDB back to Bitcoin. Conversion rates and fees apply.")
+        }
+    }
+
+    private func updateUsdBalance(_ enabled: Bool) {
+        guard !usdUpdating else { return }
+        usdUpdating = true
+        usdError = nil
+        Task {
+            do {
+                try await store.setStableBalanceEnabled(enabled)
+            } catch {
+                usdError = "Couldn't update the USD balance. Try again in a moment."
+            }
+            usdUpdating = false
+        }
+    }
 
     private var lightningAddressSection: some View {
         settingsGroup(header: "Lightning Address") {

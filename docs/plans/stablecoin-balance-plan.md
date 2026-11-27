@@ -1,8 +1,9 @@
 # Stablecoin (USDB) Balance & Transactions — Follow-up Plan
 
-Status: proposal, not started. Depends on the Breez SDK 0.28.1 bump (all three
-apps) landing first. The web app is the behavioral reference; it already ships
-most of this behind "USD mode".
+Status: Phases 1–2 landed on `feat/usdb-balance` (config at connect, USDB
+balance surfaced on the dashboard and in wallet settings, USD-mode toggle
+with resume prompt). Phases 3–4 below remain. The web app is the behavioral
+reference; it already ships most of this behind "USD mode".
 
 ## Goal
 
