@@ -27,25 +27,51 @@ struct WalletTransactionRow: View {
                 ? ZapSender.sender(forPaymentHash: tx.paymentHash)
                 : ZapSender.recipient(forPaymentHash: tx.paymentHash))
         let profile = counterpartyPubkey.flatMap { ProfileRepository.shared.get($0) }
-        let amountColor: Color = isIncoming ? Color.wispRepostColor : .red.opacity(0.85)
+        // Green means money arrived and red means it left. A conversion is
+        // neither — nothing entered or left the wallet, it changed shape
+        // inside it — so it renders neutral and signless: each leg shows what
+        // the conversion produced, in the destination's denomination.
+        let isConversion = tx.isConversion
+        let amountColor: Color = isConversion
+            ? .primary
+            : (isIncoming ? Color.wispRepostColor : .red.opacity(0.85))
+        let sign = isConversion ? "" : (isIncoming ? "+" : "-")
         let sats = abs(tx.amountMsats) / 1000
         let feeSats = tx.feeMsats / 1000
-        let sign = isIncoming ? "+" : "-"
         let hidden = displayMode == .hidden
         // `walletFiat` returns nil until the rate cache has loaded, so the
         // two-Text sats layout stays intact while the rate is in flight.
-        let fiatAmount: String? = displayMode == .fiat
+        // A token row has no sats value, so there is nothing to convert —
+        // the fiat rate is sats-to-currency.
+        let fiatAmount: String? = (displayMode == .fiat && !tx.isTokenTransfer)
             ? CurrencyFormatter.walletFiat(sats: sats)
             : nil
-        let fiatFee: String? = (displayMode == .fiat && feeSats > 0)
+        let fiatFee: String? = (displayMode == .fiat && !tx.isTokenTransfer && feeSats > 0)
             ? CurrencyFormatter.walletFiat(sats: feeSats)
             : nil
+        // A conversion has no counterparty and rarely a description, so its
+        // label sits where "Received" / "Sent" would — which is exactly what
+        // read as money arriving from someone.
+        let rowLabel = profile?.displayString
+            ?? (tx.description?.isEmpty == false ? tx.description! : nil)
+            ?? tx.conversionFrom.map { "Converted from \($0)" }
+            ?? (isIncoming ? "Received" : "Sent")
 
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 ZStack {
                     if let profile {
                         CachedAvatarView(url: profile.picture, size: 40)
+                    } else if isConversion {
+                        // Swap glyph in the wallet accent, not a green
+                        // down-arrow: nothing entered the wallet, it changed
+                        // shape inside it.
+                        Circle()
+                            .fill(Color.wispZapColor.opacity(0.18))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Color.wispZapColor)
                     } else {
                         Circle()
                             .fill((isIncoming ? Color.wispRepostColor : Color.red).opacity(0.18))
@@ -56,7 +82,7 @@ struct WalletTransactionRow: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(profile?.displayString ?? (tx.description?.isEmpty == false ? tx.description! : (isIncoming ? "Received" : "Sent")))
+                    Text(rowLabel)
                         .font(.subheadline.weight(profile != nil ? .semibold : .regular))
                         .lineLimit(1)
                     Text(relativeTime(from: Int(tx.settledAt ?? tx.createdAt)))
@@ -69,6 +95,19 @@ struct WalletTransactionRow: View {
                         Text("\(sign)•••")
                             .font(.subheadline.weight(.semibold).monospacedDigit())
                             .foregroundStyle(amountColor)
+                    } else if let assetTicker = tx.assetTicker {
+                        // In the asset's own denomination — no fiat rate is
+                        // applied: the rate converts satoshis, so applying it
+                        // to a token amount would only produce a second
+                        // wrong number.
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text("\(sign)\(tx.assetAmountCompact ?? "?")")
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(amountColor)
+                            Text(assetTicker)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     } else if let fiatAmount {
                         Text("\(sign)\(fiatAmount)")
                             .font(.subheadline.weight(.semibold).monospacedDigit())
@@ -83,7 +122,11 @@ struct WalletTransactionRow: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    if !hidden, !isIncoming, feeSats > 0 {
+                    if !hidden, !isIncoming, let assetFee = tx.assetFee, let ticker = tx.assetTicker {
+                        Text("Fee: \(assetFee) \(ticker)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if !hidden, !isIncoming, feeSats > 0 {
                         if let fiatFee {
                             Text("Fee: \(fiatFee)")
                                 .font(.caption2)
@@ -150,10 +193,28 @@ private struct TransactionDetailPanel: View {
 
         VStack(alignment: .leading, spacing: 10) {
             TxDetailRow(label: "Status", value: tx.settledAt != nil ? "Completed" : "Pending")
-            TxDetailRow(label: "Type", value: tx.isOnchain ? "On-chain" : "Lightning")
-            TxDetailRow(label: "Amount", value: "\(CurrencyFormatter.formatNumber(sats)) sats")
-            if feeSats > 0 {
-                TxDetailRow(label: "Network fee", value: "\(CurrencyFormatter.formatNumber(feeSats)) sats")
+            let assetTicker = tx.assetTicker
+            // The conversion label replaces the plain rail type: a leg of a
+            // Bitcoin↔USDB swap is neither On-chain nor Lightning to the
+            // person reading it — what matters is what was swapped.
+            TxDetailRow(
+                label: "Type",
+                value: tx.conversionFrom.map { "Converted from \($0)" }
+                    ?? (assetTicker != nil ? assetTicker! : (tx.isOnchain ? "On-chain" : "Lightning"))
+            )
+            if assetTicker != nil {
+                // Full precision here — the row rounds to two places for
+                // legibility, but the detail view is where every digit
+                // belongs.
+                TxDetailRow(label: "Amount", value: "\(tx.assetAmount ?? "?") \(assetTicker!)")
+                if let assetFee = tx.assetFee {
+                    TxDetailRow(label: "Fee", value: "\(assetFee) \(assetTicker!)")
+                }
+            } else {
+                TxDetailRow(label: "Amount", value: "\(CurrencyFormatter.formatNumber(sats)) sats")
+                if feeSats > 0 {
+                    TxDetailRow(label: "Network fee", value: "\(CurrencyFormatter.formatNumber(feeSats)) sats")
+                }
             }
             TxDetailRow(label: "Date", value: fullDate)
             if let note {

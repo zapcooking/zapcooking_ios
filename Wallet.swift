@@ -47,6 +47,47 @@ struct WalletTransaction: Identifiable, Codable {
     /// Real Bitcoin txid for on-chain deposits/withdrawals. Set from
     /// `PaymentDetails.deposit(txId:)` / `.withdraw(txId:)` in listTransactions.
     var bitcoinTxId: String?
+    /// Ticker of the asset this row moved when it wasn't bitcoin — e.g.
+    /// "USDB". Nil for every sats payment, which is the overwhelming
+    /// majority.
+    ///
+    /// Spark wallets hold tokens alongside sats, and `Payment.amount` is
+    /// documented as "satoshis **or token base units**". When this is set the
+    /// row is rendered in the asset's own denomination and no fiat rate is
+    /// applied — the rate converts satoshis, so applying it to a token amount
+    /// would only produce a second wrong number. [amountMsats] stays strictly
+    /// satoshi-denominated either way: it holds the bitcoin leg of a
+    /// conversion, and zero for a pure token transfer, which has no bitcoin
+    /// leg. [feeMsats] is zero on any asset row.
+    var assetTicker: String? = nil
+    /// Amount already scaled by the asset's decimals, at full precision.
+    /// Kept as a string because token base units are `U128` and can exceed
+    /// `Int64`. Detail views show this; rows show [assetAmountCompact].
+    var assetAmount: String? = nil
+    /// Fee in the same asset, scaled the same way. Nil when the fee is zero
+    /// or is not denominated in this asset.
+    var assetFee: String? = nil
+    /// Asset a conversion started from — "Bitcoin" or "USDB" — when this row
+    /// is one leg of a Bitcoin↔USDB swap rather than money entering or
+    /// leaving the wallet.
+    ///
+    /// Drives the "Converted from Bitcoin" label in place of Received/Sent,
+    /// and suppresses the +/- sign: a conversion is neither a credit nor a
+    /// debit, and both of its legs land in the history.
+    var conversionFrom: String? = nil
+
+    /// True when this row moved something other than bitcoin.
+    var isTokenTransfer: Bool { assetTicker != nil }
+
+    /// True when this row is one leg of a Bitcoin↔USDB conversion.
+    var isConversion: Bool { conversionFrom != nil }
+
+    /// Row-sized amount: two decimal places, full precision kept in
+    /// [assetAmount]. Dust that would round away to "0.00" keeps its full
+    /// precision instead.
+    var assetAmountCompact: String? {
+        assetAmount.map { StableBalanceState.compactTokenAmount($0) }
+    }
 
     /// Spark surfaces on-chain transactions with a UUID-formatted ID (contains hyphens)
     /// while Lightning payment hashes are always 64-char hex. Also true when a

@@ -470,7 +470,13 @@ final class WalletStore {
         }
         paymentTask = Task { [weak self] in
             for await _ in wallet.paymentReceived {
-                _ = await self?.fetchBalance()
+                guard let self else { return }
+                // Web and Android reload history alongside the balance on
+                // payment events; a stable-balance receive renders as a
+                // conversion whose token side settles a beat after the
+                // payment itself, so the list must follow the balance here.
+                _ = await self.fetchBalance()
+                await self.refreshTransactions()
             }
         }
         balanceTask = Task { [weak self] in
@@ -479,6 +485,10 @@ final class WalletStore {
                 self.balanceMsats = msats
                 self.syncStableBalanceFromWallet()
                 WalletCache.saveBalance(msats, for: self.keypair.pubkey)
+                // `.synced` drives this stream too — the moment the conversion
+                // behind a stable-balance receive settles, the row lands
+                // without a manual refresh.
+                await self.refreshTransactions()
             }
         }
     }
