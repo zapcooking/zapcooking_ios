@@ -534,11 +534,23 @@ struct WalletView: View {
             Divider().opacity(0.15)
 
             HStack {
-                Text("Recent")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+                HStack(spacing: 6) {
+                    Text("Recent")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    // The payment list trails the balance while the SDK's
+                    // first sync fills it — say so instead of silently
+                    // showing history that's about to change.
+                    if store.isSyncing {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Syncing…")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 Spacer()
                 Button {
                     showAllTransactions = true
