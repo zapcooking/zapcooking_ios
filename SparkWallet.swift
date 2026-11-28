@@ -4,6 +4,16 @@ import BigNumber
 import CryptoKit
 import os
 
+/// What the confirm step shows before a payment fires: the fee, and whether
+/// Spark will convert USDB to Bitcoin to fund it. Phase 4 of the stablecoin
+/// plan — the SDK auto-converts on send when sats are short; the disclosure
+/// exists so that conversion is confirmed, not silent.
+struct SendPaymentPreview: Equatable {
+    let feeSats: UInt64
+    /// True when Spark will convert USDB → BTC to fund this payment.
+    let willConvert: Bool
+}
+
 /// Bridges the SDK's buffered log lines into the unified log so connect
 /// failures carry their real cause instead of a terse one-liner. Registered
 /// via `initLogging` before the first connect; lives at file scope because
@@ -551,6 +561,68 @@ final class SparkWallet: Wallet {
     /// surfaces full gRPC envelopes including internal field names and byte
     /// arrays — exposing those in the Send sheet is hostile. Falls back to
     /// `localizedDescription` for unknown errors.
+    // MARK: - Payment preview (phase 4)
+
+    /// Run the SDK's prepare step without paying, so the send sheet can
+    /// disclose the fee and a USDB→Bitcoin conversion before the user
+    /// commits. Handles bolt11 invoices and LNURL-pay/lightning addresses.
+    func preparePayment(input: String, amountSats: UInt64?) async -> Result<SendPaymentPreview, WalletError> {
+        guard let sdk else { return .failure(.notConnected) }
+        guard let parsed = await parseInput(input) else {
+            return await prepareInvoicePayment(bolt11: input)
+        }
+        switch parsed {
+        case .bolt11Invoice:
+            return await prepareInvoicePayment(bolt11: input)
+        case .lnurlPay(let details):
+            return await prepareLnurlPayment(payRequest: details, amountSats: amountSats)
+        case .lightningAddress(let details):
+            return await prepareLnurlPayment(payRequest: details.payRequest, amountSats: amountSats)
+        default:
+            return await prepareInvoicePayment(bolt11: input)
+        }
+    }
+
+    private func prepareInvoicePayment(bolt11: String) async -> Result<SendPaymentPreview, WalletError> {
+        guard let sdk else { return .failure(.notConnected) }
+        do {
+            let prepare = try await sdk.prepareSendPayment(request: PrepareSendPaymentRequest(
+                paymentRequest: .input(input: bolt11),
+                amount: nil,
+                tokenIdentifier: nil,
+                conversionOptions: nil,
+                feePolicy: nil
+            ))
+            var feeSats: UInt64 = 0
+            if case .bolt11Invoice(_, let sparkFee, let lightningFee) = prepare.paymentMethod {
+                feeSats = (sparkFee ?? 0) + lightningFee
+            }
+            return .success(SendPaymentPreview(
+                feeSats: feeSats,
+                willConvert: prepare.conversionEstimate != nil
+            ))
+        } catch {
+            return .failure(.other(Self.friendlyPayError(error)))
+        }
+    }
+
+    private func prepareLnurlPayment(payRequest: LnurlPayRequestDetails, amountSats: UInt64?) async -> Result<SendPaymentPreview, WalletError> {
+        guard let sdk else { return .failure(.notConnected) }
+        guard let amountSats else { return .failure(.other("Enter an amount first")) }
+        do {
+            let prepare = try await sdk.prepareLnurlPay(request: PrepareLnurlPayRequest(
+                amount: BInt(Int64(clamping: amountSats)),
+                payRequest: payRequest
+            ))
+            return .success(SendPaymentPreview(
+                feeSats: prepare.feeSats,
+                willConvert: prepare.conversionEstimate != nil
+            ))
+        } catch {
+            return .failure(.other(Self.friendlyPayError(error)))
+        }
+    }
+
     private static func friendlyPayError(_ error: Error) -> String {
         let raw = error.localizedDescription
         let lower = raw.lowercased()

@@ -691,6 +691,10 @@ struct SendInvoiceSheet: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var galleryError: String?
     @State private var detectTask: Task<Void, Never>?
+    /// Phase 4: set after the SDK's prepare step reports a USDB→Bitcoin
+    /// conversion for this payment — the sheet then requires a second,
+    /// informed tap before firing.
+    @State private var conversionPreview: SendPaymentPreview?
 
     private var decoded: Bolt11.DecodedInvoice? { Bolt11.decode(invoice) }
     private var trimmedInvoice: String { invoice.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -821,7 +825,12 @@ struct SendInvoiceSheet: View {
                     }
                 }
                 .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
-                .onChange(of: invoice) { _, _ in scheduleDetect() }
+                .onChange(of: invoice) { _, _ in
+                    scheduleDetect()
+                    // A stale conversion estimate describes the previous
+                    // payment — drop it when the input changes.
+                    conversionPreview = nil
+                }
                 .onChange(of: selectedPhoto) { _, item in
                     guard let item else { return }
                     Task { await decodeQRFromPhoto(item) }
@@ -921,13 +930,38 @@ struct SendInvoiceSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // Phase 4 disclosure: the SDK's prepare step says this
+                // payment will convert USDB to fund itself. That conversion
+                // costs a rate and a fee Spark sets at settlement, so it is
+                // confirmed rather than silent.
+                if let preview = conversionPreview {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label {
+                            Text("This payment may convert USDB to Bitcoin. The final rate and conversion fee are determined by Spark before settlement.")
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        } icon: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundStyle(Color.wispZapColor)
+                        }
+                        if preview.feeSats > 0 {
+                            Text("Fee: \(CurrencyFormatter.formatNumber(Int64(preview.feeSats))) sats")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                }
+
                 // Pay / Next button
                 Button {
                     Task { await pay() }
                 } label: {
                     Group {
                         if inFlight { ProgressView().tint(.white) } else {
-                            Text(buttonLabel)
+                            Text(conversionPreview != nil ? "Confirm & Pay" : buttonLabel)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                         }
@@ -963,7 +997,31 @@ struct SendInvoiceSheet: View {
     }
 
     private func pay() async {
+        // Phase 4: before the first pay attempt, run the SDK's prepare step
+        // so a USDB→Bitcoin conversion is disclosed and confirmed rather
+        // than happening silently. NWC wallets skip prepare (unsupported)
+        // and pay as before; prepare errors surface as status text.
+        if conversionPreview == nil, store.mode == .spark {
+            inFlight = true
+            var isBolt11 = false
+            if case .bolt11 = inputType { isBolt11 = true }
+            let input = isBolt11 ? normalizeInvoice(trimmedInvoice) : trimmedInvoice
+            let prepareResult = await store.preparePayment(
+                input: input,
+                amountSats: amountSats.map { UInt64($0) }
+            )
+            inFlight = false
+            switch prepareResult {
+            case .success(.some(let preview)) where preview.willConvert:
+                conversionPreview = preview
+                return
+            default:
+                break
+            }
+        }
+
         inFlight = true; defer { inFlight = false }
+        conversionPreview = nil
         status = nil
         let input = trimmedInvoice
         let result: Result<String, WalletError>

@@ -534,6 +534,16 @@ final class WalletStore {
         return await wallet.payInvoice(bolt11)
     }
 
+    /// Phase 4: run the SDK's prepare step without paying so the send sheet
+    /// can disclose a USDB→Bitcoin conversion and the fee before commit.
+    /// Success(nil) = prepare unsupported for this wallet type (NWC) — the
+    /// caller pays directly.
+    func preparePayment(input: String, amountSats: UInt64?) async -> Result<SendPaymentPreview?, WalletError> {
+        guard let spark = wallet as? SparkWallet else { return .success(nil) }
+        let result = await spark.preparePayment(input: input, amountSats: amountSats)
+        return result.map { Optional($0) }
+    }
+
     /// Detect whether the pasted string is a lightning address, LNURL, or bolt11 invoice.
     func detectInputType(_ input: String) async -> WalletInputType {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
