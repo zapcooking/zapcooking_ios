@@ -39,7 +39,7 @@ struct WalletTransactionRow: View {
         let amountColor: Color = isSendConversion
             ? .red.opacity(0.85)
             : (isConversion
-                ? .primary
+                ? .conversionSky
                 : (isIncoming ? Color.wispRepostColor : .red.opacity(0.85)))
         let sign = isSendConversion ? "-" : (isConversion ? "" : (isIncoming ? "+" : "-"))
         let sats = abs(tx.amountMsats) / 1000
