@@ -590,12 +590,28 @@ private struct SidebarMiniWalletView: View {
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.primary)
         } else {
-            balanceLine
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.25), value: store.balanceMsats)
+            VStack(alignment: .leading, spacing: 2) {
+                balanceLine
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.25), value: store.balanceMsats)
+                // The USDB a USD-mode wallet holds rides under the sats —
+                // the stripe would otherwise read as the whole wallet while
+                // most of its value sits in the token. Hidden with the
+                // balance itself.
+                if displayMode != .hidden,
+                   let stable = store.stableBalance,
+                   let compact = stable.amountCompact,
+                   stable.hasBalance {
+                    Text("$\(compact) \(stable.ticker)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(stable.active ? Color.wispZapColor : .secondary)
+                        .lineLimit(1)
+                        .animation(.easeInOut(duration: 0.25), value: stable.amountCompact)
+                }
+            }
         }
     }
 

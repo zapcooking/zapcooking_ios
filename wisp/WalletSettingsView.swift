@@ -264,26 +264,30 @@ struct WalletSettingsView: View {
         let state = store.stableBalance
         let active = state?.active == true
         return settingsGroup(header: "USD Balance") {
+            // One quiet row — title + status caption left, amount right —
+            // mirroring the Lightning Address group's structure.
             HStack(spacing: 12) {
                 Image(systemName: active ? "dollarsign.circle.fill" : "dollarsign.circle")
                     .font(.system(size: 15))
                     .foregroundStyle(active ? Color.wispZapColor : .secondary)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(active ? "Stable balance active" : "USD balance")
+                    Text("USD balance")
                         .font(.subheadline)
                         .foregroundStyle(.primary)
                     Text(active
-                        ? "Your main balance is shown in \(state?.ticker ?? "USDB"). Bitcoin payments automatically convert from your USD balance when needed."
+                        ? "Incoming Bitcoin converts automatically"
                         : "Protect future wallet value from Bitcoin price movement.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 if let compact = state?.amountCompact, state?.hasBalance == true {
                     Text("$\(compact) \(state?.ticker ?? "USDB")")
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
                 }
             }
             .padding(.horizontal, 16)
