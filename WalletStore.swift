@@ -23,6 +23,11 @@ final class WalletStore {
     /// The wallet's USD (USDB) stablecoin balance and whether USD mode is on.
     /// Spark-only — nil for NWC or before the first balance refresh.
     private(set) var stableBalance: StableBalanceState?
+    /// True from a Spark connect until the first sync lands: the payment
+    /// list trails the balance while the SDK fills its local table, and the
+    /// history surfaces read this to say "still counting" instead of
+    /// silently showing rows that are about to change.
+    private(set) var isSyncing: Bool = false
 
     /// Backup search/publish progress for the Spark relay-backup flow.
     private(set) var relayBackupSearchState: BackupSearchState = .idle
@@ -141,6 +146,7 @@ final class WalletStore {
         mode = nil
         balanceMsats = nil
         stableBalance = nil
+        isSyncing = false
         transactions = []
         lightningAddress = nil
         nwcNodeAlias = nil
@@ -328,8 +334,12 @@ final class WalletStore {
         wireUp(newWallet)
         mode = newMode
         WalletMode.save(newMode, for: keypair.pubkey)
+        // A Spark connect's payment list trails its first sync — surface the
+        // catch-up instead of silently showing stale history.
+        isSyncing = newMode == .spark
         await newWallet.connect()
         isConnected = newWallet.isConnected
+        if !isConnected { isSyncing = false }
         // Same liveness proof as `connectNwc`, on the launch-reconnect path.
         // Unlike the connect flow, the session stays wired so the dashboard
         // keeps rendering cached values — the alert tells the user why
@@ -407,8 +417,10 @@ final class WalletStore {
         wireUp(spark)
         mode = .spark
         WalletMode.save(.spark, for: keypair.pubkey)
+        isSyncing = true
         await spark.connect()
         isConnected = spark.isConnected
+        if !isConnected { isSyncing = false }
         if isConnected {
             Task { _ = await self.fetchBalance() }
             Task { await self.refreshTransactions() }
@@ -483,6 +495,9 @@ final class WalletStore {
             for await msats in wallet.balanceUpdates {
                 guard let self else { return }
                 self.balanceMsats = msats
+                // The first yield after a Spark connect is the sync landing —
+                // the payment list is now trustworthy.
+                self.isSyncing = false
                 self.syncStableBalanceFromWallet()
                 WalletCache.saveBalance(msats, for: self.keypair.pubkey)
                 // `.synced` drives this stream too — the moment the conversion
@@ -532,6 +547,16 @@ final class WalletStore {
     func payInvoice(_ bolt11: String) async -> Result<String, WalletError> {
         guard let wallet else { return .failure(.notConnected) }
         return await wallet.payInvoice(bolt11)
+    }
+
+    /// Phase 4: run the SDK's prepare step without paying so the send sheet
+    /// can disclose a USDB→Bitcoin conversion and the fee before commit.
+    /// Success(nil) = prepare unsupported for this wallet type (NWC) — the
+    /// caller pays directly.
+    func preparePayment(input: String, amountSats: UInt64?) async -> Result<SendPaymentPreview?, WalletError> {
+        guard let spark = wallet as? SparkWallet else { return .success(nil) }
+        let result = await spark.preparePayment(input: input, amountSats: amountSats)
+        return result.map { Optional($0) }
     }
 
     /// Detect whether the pasted string is a lightning address, LNURL, or bolt11 invoice.

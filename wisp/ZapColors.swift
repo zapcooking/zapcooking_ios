@@ -70,4 +70,11 @@ nonisolated extension Color {
     static var textSecondary: Color { .secondary }
     /// Neutral hairline, the palette outline.
     static var borderSubtle: Color { ResolvedThemeProxy.current.palette.outline }
+
+    /// Conversion accent — Tailwind sky-400, fixed, matching the Android
+    /// wallet's `ConversionSky` and the web history rows. Deliberately
+    /// outside the brand pair and away from the green/red of received/sent:
+    /// a Bitcoin↔USDB conversion is neither money arriving nor money
+    /// leaving, and colouring it like either one misreads.
+    static var conversionSky: Color { Color(red: 56 / 255, green: 189 / 255, blue: 248 / 255) }
 }

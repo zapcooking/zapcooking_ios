@@ -344,8 +344,17 @@ struct WalletView: View {
         // their funds arrived. A cached balance from a previous session is a
         // real figure and keeps rendering (pulsing) while the fresh one loads.
         let awaitingBalance = store.mode != nil && store.balanceMsats == nil
+        // USD mode active with a USDB balance: the token IS the main balance
+        // — the settings card promises it, and a $-figure rendered under the
+        // sats number would read as a fiat valuation of those sats (631 sats
+        // are not worth $18.61). So the USDB leads and the sats step down;
+        // the tap-cycle is suspended while it leads, since cycling into a
+        // fiat line recreates the same misread.
+        let stable = store.stableBalance
+        let usdPrimary = stable?.active == true && stable?.hasBalance == true
         return VStack(spacing: 14) {
             Button {
+                guard !usdPrimary else { return }
                 withAnimation(.easeInOut(duration: 0.15)) {
                     balanceDisplayRaw = mode.next.rawValue
                 }
@@ -363,6 +372,12 @@ struct WalletView: View {
                         Text("* * * * *")
                             .font(.system(size: 52, weight: .semibold, design: .rounded))
                             .foregroundStyle(.primary)
+                    } else if usdPrimary, let stable, let compact = stable.amountCompact {
+                        // The USDB balance leads when USD mode is on.
+                        Text("$\(compact)")
+                            .font(.system(size: 52, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText())
                     } else if let fiatBalance {
                         Text(fiatBalance)
                             .font(.system(size: 52, weight: .semibold, design: .rounded))
@@ -396,21 +411,27 @@ struct WalletView: View {
                         && !awaitingBalance
                         && fiatBalance == nil
                         && !unit.unitLabel.isEmpty
-                    Text(showUnitLabel ? unit.unitLabel : " ")
+                    Text(usdPrimary ? stable?.ticker ?? "USDB" : (showUnitLabel ? unit.unitLabel : " "))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .opacity(showUnitLabel ? 1 : 0)
-                    // The opt-in USDB balance rides under the sats figure —
-                    // the two are distinct piles of money and are never
-                    // summed. Hidden with the balance itself.
-                    if !awaitingBalance && mode != .hidden,
-                       let stable = store.stableBalance,
-                       let compact = stable.amountCompact,
-                       stable.hasBalance {
-                        Text("$\(compact) \(stable.ticker)")
-                            .font(.callout.weight(.medium).monospacedDigit())
-                            .foregroundStyle(stable.active ? Color.wispZapColor : .secondary)
-                            .animation(.easeInOut(duration: 0.25), value: stable.amountCompact)
+                        .opacity(showUnitLabel || usdPrimary ? 1 : 0)
+                    // The two balances are distinct piles of money and are
+                    // never summed. When USD mode leads, the sats step down
+                    // under the token; when it's off but USDB is held, the
+                    // wording can't read as a valuation of the sats above it
+                    // ("$18.61 in USDB", not "$18.61 USDB").
+                    if !awaitingBalance && mode != .hidden {
+                        if usdPrimary {
+                            Text("\(CurrencyFormatter.formatNumber(sats)) sats available")
+                                .font(.callout.weight(.medium).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        } else if let stable, let compact = stable.amountCompact,
+                                  stable.hasBalance {
+                            Text("$\(compact) in \(stable.ticker)")
+                                .font(.callout.weight(.medium).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .animation(.easeInOut(duration: 0.25), value: compact)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -513,11 +534,23 @@ struct WalletView: View {
             Divider().opacity(0.15)
 
             HStack {
-                Text("Recent")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+                HStack(spacing: 6) {
+                    Text("Recent")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    // The payment list trails the balance while the SDK's
+                    // first sync fills it — say so instead of silently
+                    // showing history that's about to change.
+                    if store.isSyncing {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Syncing…")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 Spacer()
                 Button {
                     showAllTransactions = true
@@ -691,6 +724,10 @@ struct SendInvoiceSheet: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var galleryError: String?
     @State private var detectTask: Task<Void, Never>?
+    /// Phase 4: set after the SDK's prepare step reports a USDB→Bitcoin
+    /// conversion for this payment — the sheet then requires a second,
+    /// informed tap before firing.
+    @State private var conversionPreview: SendPaymentPreview?
 
     private var decoded: Bolt11.DecodedInvoice? { Bolt11.decode(invoice) }
     private var trimmedInvoice: String { invoice.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -821,7 +858,12 @@ struct SendInvoiceSheet: View {
                     }
                 }
                 .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
-                .onChange(of: invoice) { _, _ in scheduleDetect() }
+                .onChange(of: invoice) { _, _ in
+                    scheduleDetect()
+                    // A stale conversion estimate describes the previous
+                    // payment — drop it when the input changes.
+                    conversionPreview = nil
+                }
                 .onChange(of: selectedPhoto) { _, item in
                     guard let item else { return }
                     Task { await decodeQRFromPhoto(item) }
@@ -921,13 +963,38 @@ struct SendInvoiceSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // Phase 4 disclosure: the SDK's prepare step says this
+                // payment will convert USDB to fund itself. That conversion
+                // costs a rate and a fee Spark sets at settlement, so it is
+                // confirmed rather than silent.
+                if let preview = conversionPreview {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label {
+                            Text("This payment may convert USDB to Bitcoin. The final rate and conversion fee are determined by Spark before settlement.")
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        } icon: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundStyle(Color.wispZapColor)
+                        }
+                        if preview.feeSats > 0 {
+                            Text("Fee: \(CurrencyFormatter.formatNumber(Int64(preview.feeSats))) sats")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.wispSurfaceVariant.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                }
+
                 // Pay / Next button
                 Button {
                     Task { await pay() }
                 } label: {
                     Group {
                         if inFlight { ProgressView().tint(.white) } else {
-                            Text(buttonLabel)
+                            Text(conversionPreview != nil ? "Confirm & Pay" : buttonLabel)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                         }
@@ -963,7 +1030,31 @@ struct SendInvoiceSheet: View {
     }
 
     private func pay() async {
+        // Phase 4: before the first pay attempt, run the SDK's prepare step
+        // so a USDB→Bitcoin conversion is disclosed and confirmed rather
+        // than happening silently. NWC wallets skip prepare (unsupported)
+        // and pay as before; prepare errors surface as status text.
+        if conversionPreview == nil, store.mode == .spark {
+            inFlight = true
+            var isBolt11 = false
+            if case .bolt11 = inputType { isBolt11 = true }
+            let input = isBolt11 ? normalizeInvoice(trimmedInvoice) : trimmedInvoice
+            let prepareResult = await store.preparePayment(
+                input: input,
+                amountSats: amountSats.map { UInt64($0) }
+            )
+            inFlight = false
+            switch prepareResult {
+            case .success(.some(let preview)) where preview.willConvert:
+                conversionPreview = preview
+                return
+            default:
+                break
+            }
+        }
+
         inFlight = true; defer { inFlight = false }
+        conversionPreview = nil
         status = nil
         let input = trimmedInvoice
         let result: Result<String, WalletError>

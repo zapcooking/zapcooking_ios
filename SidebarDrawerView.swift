@@ -589,14 +589,53 @@ private struct SidebarMiniWalletView: View {
             Text("Set up wallet")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.primary)
+        } else if usdPrimary, displayMode != .hidden,
+                  let stable = store.stableBalance,
+                  let compact = stable.amountCompact {
+            // USD mode leads here too — same hierarchy as the dashboard, so
+            // the stripe can't read "$18.61" as what the 631 sats are worth.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("$\(compact) \(stable.ticker)")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                if let msats = store.balanceMsats {
+                    Text("\(numberString(msats / 1000)) sats available")
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         } else {
-            balanceLine
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.25), value: store.balanceMsats)
+            VStack(alignment: .leading, spacing: 2) {
+                balanceLine
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.25), value: store.balanceMsats)
+                // USDB held with USD mode off rides under the sats, worded so
+                // it can't read as a valuation of them. Hidden with the
+                // balance itself.
+                if displayMode != .hidden, !usdPrimary,
+                   let stable = store.stableBalance,
+                   let compact = stable.amountCompact,
+                   stable.hasBalance {
+                    Text("$\(compact) in \(stable.ticker)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .animation(.easeInOut(duration: 0.25), value: compact)
+                }
+            }
         }
+    }
+
+    /// USD mode active with a USDB balance: the token is the main balance —
+    /// mirrors the dashboard's hierarchy.
+    private var usdPrimary: Bool {
+        store.stableBalance?.active == true && store.stableBalance?.hasBalance == true
     }
 
     /// One `Text` so VoiceOver reads the figure as a unit. Compacts long

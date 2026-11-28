@@ -27,15 +27,21 @@ struct WalletTransactionRow: View {
                 ? ZapSender.sender(forPaymentHash: tx.paymentHash)
                 : ZapSender.recipient(forPaymentHash: tx.paymentHash))
         let profile = counterpartyPubkey.flatMap { ProfileRepository.shared.get($0) }
-        // Green means money arrived and red means it left. A conversion is
-        // neither — nothing entered or left the wallet, it changed shape
-        // inside it — so it renders neutral and signless: each leg shows what
-        // the conversion produced, in the destination's denomination.
+        // Green means money arrived and red means it left. A conversion that
+        // merely reshaped the balance (USD-mode toggles, stable-balance
+        // receives) is neither — it renders neutral and signless. But a
+        // conversion that funded a send DID move money out: the USDB left and
+        // the payee got sats, so it renders as an outgoing payment. Each row
+        // still shows what the conversion produced, in the destination's
+        // denomination.
         let isConversion = tx.isConversion
-        let amountColor: Color = isConversion
-            ? .primary
-            : (isIncoming ? Color.wispRepostColor : .red.opacity(0.85))
-        let sign = isConversion ? "" : (isIncoming ? "+" : "-")
+        let isSendConversion = isConversion && tx.type == .outgoing
+        let amountColor: Color = isSendConversion
+            ? .red.opacity(0.85)
+            : (isConversion
+                ? .conversionSky
+                : (isIncoming ? Color.wispRepostColor : .red.opacity(0.85)))
+        let sign = isSendConversion ? "-" : (isConversion ? "" : (isIncoming ? "+" : "-"))
         let sats = abs(tx.amountMsats) / 1000
         let feeSats = tx.feeMsats / 1000
         let hidden = displayMode == .hidden
@@ -49,29 +55,28 @@ struct WalletTransactionRow: View {
         let fiatFee: String? = (displayMode == .fiat && !tx.isTokenTransfer && feeSats > 0)
             ? CurrencyFormatter.walletFiat(sats: feeSats)
             : nil
-        // A conversion has no counterparty and rarely a description, so its
-        // label sits where "Received" / "Sent" would — which is exactly what
-        // read as money arriving from someone.
-        let rowLabel = profile?.displayString
-            ?? (tx.description?.isEmpty == false ? tx.description! : nil)
-            ?? tx.conversionFrom.map { "Converted from \($0)" }
-            ?? (isIncoming ? "Received" : "Sent")
+        let descriptionLabel: String? = (tx.description?.isEmpty == false) ? tx.description : nil
+        let fallbackLabel: String = isSendConversion
+            ? "Sent"
+            : (tx.conversionFrom.map { "Converted from \($0)" } ?? (isIncoming ? "Received" : "Sent"))
+        let rowLabel = profile?.displayString ?? descriptionLabel ?? fallbackLabel
 
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 ZStack {
                     if let profile {
                         CachedAvatarView(url: profile.picture, size: 40)
-                    } else if isConversion {
-                        // Swap glyph in the wallet accent, not a green
-                        // down-arrow: nothing entered the wallet, it changed
-                        // shape inside it.
+                    } else if isConversion && !isSendConversion {
+                        // Swap glyph in the same sky accent as the amount:
+                        // one look says "conversion" — neither arriving nor
+                        // leaving. A send-funded conversion keeps the
+                        // outgoing arrow — money left for a payee.
                         Circle()
-                            .fill(Color.wispZapColor.opacity(0.18))
+                            .fill(Color.conversionSky.opacity(0.18))
                             .frame(width: 40, height: 40)
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color.wispZapColor)
+                            .foregroundStyle(Color.conversionSky)
                     } else {
                         Circle()
                             .fill((isIncoming ? Color.wispRepostColor : Color.red).opacity(0.18))
