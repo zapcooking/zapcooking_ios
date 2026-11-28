@@ -2,6 +2,20 @@ import Foundation
 import BreezSdkSpark
 import BigNumber
 import CryptoKit
+import os
+
+/// Bridges the SDK's buffered log lines into the unified log so connect
+/// failures carry their real cause instead of a terse one-liner. Registered
+/// via `initLogging` before the first connect; lives at file scope because
+/// the SDK invokes it from Rust worker threads. The SDK's `Logger` protocol
+/// is class-constrained, hence `final class`.
+private let sparkSdkLog = os.Logger(subsystem: "wisp", category: "breez-sdk")
+
+private final class SparkSdkLogBridge: BreezSdkSpark.Logger {
+    func log(l: LogEntry) {
+        sparkSdkLog.log("\(l.level, privacy: .public): \(l.line, privacy: .public)")
+    }
+}
 
 /// Embedded self-custodial Lightning wallet via the Breez Spark SDK.
 /// Mirrors the Android `SparkRepository` semantics: the mnemonic is the source of truth
@@ -12,6 +26,22 @@ final class SparkWallet: Wallet {
     private let pubkey: String
     private var sdk: BreezSdk?
     private var listenerId: String?
+    /// The SDK buffers its own log lines until a logger is registered via
+    /// `initLogging`; without it every connect failure surfaces only as a
+    /// terse "Connection failed: …" with nothing behind it.
+    private static var sdkLoggingInitialized = false
+
+    /// Register the SDK's log stream once, before the first connect, so its
+    /// buffered lines flush into the unified log.
+    static func initializeSdkLogging() {
+        guard !sdkLoggingInitialized else { return }
+        sdkLoggingInitialized = true
+        do {
+            try initLogging(logDir: nil, appLogger: SparkSdkLogBridge(), logFilter: "info")
+        } catch {
+            sparkSdkLog.error("initLogging failed: \(error.localizedDescription)")
+        }
+    }
 
     private(set) var balanceMsats: Int64?
     /// The wallet's USD (USDB) stablecoin balance and whether USD mode is on.
@@ -143,6 +173,7 @@ final class SparkWallet: Wallet {
         }
 
         emit("Initializing Spark SDK…")
+        SparkWallet.initializeSdkLogging()
 
         do {
             let seed = Seed.mnemonic(mnemonic: mnemonic, passphrase: nil)
@@ -698,6 +729,7 @@ final class SparkWallet: Wallet {
     }
 
     private func emit(_ message: String) {
+        sparkSdkLog.info("status: \(message, privacy: .public)")
         statusContinuation.yield(message)
     }
 }
