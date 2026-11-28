@@ -67,16 +67,16 @@ struct WalletTransactionRow: View {
                     if let profile {
                         CachedAvatarView(url: profile.picture, size: 40)
                     } else if isConversion && !isSendConversion {
-                        // Swap glyph in the wallet accent, not a green
-                        // down-arrow: nothing entered the wallet, it changed
-                        // shape inside it. A send-funded conversion keeps the
+                        // Swap glyph in the same sky accent as the amount:
+                        // one look says "conversion" — neither arriving nor
+                        // leaving. A send-funded conversion keeps the
                         // outgoing arrow — money left for a payee.
                         Circle()
-                            .fill(Color.wispZapColor.opacity(0.18))
+                            .fill(Color.conversionSky.opacity(0.18))
                             .frame(width: 40, height: 40)
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color.wispZapColor)
+                            .foregroundStyle(Color.conversionSky)
                     } else {
                         Circle()
                             .fill((isIncoming ? Color.wispRepostColor : Color.red).opacity(0.18))
