@@ -601,7 +601,7 @@ private struct SidebarMiniWalletView: View {
                     .lineLimit(1)
                     .contentTransition(.numericText())
                 if let msats = store.balanceMsats {
-                    Text("\(numberString(msats / 1000)) sats")
+                    Text("\(numberString(msats / 1000)) sats available")
                         .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
