@@ -401,9 +401,17 @@ struct GifPickerView: View {
         } label: {
             // Animated, not AsyncImage: SwiftUI's AsyncImage rasterizes
             // through UIImage(data:) and keeps only the first frame, and
-            // these previews are the animated w240 renditions. The aspect
-            // hint reserves the real dimensions before load so the grid
-            // never jumps.
+            // these previews are the animated w240 renditions.
+            //
+            // The aspect wrapper is on the cell, not left to the loaded
+            // image: until the payload lands the view shows the placeholder,
+            // which has no intrinsic height — without the wrapper every cell
+            // collapses flat, the whole page fits on screen at once, every
+            // cell fires onAppear, and the tail check pages in the entire
+            // result set (and starts downloading every preview) on open.
+            // Holding the real dimensions keeps the grid from jumping and
+            // paging scroll-driven, the way Android's picker pins
+            // aspectRatio on its AsyncImage before load.
             //
             // Once loaded, the preview draws in a UIKit `UIImageView`, and a
             // touch landing on that view never reaches SwiftUI's gesture
@@ -419,6 +427,7 @@ struct GifPickerView: View {
                 failure: { Color.wispSurfaceVariant }
             )
             .allowsHitTesting(false)
+            .aspectRatio(gif.width / max(gif.height, 1), contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
