@@ -344,8 +344,17 @@ struct WalletView: View {
         // their funds arrived. A cached balance from a previous session is a
         // real figure and keeps rendering (pulsing) while the fresh one loads.
         let awaitingBalance = store.mode != nil && store.balanceMsats == nil
+        // USD mode active with a USDB balance: the token IS the main balance
+        // — the settings card promises it, and a $-figure rendered under the
+        // sats number would read as a fiat valuation of those sats (631 sats
+        // are not worth $18.61). So the USDB leads and the sats step down;
+        // the tap-cycle is suspended while it leads, since cycling into a
+        // fiat line recreates the same misread.
+        let stable = store.stableBalance
+        let usdPrimary = stable?.active == true && stable?.hasBalance == true
         return VStack(spacing: 14) {
             Button {
+                guard !usdPrimary else { return }
                 withAnimation(.easeInOut(duration: 0.15)) {
                     balanceDisplayRaw = mode.next.rawValue
                 }
@@ -363,6 +372,12 @@ struct WalletView: View {
                         Text("* * * * *")
                             .font(.system(size: 52, weight: .semibold, design: .rounded))
                             .foregroundStyle(.primary)
+                    } else if usdPrimary, let stable, let compact = stable.amountCompact {
+                        // The USDB balance leads when USD mode is on.
+                        Text("$\(compact)")
+                            .font(.system(size: 52, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText())
                     } else if let fiatBalance {
                         Text(fiatBalance)
                             .font(.system(size: 52, weight: .semibold, design: .rounded))
@@ -396,21 +411,27 @@ struct WalletView: View {
                         && !awaitingBalance
                         && fiatBalance == nil
                         && !unit.unitLabel.isEmpty
-                    Text(showUnitLabel ? unit.unitLabel : " ")
+                    Text(usdPrimary ? stable?.ticker ?? "USDB" : (showUnitLabel ? unit.unitLabel : " "))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .opacity(showUnitLabel ? 1 : 0)
-                    // The opt-in USDB balance rides under the sats figure —
-                    // the two are distinct piles of money and are never
-                    // summed. Hidden with the balance itself.
-                    if !awaitingBalance && mode != .hidden,
-                       let stable = store.stableBalance,
-                       let compact = stable.amountCompact,
-                       stable.hasBalance {
-                        Text("$\(compact) \(stable.ticker)")
-                            .font(.callout.weight(.medium).monospacedDigit())
-                            .foregroundStyle(stable.active ? Color.wispZapColor : .secondary)
-                            .animation(.easeInOut(duration: 0.25), value: stable.amountCompact)
+                        .opacity(showUnitLabel || usdPrimary ? 1 : 0)
+                    // The two balances are distinct piles of money and are
+                    // never summed. When USD mode leads, the sats step down
+                    // under the token; when it's off but USDB is held, the
+                    // wording can't read as a valuation of the sats above it
+                    // ("$18.61 in USDB", not "$18.61 USDB").
+                    if !awaitingBalance && mode != .hidden {
+                        if usdPrimary {
+                            Text("\(CurrencyFormatter.formatNumber(sats)) sats available")
+                                .font(.callout.weight(.medium).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        } else if let stable, let compact = stable.amountCompact,
+                                  stable.hasBalance {
+                            Text("$\(compact) in \(stable.ticker)")
+                                .font(.callout.weight(.medium).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .animation(.easeInOut(duration: 0.25), value: compact)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
