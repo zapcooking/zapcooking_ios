@@ -21,5 +21,5 @@ enum BreezConfig {
     /// `wisp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
     /// Update this string whenever the SDK is bumped — there's no runtime
     /// version constant exposed by the Swift bindings to read instead.
-    static let sdkVersion = "0.28.1"
+    static let sdkVersion = "0.29.0"
 }
